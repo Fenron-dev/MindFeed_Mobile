@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../domain/tag_parser.dart';
+import '../../services/url_metadata_service.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   const CaptureScreen({super.key});
@@ -19,7 +21,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   List<String> _parsedTags = [];
   bool _showTitle = false;
 
-  // Capture-Optionen (werden später via SharedPreferences gemerkt)
+  // URL-Preview
+  UrlMetadata? _urlPreview;
+  bool _loadingPreview = false;
+  String? _lastCheckedUrl;
+  Timer? _urlDebounce;
+
+  // Capture-Optionen
   bool _autoSave = false;
   bool _autoAi = false;
 
@@ -34,6 +42,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   @override
   void dispose() {
+    _urlDebounce?.cancel();
     _bodyCtrl.removeListener(_onBodyChanged);
     _bodyCtrl.dispose();
     _titleCtrl.dispose();
@@ -42,9 +51,34 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   void _onBodyChanged() {
-    // setState bei jeder Änderung → canSave wird neu ausgewertet
     setState(() {
       _parsedTags = TagParser.parse(_bodyCtrl.text);
+    });
+    _scheduleUrlCheck();
+  }
+
+  void _scheduleUrlCheck() {
+    _urlDebounce?.cancel();
+    _urlDebounce = Timer(const Duration(milliseconds: 600), _checkUrl);
+  }
+
+  Future<void> _checkUrl() async {
+    final url = UrlMetadataService.extractUrl(_bodyCtrl.text);
+    if (url == null || url == _lastCheckedUrl) return;
+    _lastCheckedUrl = url;
+    setState(() => _loadingPreview = true);
+    final meta = await UrlMetadataService.fetch(url);
+    if (!mounted) return;
+    setState(() {
+      _urlPreview = meta;
+      _loadingPreview = false;
+      // Titel automatisch vorausfüllen wenn noch leer
+      if (meta != null &&
+          _titleCtrl.text.trim().isEmpty &&
+          meta.title.isNotEmpty) {
+        _titleCtrl.text = meta.title;
+        _showTitle = true;
+      }
     });
   }
 
@@ -177,6 +211,83 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
             ),
           ),
+
+          // URL-Preview (lädt automatisch beim Eintippen)
+          if (_loadingPreview)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: MFColors.border))),
+              child: const Row(children: [
+                SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: MFColors.teal),
+                ),
+                SizedBox(width: 10),
+                Text('Link wird geladen…',
+                    style: TextStyle(
+                        fontSize: 12, color: MFColors.textMuted)),
+              ]),
+            )
+          else if (_urlPreview != null)
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+              decoration: BoxDecoration(
+                color: MFColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: MFColors.border),
+              ),
+              child: Row(children: [
+                if (_urlPreview!.image != null)
+                  ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(9),
+                      bottomLeft: Radius.circular(9),
+                    ),
+                    child: Image.network(
+                      _urlPreview!.image!,
+                      width: 56, height: 56,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_urlPreview!.title,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: MFColors.textPrimary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                        if (_urlPreview!.description.isNotEmpty)
+                          Text(_urlPreview!.description,
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: MFColors.textSecondary),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        Text(_urlPreview!.domain,
+                            style: const TextStyle(
+                                fontSize: 10, color: MFColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close,
+                      size: 14, color: MFColors.textMuted),
+                  onPressed: () =>
+                      setState(() { _urlPreview = null; _lastCheckedUrl = null; }),
+                ),
+              ]),
+            ),
 
           // Tag-Preview
           if (_parsedTags.isNotEmpty)
