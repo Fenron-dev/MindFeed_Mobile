@@ -40,7 +40,7 @@ dependencies:
   path: ^1.9.0
   file_picker: ^10.1.7
   share_plus: ^10.0.0
-  receive_sharing_intent: ^1.8.0   # Share Intent (URLs aus anderen Apps)
+  # receive_sharing_intent: ^1.8.0  # TODO: JVM-Kompatibilität prüfen, re-enable in V1.1
   archive: ^4.0.9                  # ZIP backup
 
   # ─── Settings / Security ─────────────────────────────────────────
