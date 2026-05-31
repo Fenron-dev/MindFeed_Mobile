@@ -1,0 +1,44 @@
+name: Android APK Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Manuell auslösbar über GitHub UI
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17 setup
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter setup
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+          cache: true
+
+      - name: Dependencies installieren
+        run: flutter pub get
+
+      - name: Code-Generator ausführen (Drift)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: APK bauen (Debug)
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: APK hochladen (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindfeed-debug-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14
