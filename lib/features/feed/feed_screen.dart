@@ -56,23 +56,28 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               ),
               title: _SearchBar(),
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.grid_view_outlined,
-                      color: MFColors.textSecondary, size: 20),
-                  tooltip: 'Ansicht wechseln',
-                  onPressed: () {},
-                ),
-                IconButton(
-                  icon: const Icon(Icons.sort_outlined,
-                      color: MFColors.textSecondary, size: 20),
-                  tooltip: 'Sortieren',
-                  onPressed: () {},
-                ),
-                IconButton(
-                  icon: const Icon(Icons.tune_outlined,
-                      color: MFColors.textSecondary, size: 20),
-                  tooltip: 'Filter',
-                  onPressed: () {},
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert,
+                      color: MFColors.textSecondary, size: 22),
+                  tooltip: 'Ansicht & Filter',
+                  color: MFColors.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: MFColors.border),
+                  ),
+                  onSelected: (value) {
+                    // TODO: Aktionen implementieren
+                  },
+                  itemBuilder: (_) => [
+                    _menuItem('view_list', Icons.view_list_outlined, 'Listenansicht'),
+                    _menuItem('view_cards', Icons.dashboard_outlined, 'Kartenansicht'),
+                    _menuItem('view_grid', Icons.grid_view_outlined, 'Thumbnail-Ansicht'),
+                    const PopupMenuDivider(),
+                    _menuItem('sort_date', Icons.access_time_outlined, 'Sortierung: Datum'),
+                    _menuItem('sort_name', Icons.sort_by_alpha_outlined, 'Sortierung: Name'),
+                    const PopupMenuDivider(),
+                    _menuItem('filter', Icons.tune_outlined, 'Filter & Quickfilter…'),
+                  ],
                 ),
               ],
             )
@@ -126,6 +131,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     );
   }
 }
+
+PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
+    PopupMenuItem(
+      value: value,
+      child: Row(children: [
+        Icon(icon, size: 18, color: MFColors.textSecondary),
+        const SizedBox(width: 12),
+        Text(label,
+            style: const TextStyle(
+                color: MFColors.textPrimary, fontSize: 13)),
+      ]),
+    );
 
 // ─── Suchleiste ──────────────────────────────────────────────────────────────
 class _SearchBar extends StatelessWidget {

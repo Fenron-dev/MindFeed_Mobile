@@ -42,11 +42,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   void _onBodyChanged() {
-    final tags = TagParser.parse(_bodyCtrl.text);
-    if (tags.length != _parsedTags.length ||
-        !tags.every(_parsedTags.contains)) {
-      setState(() => _parsedTags = tags);
-    }
+    // setState bei jeder Änderung → canSave wird neu ausgewertet
+    setState(() {
+      _parsedTags = TagParser.parse(_bodyCtrl.text);
+    });
   }
 
   Future<void> _save() async {
