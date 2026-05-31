@@ -67,53 +67,49 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   void _checkWikilinkContext() {
     final text = _bodyCtrl.text;
-    final cursor = _bodyCtrl.selection.baseOffset;
-    if (cursor < 0) return;
-
-    // Text vor dem Cursor auf offenes [[ prüfen
-    final before = text.substring(0, cursor.clamp(0, text.length));
-    final openIdx = before.lastIndexOf('[[');
-    final closeIdx = before.lastIndexOf(']]');
-
-    if (openIdx != -1 && openIdx > closeIdx) {
-      final partial = before.substring(openIdx + 2);
-      if (partial != _partialWikilink) {
-        _partialWikilink = partial;
-        _wikilinkDebounce?.cancel();
-        _wikilinkDebounce = Timer(const Duration(milliseconds: 200), () async {
-          final results = await ref
-              .read(entryRepositoryProvider)
-              .search(partial.isEmpty ? '' : partial);
-          if (mounted) setState(() => _wikilinkSuggestions = results.take(8).toList());
-        });
-      }
-    } else {
-      if (_partialWikilink != null) {
-        _partialWikilink = null;
-        setState(() => _wikilinkSuggestions = []);
-      }
+    // Letztes [[ das kein ]] danach hat → aktive Wikilink-Eingabe
+    final openIdx = text.lastIndexOf('[[');
+    if (openIdx == -1) {
+      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+      return;
     }
+    final afterOpen = text.substring(openIdx + 2);
+    if (afterOpen.contains(']]')) {
+      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+      return;
+    }
+
+    final partial = afterOpen.trim();
+    if (partial == _partialWikilink) return;
+    _partialWikilink = partial;
+
+    _wikilinkDebounce?.cancel();
+    _wikilinkDebounce = Timer(const Duration(milliseconds: 180), () async {
+      final results = await ref
+          .read(entryRepositoryProvider)
+          .search(partial.isEmpty ? '' : partial);
+      if (mounted) {
+        setState(() => _wikilinkSuggestions = results
+            .where((e) => e.entry.id != '') // alle zeigen
+            .take(8)
+            .toList());
+      }
+    });
   }
 
   void _insertWikilink(String title) {
     final text = _bodyCtrl.text;
-    final cursor = _bodyCtrl.selection.baseOffset;
-    final before = text.substring(0, cursor.clamp(0, text.length));
-    final openIdx = before.lastIndexOf('[[');
+    final openIdx = text.lastIndexOf('[[');
     if (openIdx == -1) return;
 
-    final after = text.substring(cursor.clamp(0, text.length));
-    // Ersetze [[partial mit [[Title]]
-    final newText = '${text.substring(0, openIdx)}[[$title]]$after';
-    final newCursor = openIdx + title.length + 4; // hinter ]]
+    // Alles ab [[ ersetzen mit [[Title]]
+    final before = text.substring(0, openIdx);
+    final newText = '$before[[$title]]';
     _bodyCtrl.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(offset: newCursor),
+      selection: TextSelection.collapsed(offset: newText.length),
     );
-    setState(() {
-      _wikilinkSuggestions = [];
-      _partialWikilink = null;
-    });
+    setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
   }
 
   void _scheduleUrlCheck() {
@@ -142,15 +138,36 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Future<void> _save() async {
-    final body = _bodyCtrl.text.trim();
-    if (body.isEmpty) return;
+    final rawBody = _bodyCtrl.text.trim();
+    if (rawBody.isEmpty) return;
 
     setState(() => _isSaving = true);
+
+    // Falls die URL-Preview noch lädt, kurz warten (max 3s)
+    if (_loadingPreview) {
+      for (var i = 0; i < 30 && _loadingPreview; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    // URL aus Body entfernen (wird als sourceUrl gespeichert)
+    final detectedUrl = UrlMetadataService.extractUrl(rawBody);
+    final cleanBody = detectedUrl != null
+        ? rawBody.replaceAll(detectedUrl, '').trim()
+        : rawBody;
+    final finalBody = cleanBody.isEmpty ? 'Link-Verweis' : cleanBody;
+
+    // Titel: explizit > URL-Vorschau-Titel > aus Body
+    final explicitTitle = _titleCtrl.text.trim();
+    final resolvedTitle = explicitTitle.isNotEmpty
+        ? explicitTitle
+        : (_urlPreview?.title.isNotEmpty == true ? _urlPreview!.title : null);
+
     try {
       await ref.read(entryRepositoryProvider).createEntry(
-            body: body,
-            title: _titleCtrl.text.trim().isEmpty ? null : _titleCtrl.text.trim(),
-            sourceUrl: UrlMetadataService.extractUrl(body),
+            body: finalBody,
+            title: resolvedTitle,
+            sourceUrl: detectedUrl,
             urlTitle: _urlPreview?.title,
             urlDescription: _urlPreview?.description,
             urlImage: _urlPreview?.image,

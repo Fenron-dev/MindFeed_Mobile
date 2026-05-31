@@ -60,6 +60,14 @@ class EntryRepository {
     return _enrichSingle(entry);
   }
 
+  /// Reaktiver Stream: aktualisiert sich automatisch nach Edits
+  Stream<EntryWithDetails?> watchById(String id) {
+    return entryDao.watchById(id).asyncMap((entry) async {
+      if (entry == null) return null;
+      return _enrichSingle(entry);
+    });
+  }
+
   /// Erstellt einen neuen Eintrag.
   /// Wenn [urlTitle]/[urlDescription]/[urlImage]/[urlDomain] übergeben werden,
   /// werden sie als Properties gespeichert und der Typ wird auf 'link' gesetzt.

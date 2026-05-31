@@ -6,6 +6,7 @@ import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
+import '../../features/feed/feed_provider.dart';
 import '../../widgets/entry_card.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -110,6 +111,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _buildBody() {
+    // Wenn kein Suchtext: reaktiven Feed-Stream zeigen (immer aktuell)
+    if (_ctrl.text.trim().isEmpty) {
+      final feedAsync = ref.watch(feedProvider);
+      return feedAsync.when(
+        loading: () => const Center(
+            child: CircularProgressIndicator(color: MFColors.teal)),
+        error: (e, _) => Center(child: Text('$e')),
+        data: (entries) => _buildList(entries),
+      );
+    }
+
     if (_loading) {
       return const Center(
           child: CircularProgressIndicator(color: MFColors.teal));
@@ -122,27 +134,34 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
     if (_results.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.search_off, size: 40, color: MFColors.border),
-            const SizedBox(height: 12),
-            Text('Keine Ergebnisse für „${_ctrl.text}"',
-                style: const TextStyle(
-                    fontSize: 14, color: MFColors.textSecondary)),
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.search_off, size: 40, color: MFColors.border),
+          const SizedBox(height: 12),
+          Text('Keine Ergebnisse für „${_ctrl.text}"',
+              style: const TextStyle(
+                  fontSize: 14, color: MFColors.textSecondary)),
+        ]),
       );
     }
 
+    return _buildList(_results);
+  }
+
+  Widget _buildList(List<EntryWithDetails> items) {
+    if (items.isEmpty) {
+      return const Center(
+        child: Text('Noch keine Einträge',
+            style: TextStyle(color: MFColors.textMuted)),
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
-      itemCount: _results.length,
+      itemCount: items.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (ctx, i) => EntryCard(
-        item: _results[i],
-        onTap: () => ctx.push(
-            AppRoutes.entryDetailPath(_results[i].entry.id)),
+        item: items[i],
+        onTap: () =>
+            ctx.push(AppRoutes.entryDetailPath(items[i].entry.id)),
       ),
     );
   }

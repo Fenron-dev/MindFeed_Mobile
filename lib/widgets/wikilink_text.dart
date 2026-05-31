@@ -49,16 +49,34 @@ class WikilinkText extends StatelessWidget {
       }
 
       if (match.group(1) != null) {
-        // [[Wikilink]]
+        // [[Wikilink]] → nur Titel anzeigen, Klammern ausblenden
         final title = match.group(1)!.trim();
-        spans.add(TextSpan(
-          text: '[[${title}]]',
-          style: const TextStyle(
-            color: Color(0xFFA78BFA),
-            fontWeight: FontWeight.w500,
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: GestureDetector(
+            onTap: () => onWikilink?.call(title),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1B4B),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                    color: const Color(0xFF4338CA), width: 0.5),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.layers_outlined,
+                    size: 11, color: Color(0xFFA78BFA)),
+                const SizedBox(width: 3),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFFA78BFA),
+                        fontWeight: FontWeight.w500)),
+              ]),
+            ),
           ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () => onWikilink?.call(title),
         ));
       } else if (match.group(2) != null) {
         // **bold**
