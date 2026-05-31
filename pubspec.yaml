@@ -1,0 +1,81 @@
+name: mindfeed_mobile
+description: "MindFeed Mobile — Offline-first Second Brain PKM App"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ─── State Management ────────────────────────────────────────────
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # ─── Navigation ──────────────────────────────────────────────────
+  go_router: ^14.8.1
+
+  # ─── Database (Drift + SQLite) ────────────────────────────────────
+  drift: ^2.23.1
+  drift_flutter: ^0.2.4
+  sqlite3_flutter_libs: ^0.5.28
+  # sqlcipher_flutter_libs: ^0.6.0  # Phase 2: optionale Verschlüsselung
+
+  # ─── HTTP / Networking ────────────────────────────────────────────
+  http: ^1.6.0
+
+  # ─── Media ───────────────────────────────────────────────────────
+  media_kit: ^1.1.11
+  media_kit_native_event_loop: ^1.0.5
+  record: ^6.0.0           # Audio Recording
+  image: ^4.2.0
+
+  # ─── Markdown ────────────────────────────────────────────────────
+  flutter_markdown: ^0.7.6
+
+  # ─── File & Storage ──────────────────────────────────────────────
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  file_picker: ^10.1.7
+  share_plus: ^10.0.0
+  receive_sharing_intent: ^1.8.0   # Share Intent (URLs aus anderen Apps)
+  archive: ^4.0.9                  # ZIP backup
+
+  # ─── Settings / Security ─────────────────────────────────────────
+  shared_preferences: ^2.3.4
+  flutter_secure_storage: ^9.2.2
+  local_auth: ^2.3.0               # Biometrie für Vault-Lock
+
+  # ─── UI ──────────────────────────────────────────────────────────
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  gap: ^3.0.1
+  intl: ^0.20.2
+  photo_view: ^0.15.0
+  url_launcher: ^6.3.1             # Deep-Links (AniList, YouTube App, etc.)
+  cached_network_image: ^3.4.1     # Thumbnail-Caching
+
+  # ─── Notifications ───────────────────────────────────────────────
+  flutter_local_notifications: ^19.0.0
+
+  # ─── Utils ───────────────────────────────────────────────────────
+  uuid: ^4.5.1
+  mime: ^2.0.0
+  html: ^0.15.6                    # OG-Tag Parsing für URL-Metadata
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # ─── Code Generation ─────────────────────────────────────────────
+  drift_dev: ^2.23.1
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.6.1
+  custom_lint: ^0.7.5
+  riverpod_lint: ^2.6.1
+
+flutter:
+  uses-material-design: true
