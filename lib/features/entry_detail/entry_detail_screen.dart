@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
@@ -236,7 +237,20 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     : WikilinkText(
                         text: entry.body,
                         onTag: (_) {},
-                        onWikilink: (_) {},
+                        onWikilink: (title) async {
+                          final results = await ref
+                              .read(entryRepositoryProvider)
+                              .search(title);
+                          final found = results
+                              .where((e) =>
+                                  e.entry.title?.toLowerCase() ==
+                                  title.toLowerCase())
+                              .firstOrNull;
+                          if (found != null && mounted) {
+                            context.push(AppRoutes.entryDetailPath(
+                                found.entry.id));
+                          }
+                        },
                       ),
 
                 // Source-Link-Preview
@@ -471,9 +485,9 @@ class _PropertiesTable extends ConsumerWidget {
   final List<EntryProperty> properties;
   final String entryId;
 
-  static const _hidden = {
-    'og_image', 'og_title', 'og_description', 'domain'
-  };
+  // Nur technische interne Properties verstecken;
+  // og_title / og_description werden im Link-Preview angezeigt
+  static const _hidden = {'og_image', 'og_title', 'og_description'};
 
   const _PropertiesTable(
       {required this.properties, required this.entryId});

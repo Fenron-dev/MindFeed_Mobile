@@ -11,13 +11,14 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
   EntryDao(super.db);
 
   Stream<List<Entry>> watchAll({String sortOrder = 'desc'}) {
-    final q = select(entries);
-    if (sortOrder == 'desc') {
-      q.orderBy([(e) => OrderingTerm.desc(e.createdAt)]);
-    } else {
-      q.orderBy([(e) => OrderingTerm.asc(e.createdAt)]);
-    }
-    return q.watch();
+    return (select(entries)
+          ..orderBy([
+            (e) => OrderingTerm.desc(e.pinned),   // Angeheftete immer oben
+            (e) => sortOrder == 'desc'
+                ? OrderingTerm.desc(e.createdAt)
+                : OrderingTerm.asc(e.createdAt),
+          ]))
+        .watch();
   }
 
   Stream<Entry?> watchById(String id) =>

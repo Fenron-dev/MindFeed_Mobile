@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../data/repositories/entry_repository.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/url_metadata_service.dart';
 
@@ -27,6 +28,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   String? _lastCheckedUrl;
   Timer? _urlDebounce;
 
+  // Wikilink-Autocomplete
+  List<EntryWithDetails> _wikilinkSuggestions = [];
+  Timer? _wikilinkDebounce;
+  String? _partialWikilink; // Text nach [[
+
   // Capture-Optionen
   bool _autoSave = false;
   bool _autoAi = false;
@@ -43,6 +49,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   @override
   void dispose() {
     _urlDebounce?.cancel();
+    _wikilinkDebounce?.cancel();
     _bodyCtrl.removeListener(_onBodyChanged);
     _bodyCtrl.dispose();
     _titleCtrl.dispose();
@@ -55,6 +62,58 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       _parsedTags = TagParser.parse(_bodyCtrl.text);
     });
     _scheduleUrlCheck();
+    _checkWikilinkContext();
+  }
+
+  void _checkWikilinkContext() {
+    final text = _bodyCtrl.text;
+    final cursor = _bodyCtrl.selection.baseOffset;
+    if (cursor < 0) return;
+
+    // Text vor dem Cursor auf offenes [[ prüfen
+    final before = text.substring(0, cursor.clamp(0, text.length));
+    final openIdx = before.lastIndexOf('[[');
+    final closeIdx = before.lastIndexOf(']]');
+
+    if (openIdx != -1 && openIdx > closeIdx) {
+      final partial = before.substring(openIdx + 2);
+      if (partial != _partialWikilink) {
+        _partialWikilink = partial;
+        _wikilinkDebounce?.cancel();
+        _wikilinkDebounce = Timer(const Duration(milliseconds: 200), () async {
+          final results = await ref
+              .read(entryRepositoryProvider)
+              .search(partial.isEmpty ? '' : partial);
+          if (mounted) setState(() => _wikilinkSuggestions = results.take(8).toList());
+        });
+      }
+    } else {
+      if (_partialWikilink != null) {
+        _partialWikilink = null;
+        setState(() => _wikilinkSuggestions = []);
+      }
+    }
+  }
+
+  void _insertWikilink(String title) {
+    final text = _bodyCtrl.text;
+    final cursor = _bodyCtrl.selection.baseOffset;
+    final before = text.substring(0, cursor.clamp(0, text.length));
+    final openIdx = before.lastIndexOf('[[');
+    if (openIdx == -1) return;
+
+    final after = text.substring(cursor.clamp(0, text.length));
+    // Ersetze [[partial mit [[Title]]
+    final newText = '${text.substring(0, openIdx)}[[$title]]$after';
+    final newCursor = openIdx + title.length + 4; // hinter ]]
+    _bodyCtrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCursor),
+    );
+    setState(() {
+      _wikilinkSuggestions = [];
+      _partialWikilink = null;
+    });
   }
 
   void _scheduleUrlCheck() {
@@ -90,9 +149,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     try {
       await ref.read(entryRepositoryProvider).createEntry(
             body: body,
-            title: _titleCtrl.text.trim().isEmpty
-                ? null
-                : _titleCtrl.text.trim(),
+            title: _titleCtrl.text.trim().isEmpty ? null : _titleCtrl.text.trim(),
+            sourceUrl: UrlMetadataService.extractUrl(body),
+            urlTitle: _urlPreview?.title,
+            urlDescription: _urlPreview?.description,
+            urlImage: _urlPreview?.image,
+            urlDomain: _urlPreview?.domain,
           );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -211,6 +273,67 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
             ),
           ),
+
+          // Wikilink-Autocomplete Suggestion Bar
+          if (_wikilinkSuggestions.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+              decoration: const BoxDecoration(
+                color: MFColors.surfaceAlt,
+                border: Border(top: BorderSide(color: MFColors.border))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4, bottom: 3),
+                    child: Text('Wikilink einfügen:',
+                        style: TextStyle(
+                            fontSize: 10, color: MFColors.textMuted,
+                            fontFamily: 'monospace')),
+                  ),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _wikilinkSuggestions.map((item) {
+                        final title = item.entry.title ?? 'Unbenannt';
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: GestureDetector(
+                            onTap: () => _insertWikilink(title),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E1B4B),
+                                borderRadius: BorderRadius.circular(99),
+                                border: Border.all(
+                                    color: const Color(0xFF4338CA),
+                                    width: 0.5),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                const Icon(Icons.layers_outlined,
+                                    size: 11, color: Color(0xFFA78BFA)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  title.length > 24
+                                      ? '${title.substring(0, 24)}…'
+                                      : title,
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFFA78BFA),
+                                      fontWeight: FontWeight.w500),
+                                ),
+                              ]),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // URL-Preview (lädt automatisch beim Eintippen)
           if (_loadingPreview)

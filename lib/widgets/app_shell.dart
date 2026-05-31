@@ -6,6 +6,9 @@ import '../core/theme.dart';
 import '../data/repositories/container_repository.dart';
 import '../features/containers/container_provider.dart';
 
+/// GlobalKey damit FeedScreen (verschachtelter Scaffold) den Drawer öffnen kann.
+final appScaffoldKey = GlobalKey<ScaffoldState>();
+
 class AppShell extends StatelessWidget {
   final StatefulNavigationShell shell;
   const AppShell({super.key, required this.shell});
@@ -13,8 +16,9 @@ class AppShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: appScaffoldKey,
       body: shell,
-      drawer: const _MindFeedDrawer(),
+      drawer: const MindFeedDrawer(),
       bottomNavigationBar: NavigationBar(
         selectedIndex: shell.currentIndex,
         onDestinationSelected: shell.goBranch,
@@ -42,8 +46,8 @@ class AppShell extends StatelessWidget {
 
 // ─── Drawer ───────────────────────────────────────────────────────────────────
 
-class _MindFeedDrawer extends ConsumerWidget {
-  const _MindFeedDrawer();
+class MindFeedDrawer extends ConsumerWidget {
+  const MindFeedDrawer();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

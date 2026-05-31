@@ -129,23 +129,51 @@ class AppDatabase extends _$AppDatabase {
         'CREATE INDEX IF NOT EXISTS idx_properties_entry ON entry_properties(entry_id)');
   }
 
-  /// FTS5 Volltextsuche — gibt Entries zurück sortiert nach Relevanz
+  /// Suche: FTS5 mit LIKE-Fallback (Fuzzy).
+  /// Gibt alle Entries zurück wenn query leer ist.
   Future<List<Entry>> searchFts(String query) async {
-    if (query.trim().isEmpty) return [];
-    // FTS5 MATCH-Syntax: query* für Prefix-Suche
-    final safeQuery = query.trim().replaceAll('"', '').replaceAll("'", '');
-    final rows = await customSelect(
-      '''
-      SELECT e.* FROM entries e
-      INNER JOIN entries_fts fts ON fts.rowid = e.rowid
-      WHERE entries_fts MATCH ?
-      ORDER BY rank
-      LIMIT 100
-      ''',
-      variables: [Variable.withString('$safeQuery*')],
-      readsFrom: {entries},
-    ).get();
+    final q = query.trim();
+    if (q.isEmpty) {
+      return (select(entries)
+            ..orderBy([
+              (e) => OrderingTerm.desc(e.pinned),
+              (e) => OrderingTerm.desc(e.createdAt),
+            ])
+            ..limit(200))
+          .get();
+    }
 
-    return rows.map((row) => Entry.fromJson(row.data)).toList();
+    // 1. Versuch: FTS5 (schnell, relevanzbasiert)
+    try {
+      final safe = q.replaceAll('"', '').replaceAll("'", '').replaceAll('*', '');
+      final rows = await customSelect(
+        '''
+        SELECT e.* FROM entries e
+        INNER JOIN entries_fts fts ON fts.rowid = e.rowid
+        WHERE entries_fts MATCH ?
+        ORDER BY rank
+        LIMIT 100
+        ''',
+        variables: [Variable.withString('$safe*')],
+        readsFrom: {entries},
+      ).get();
+      if (rows.isNotEmpty) {
+        return rows.map((r) => Entry.fromJson(r.data)).toList();
+      }
+    } catch (_) { /* FTS5 nicht verfügbar, Fallback */ }
+
+    // 2. LIKE-Fallback (Fuzzy — sucht in Titel, Body, Tags)
+    final like = '%${q.toLowerCase()}%';
+    return (select(entries)
+          ..where((e) =>
+              e.title.lower().like(like) |
+              e.body.lower().like(like) |
+              e.sourceUrl.lower().like(like))
+          ..orderBy([
+            (e) => OrderingTerm.desc(e.pinned),
+            (e) => OrderingTerm.desc(e.createdAt),
+          ])
+          ..limit(100))
+        .get();
   }
 }

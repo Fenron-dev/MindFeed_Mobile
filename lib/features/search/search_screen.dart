@@ -26,8 +26,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _focus.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focus.requestFocus();
+      _search(''); // Alle Einträge sofort laden
+    });
   }
 
   @override
@@ -40,11 +42,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _onChanged(String q) {
     _debounce?.cancel();
-    if (q.trim().isEmpty) {
-      setState(() { _results = []; _hasSearched = false; });
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 280), () => _search(q));
+    _debounce = Timer(const Duration(milliseconds: 250), () => _search(q));
   }
 
   Future<void> _search(String q) async {
@@ -119,21 +117,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
     if (!_hasSearched) {
       return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.search, size: 48, color: MFColors.border),
-            SizedBox(height: 12),
-            Text('Tippe um zu suchen',
-                style: TextStyle(
-                    fontSize: 15, color: MFColors.textSecondary)),
-            SizedBox(height: 4),
-            Text('FTS5-Volltextsuche in Titel, Inhalt und Tags',
-                style: TextStyle(
-                    fontSize: 12, color: MFColors.textMuted)),
-          ],
-        ),
-      );
+          child: CircularProgressIndicator(color: MFColors.teal));
     }
 
     if (_results.isEmpty) {

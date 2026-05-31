@@ -60,29 +60,39 @@ class EntryRepository {
     return _enrichSingle(entry);
   }
 
-  /// Erstellt einen neuen Eintrag: Tags werden automatisch aus dem Body
-  /// extrahiert und als separate Tag-Records angelegt.
+  /// Erstellt einen neuen Eintrag.
+  /// Wenn [urlTitle]/[urlDescription]/[urlImage]/[urlDomain] übergeben werden,
+  /// werden sie als Properties gespeichert und der Typ wird auf 'link' gesetzt.
   Future<EntryWithDetails> createEntry({
     required String body,
     String? title,
     String type = 'text',
     String status = 'inbox',
     String? sourceUrl,
+    String? urlTitle,
+    String? urlDescription,
+    String? urlImage,
+    String? urlDomain,
     List<String> containerIds = const [],
   }) async {
     final id = 'e-${_uuid.v4()}';
     final now = DateTime.now().toUtc();
 
-    // Titel: explizit oder erste Zeile des Bodies
+    final hasUrl = sourceUrl != null && sourceUrl.isNotEmpty;
+    final resolvedType = hasUrl ? 'link' : type;
+
+    // Titel: URL-Titel bevorzugen, dann explizit, dann aus Body
     final resolvedTitle = (title != null && title.trim().isNotEmpty)
         ? title.trim()
-        : _extractTitle(body);
+        : (urlTitle != null && urlTitle.isNotEmpty)
+            ? urlTitle
+            : _extractTitle(body);
 
     final companion = EntriesCompanion(
       id: Value(id),
       body: Value(body),
       title: Value(resolvedTitle),
-      type: Value(type),
+      type: Value(resolvedType),
       status: Value(status),
       sourceUrl: Value(sourceUrl),
       createdAt: Value(now),
@@ -94,6 +104,29 @@ class EntryRepository {
     // Tags automatisch parsen und speichern
     final parsedTags = TagParser.parse(body);
     await tagDao.setEntryTags(id, parsedTags);
+
+    // URL-Metadaten als Properties speichern
+    if (hasUrl) {
+      final props = <EntryPropertiesCompanion>[];
+      void addProp(String key, String? value, String propType) {
+        if (value != null && value.isNotEmpty) {
+          props.add(EntryPropertiesCompanion(
+            id: Value('prop-${_uuid.v4()}'),
+            entryId: Value(id),
+            key: Value(key),
+            value: Value(value),
+            type: Value(propType),
+          ));
+        }
+      }
+      addProp('og_title', urlTitle, 'string');
+      addProp('og_description', urlDescription, 'string');
+      addProp('og_image', urlImage, 'url');
+      addProp('domain', urlDomain, 'string');
+      if (props.isNotEmpty) {
+        await propertyDao.setProperties(id, props);
+      }
+    }
 
     // Wikilinks als EntryLinks speichern (Zielauflösung kommt in Phase 2)
     WikilinkParser.parse(body); // bereits extrahiert, Persistenz TODO

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
+import '../../widgets/app_shell.dart' show appScaffoldKey;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
 
@@ -48,13 +49,19 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       // ─── AppBar (Gmail-Style: verschwindet beim Runterscrollen) ──
       appBar: _barsVisible
           ? AppBar(
-              leading: Builder(
-                builder: (ctx) => IconButton(
-                  icon: const Icon(Icons.menu, color: MFColors.textSecondary),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
+              leading: IconButton(
+                icon: const Icon(Icons.menu, color: MFColors.textSecondary),
+                // GlobalKey öffnet den Drawer des äußeren AppShell-Scaffolds
+                onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+              ),
+              title: const Text(
+                'MindFeed',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: MFColors.textPrimary,
                 ),
               ),
-              title: _SearchBar(),
               actions: [
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert,
@@ -144,35 +151,6 @@ PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
       ]),
     );
 
-// ─── Suchleiste ──────────────────────────────────────────────────────────────
-class _SearchBar extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.go(AppRoutes.search),
-      child: Container(
-        height: 38,
-        decoration: BoxDecoration(
-          color: MFColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: MFColors.border),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(width: 12),
-            Icon(Icons.search, size: 16, color: MFColors.textMuted),
-            SizedBox(width: 8),
-            Text(
-              'Einträge durchsuchen…',
-              style: TextStyle(fontSize: 13, color: MFColors.textMuted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Schnellfilter-Leiste ────────────────────────────────────────────────────
 class _QuickFilterBar extends StatefulWidget {
   const _QuickFilterBar();
@@ -183,38 +161,39 @@ class _QuickFilterBar extends StatefulWidget {
 
 class _QuickFilterBarState extends State<_QuickFilterBar> {
   int _selected = 0;
-
-  // TODO: aus Einstellungen laden (welche 3 Filter aktiv)
   static const _filters = ['Alle', 'Inbox', 'Angeheftet'];
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 36,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         itemCount: _filters.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (_, i) {
           final active = i == _selected;
-          return FilterChip(
-            label: Text(_filters[i]),
+          return ChoiceChip(
+            label: Text(
+              _filters[i],
+              style: TextStyle(
+                fontSize: 12,
+                color: active ? MFColors.teal : MFColors.textSecondary,
+                fontWeight: active ? FontWeight.bold : FontWeight.w500,
+              ),
+            ),
             selected: active,
             onSelected: (_) => setState(() => _selected = i),
             backgroundColor: MFColors.surface,
             selectedColor: MFColors.tealBg,
             checkmarkColor: MFColors.teal,
-            labelStyle: TextStyle(
-              fontSize: 11,
-              color: active ? MFColors.teal : MFColors.textSecondary,
-              fontWeight: FontWeight.w600,
-            ),
             side: BorderSide(
               color: active ? MFColors.tealDark : MFColors.border,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
             visualDensity: VisualDensity.compact,
+            showCheckmark: false,
           );
         },
       ),
