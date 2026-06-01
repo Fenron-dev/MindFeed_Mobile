@@ -19,20 +19,6 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// JVM 17 für alle Subprojects erzwingen.
-// tasks.withType<JavaCompile/KotlinJvmCompile>.configureEach ist vollständig lazy —
-// kein afterEvaluate, funktioniert für alle Libraries unabhängig vom Plugin.
-subprojects {
-    tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = JavaVersion.VERSION_17.toString()
-        targetCompatibility = JavaVersion.VERSION_17.toString()
-    }
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
-    }
-}
 
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
