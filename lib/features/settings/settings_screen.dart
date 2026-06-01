@@ -5,7 +5,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../domain/prop_type.dart';
 import '../../main.dart' show onRestartApp;
+import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 
 const _storage = FlutterSecureStorage();
@@ -431,6 +433,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
+          // ─── Tag-Stil ──────────────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('TAG-DARSTELLUNG'),
+          const SizedBox(height: 8),
+          _TagStyleSection(),
+
+          // ─── Templates ─────────────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('PROPERTY-TEMPLATES'),
+          const SizedBox(height: 8),
+          _TemplatesSection(),
+
           // ─── Info ──────────────────────────────────────────────────────────
           const SizedBox(height: 28),
           _SectionHeader('APP'),
@@ -527,6 +541,511 @@ class _SettingsTile extends StatelessWidget {
             if (trailing != null) trailing!,
           ]),
         ),
+      );
+}
+
+// ─── Tag-Stil Sektion ─────────────────────────────────────────────────────────
+
+class _TagStyleSection extends ConsumerWidget {
+  const _TagStyleSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = ref.watch(tagStyleProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Vorschau
+        const Text('Vorschau', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: style.bgColor,
+            borderRadius: BorderRadius.circular(style.borderRadius),
+            border: Border.all(color: style.borderColor, width: 0.5),
+          ),
+          child: Text(
+            style.showHash ? '#beispiel' : 'beispiel',
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600,
+                color: style.textColor, fontFamily: 'monospace'),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Farb-Presets
+        const Text('Farbschema', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6,
+          children: TagStyle.presets.map((p) {
+            final isActive = style.bgColor == p.bg;
+            return GestureDetector(
+              onTap: () async {
+                final newStyle = style.copyWith(
+                    bgColor: p.bg, textColor: p.text, borderColor: p.border);
+                ref.read(tagStyleProvider.notifier).state = newStyle;
+                await AppSettings.saveTagStyle(newStyle);
+              },
+              child: Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: p.bg,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isActive ? p.text : MFColors.border,
+                    width: isActive ? 2 : 1,
+                  ),
+                ),
+                child: isActive
+                    ? Icon(Icons.check, size: 14, color: p.text)
+                    : null,
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 14),
+
+        // Form
+        const Text('Form', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+        const SizedBox(height: 6),
+        Row(children: [
+          _FormBtn('Pill', style.borderRadius > 10, () async {
+            final s = style.copyWith(borderRadius: 99);
+            ref.read(tagStyleProvider.notifier).state = s;
+            await AppSettings.saveTagStyle(s);
+          }),
+          const SizedBox(width: 8),
+          _FormBtn('Eckig', style.borderRadius <= 10, () async {
+            final s = style.copyWith(borderRadius: 4);
+            ref.read(tagStyleProvider.notifier).state = s;
+            await AppSettings.saveTagStyle(s);
+          }),
+        ]),
+        const SizedBox(height: 12),
+
+        // # anzeigen
+        Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('# Zeichen anzeigen',
+                  style: TextStyle(fontSize: 12, color: MFColors.textPrimary)),
+              const Text('z.B. #tag vs. tag',
+                  style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
+            ]),
+          ),
+          Switch(
+            value: style.showHash,
+            activeThumbColor: MFColors.teal,
+            onChanged: (v) async {
+              final s = style.copyWith(showHash: v);
+              ref.read(tagStyleProvider.notifier).state = s;
+              await AppSettings.saveTagStyle(s);
+            },
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _FormBtn extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _FormBtn(this.label, this.active, this.onTap);
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? MFColors.tealBg : MFColors.bg,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: active ? MFColors.teal : MFColors.border),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: active ? MFColors.teal : MFColors.textMuted,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
+        ),
+      );
+}
+
+// ─── Templates Sektion ────────────────────────────────────────────────────────
+
+class _TemplatesSection extends ConsumerWidget {
+  const _TemplatesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final templates = ref.watch(templatesProvider);
+
+    return Column(children: [
+      ...templates.asMap().entries.map((e) {
+        final t = e.value;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: MFColors.border),
+          ),
+          child: ListTile(
+            leading: Text(t.emoji,
+                style: const TextStyle(fontSize: 22)),
+            title: Text(t.name,
+                style: const TextStyle(fontSize: 13, color: MFColors.textPrimary)),
+            subtitle: Text('${t.fields.length} Felder',
+                style: const TextStyle(fontSize: 11, color: MFColors.textMuted)),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 16, color: MFColors.textSecondary),
+                onPressed: () => _editTemplate(context, ref, t),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                onPressed: () => _deleteTemplate(ref, t.id),
+              ),
+            ]),
+          ),
+        );
+      }),
+      const SizedBox(height: 4),
+      GestureDetector(
+        onTap: () => _addTemplate(context, ref),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: MFColors.border, style: BorderStyle.solid),
+          ),
+          child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.add, size: 16, color: MFColors.teal),
+            SizedBox(width: 6),
+            Text('Template hinzufügen',
+                style: TextStyle(fontSize: 13, color: MFColors.teal, fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      ),
+    ]);
+  }
+
+  void _deleteTemplate(WidgetRef ref, String id) {
+    final current = ref.read(templatesProvider);
+    final updated = current.where((t) => t.id != id).toList();
+    ref.read(templatesProvider.notifier).state = updated;
+    AppSettings.saveTemplates(updated);
+  }
+
+  Future<void> _addTemplate(BuildContext ctx, WidgetRef ref) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TemplateEditSheet(
+        onSave: (t) {
+          final updated = [...ref.read(templatesProvider), t];
+          ref.read(templatesProvider.notifier).state = updated;
+          AppSettings.saveTemplates(updated);
+        },
+      ),
+    );
+  }
+
+  Future<void> _editTemplate(
+      BuildContext ctx, WidgetRef ref, PropTemplate template) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TemplateEditSheet(
+        existing: template,
+        onSave: (t) {
+          final current = ref.read(templatesProvider);
+          final updated = current.map((x) => x.id == t.id ? t : x).toList();
+          ref.read(templatesProvider.notifier).state = updated;
+          AppSettings.saveTemplates(updated);
+        },
+      ),
+    );
+  }
+}
+
+// ─── Template bearbeiten ──────────────────────────────────────────────────────
+
+class _TemplateEditSheet extends StatefulWidget {
+  final PropTemplate? existing;
+  final ValueChanged<PropTemplate> onSave;
+  const _TemplateEditSheet({this.existing, required this.onSave});
+
+  @override
+  State<_TemplateEditSheet> createState() => _TemplateEditSheetState();
+}
+
+class _TemplateEditSheetState extends State<_TemplateEditSheet> {
+  late final TextEditingController _nameCtrl;
+  late String _emoji;
+  late List<PropTemplateField> _fields;
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.existing;
+    _nameCtrl = TextEditingController(text: t?.name ?? '');
+    _emoji = t?.emoji ?? '📋';
+    _fields = List.from(t?.fields ?? []);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addField() async {
+    final result = await showDialog<PropTemplateField>(
+      context: context,
+      builder: (_) => _FieldDialog(),
+    );
+    if (result != null) setState(() => _fields.add(result));
+  }
+
+  void _save() {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return;
+    final id = widget.existing?.id ?? 'tpl-${DateTime.now().millisecondsSinceEpoch}';
+    widget.onSave(PropTemplate(id: id, name: name, emoji: _emoji, fields: _fields));
+    Navigator.pop(context);
+  }
+
+  static const _emojis = ['📋','🎲','📚','🎬','🐉','🎮','🎵','🏋️','✈️','💼','🔬','🍕'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 16, 20,
+          24 + MediaQuery.of(context).viewInsets.bottom),
+      decoration: const BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(color: MFColors.border,
+                borderRadius: BorderRadius.circular(99)),
+          )),
+          Text(widget.existing != null ? 'Template bearbeiten' : 'Neues Template',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold,
+                  color: MFColors.textPrimary)),
+          const SizedBox(height: 16),
+
+          // Emoji-Auswahl
+          const Text('Emoji', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 6,
+            children: _emojis.map((e) => GestureDetector(
+              onTap: () => setState(() => _emoji = e),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: _emoji == e ? MFColors.tealBg : MFColors.bg,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                      color: _emoji == e ? MFColors.teal : MFColors.border),
+                ),
+                child: Text(e, style: const TextStyle(fontSize: 18)),
+              ),
+            )).toList(),
+          ),
+          const SizedBox(height: 14),
+
+          // Name
+          TextField(
+            controller: _nameCtrl,
+            autofocus: true,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: 'Name (z.B. Brettspiel, Buch)',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Felder
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('Felder', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+            GestureDetector(
+              onTap: _addField,
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.add, size: 14, color: MFColors.teal),
+                SizedBox(width: 3),
+                Text('Feld hinzufügen', style: TextStyle(fontSize: 11, color: MFColors.teal)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          if (_fields.isEmpty)
+            const Text('Noch keine Felder.',
+                style: TextStyle(fontSize: 12, color: MFColors.textMuted))
+          else
+            ...List.generate(_fields.length, (i) {
+              final f = _fields[i];
+              final pt = PropType.fromString(f.type);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: MFColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: MFColors.border),
+                ),
+                child: Row(children: [
+                  Icon(pt.icon, size: 13, color: pt.color),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(f.key,
+                      style: const TextStyle(fontSize: 12, color: MFColors.textPrimary))),
+                  Text(pt.label,
+                      style: const TextStyle(fontSize: 10, color: MFColors.textMuted)),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: () => setState(() => _fields.removeAt(i)),
+                    child: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
+                  ),
+                ]),
+              );
+            }),
+
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _save,
+              style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+              child: const Text('Speichern',
+                  style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Dialog: Neues Template-Feld ─────────────────────────────────────────────
+
+class _FieldDialog extends StatefulWidget {
+  const _FieldDialog();
+
+  @override
+  State<_FieldDialog> createState() => _FieldDialogState();
+}
+
+class _FieldDialogState extends State<_FieldDialog> {
+  final _keyCtrl = TextEditingController();
+  PropType _type = PropType.text;
+  final _defaultCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _keyCtrl.dispose();
+    _defaultCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Feld hinzufügen',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 15)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: _keyCtrl,
+            autofocus: true,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: 'Feldname',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<PropType>(
+            value: _type,
+            dropdownColor: MFColors.surface,
+            style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+            decoration: const InputDecoration(
+              labelText: 'Typ',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+            ),
+            items: PropType.values.map((t) => DropdownMenuItem(
+              value: t,
+              child: Row(children: [
+                Icon(t.icon, size: 14, color: t.color),
+                const SizedBox(width: 8),
+                Text(t.label),
+              ]),
+            )).toList(),
+            onChanged: (v) => setState(() => _type = v ?? PropType.text),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _defaultCtrl,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: 'Standardwert (optional)',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: MFColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              final key = _keyCtrl.text.trim();
+              if (key.isEmpty) return;
+              Navigator.pop(context, PropTemplateField(
+                key: key,
+                type: _type.value,
+                defaultValue: _defaultCtrl.text.trim(),
+              ));
+            },
+            child: const Text('Hinzufügen',
+                style: TextStyle(color: MFColors.teal)),
+          ),
+        ],
       );
 }
 

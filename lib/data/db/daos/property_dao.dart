@@ -34,4 +34,15 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
       await upsertLink(fromId, toId);
     }
   }
+
+  /// Alle eindeutigen Property-Keys (für Filter-UI)
+  Future<List<String>> getUniqueKeys() async {
+    final rows = await customSelect(
+      'SELECT DISTINCT key FROM entry_properties '
+      'WHERE key NOT IN (\'og_image\',\'og_title\',\'og_description\',\'domain\') '
+      'ORDER BY key',
+      readsFrom: {entryProperties},
+    ).get();
+    return rows.map((r) => r.read<String>('key')).toList();
+  }
 }

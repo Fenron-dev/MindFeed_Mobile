@@ -12,6 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../domain/prop_type.dart';
+import '../../services/app_settings.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
@@ -983,30 +985,37 @@ class _PropertiesTable extends ConsumerWidget {
               ),
             ),
           const SizedBox(height: 6),
-          // Property hinzufügen
-          GestureDetector(
-            onTap: () => _showAddPropertyDialog(context, ref),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: MFColors.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: MFColors.border),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add, size: 14, color: MFColors.teal),
-                  SizedBox(width: 6),
-                  Text('Eigenschaft hinzufügen',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: MFColors.teal,
-                          fontWeight: FontWeight.w500)),
-                ],
+          Row(children: [
+            // Eigenschaft hinzufügen
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _showAddPropertyDialog(context, ref),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: MFColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: MFColors.border),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, size: 14, color: MFColors.teal),
+                      SizedBox(width: 6),
+                      Text('Eigenschaft hinzufügen',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: MFColors.teal,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(width: 8),
+            // Template anwenden
+            _TemplateApplyButton(entryId: entryId, existingProps: properties),
+          ]),
         ],
       ),
     );
@@ -1299,27 +1308,230 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
   }
 }
 
-// ─── PropType Enum ────────────────────────────────────────────────────────────
+// ─── Template anwenden ────────────────────────────────────────────────────────
 
-enum PropType {
-  text('text', 'Text', Icons.notes_rounded, Color(0xFF6B7280)),
-  number('number', 'Zahl', Icons.pin_outlined, Color(0xFF3B82F6)),
-  date('date', 'Datum', Icons.calendar_today_outlined, Color(0xFF8B5CF6)),
-  boolean('boolean', 'Toggle', Icons.toggle_on_outlined, Color(0xFF10B981)),
-  url('url', 'Link/URL', Icons.link_rounded, Color(0xFF60A5FA)),
-  rating('rating', 'Bewertung', Icons.star_outline_rounded, Color(0xFFF59E0B)),
-  tags('tags', 'Tags-Liste', Icons.label_outlined, Color(0xFF14B8A6)),
-  select('select', 'Auswahl', Icons.list_outlined, Color(0xFFF97316));
+class _TemplateApplyButton extends ConsumerWidget {
+  final String entryId;
+  final List<EntryProperty> existingProps;
+  const _TemplateApplyButton({required this.entryId, required this.existingProps});
 
-  const PropType(this.value, this.label, this.icon, this.color);
-  final String value;
-  final String label;
-  final IconData icon;
-  final Color color;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final templates = ref.watch(templatesProvider);
+    if (templates.isEmpty) return const SizedBox.shrink();
 
-  static PropType fromString(String s) =>
-      PropType.values.firstWhere((t) => t.value == s,
-          orElse: () => PropType.text);
+    return GestureDetector(
+      onTap: () => _showApplySheet(context, ref, templates),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: MFColors.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: MFColors.border),
+        ),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.auto_awesome_outlined, size: 13, color: Color(0xFF8B5CF6)),
+          SizedBox(width: 5),
+          Text('Template', style: TextStyle(
+              fontSize: 12, color: Color(0xFF8B5CF6), fontWeight: FontWeight.w500)),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _showApplySheet(
+      BuildContext ctx, WidgetRef ref, List<PropTemplate> templates) async {
+    final result = await showModalBottomSheet<(PropTemplate, bool)>(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TemplatePickSheet(templates: templates),
+    );
+    if (result == null || !ctx.mounted) return;
+    final (template, overwrite) = result;
+    await _apply(ref, template, overwrite);
+  }
+
+  Future<void> _apply(WidgetRef ref, PropTemplate template, bool overwrite) async {
+    final dao = ref.read(propertyDaoProvider);
+    final current = await dao.watchByEntry(entryId).first;
+
+    final List<EntryPropertiesCompanion> newProps;
+    if (overwrite) {
+      // Nur nicht-interne Properties behalten, dann Template-Felder hinzufügen
+      final systemKeys = {'og_image', 'og_title', 'og_description', 'domain',
+          'genres', 'score', 'media_type'};
+      final kept = current
+          .where((p) => systemKeys.contains(p.key.toLowerCase()))
+          .map((p) => EntryPropertiesCompanion(
+                id: drift.Value(p.id), entryId: drift.Value(p.entryId),
+                key: drift.Value(p.key), value: drift.Value(p.value),
+                type: drift.Value(p.type),
+              ))
+          .toList();
+      newProps = [
+        ...kept,
+        ...template.fields.map((f) => EntryPropertiesCompanion(
+              id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${f.key}'),
+              entryId: drift.Value(entryId),
+              key: drift.Value(f.key),
+              value: drift.Value(f.defaultValue.isEmpty ? null : f.defaultValue),
+              type: drift.Value(f.type),
+            )),
+      ];
+    } else {
+      // Ergänzen: nur Felder hinzufügen die noch nicht existieren
+      final existingKeys = current.map((p) => p.key.toLowerCase()).toSet();
+      final toAdd = template.fields
+          .where((f) => !existingKeys.contains(f.key.toLowerCase()))
+          .map((f) => EntryPropertiesCompanion(
+                id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${f.key}'),
+                entryId: drift.Value(entryId),
+                key: drift.Value(f.key),
+                value: drift.Value(f.defaultValue.isEmpty ? null : f.defaultValue),
+                type: drift.Value(f.type),
+              ))
+          .toList();
+      newProps = [
+        ...current.map((p) => EntryPropertiesCompanion(
+              id: drift.Value(p.id), entryId: drift.Value(p.entryId),
+              key: drift.Value(p.key), value: drift.Value(p.value),
+              type: drift.Value(p.type),
+            )),
+        ...toAdd,
+      ];
+    }
+    await dao.setProperties(entryId, newProps);
+  }
+}
+
+class _TemplatePickSheet extends StatefulWidget {
+  final List<PropTemplate> templates;
+  const _TemplatePickSheet({required this.templates});
+
+  @override
+  State<_TemplatePickSheet> createState() => _TemplatePickSheetState();
+}
+
+class _TemplatePickSheetState extends State<_TemplatePickSheet> {
+  PropTemplate? _selected;
+  bool _overwrite = false;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        decoration: const BoxDecoration(
+          color: MFColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Center(child: Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(color: MFColors.border,
+                borderRadius: BorderRadius.circular(99)),
+          )),
+          const Align(alignment: Alignment.centerLeft,
+            child: Text('TEMPLATE ANWENDEN', style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.bold,
+                color: MFColors.textMuted, letterSpacing: 1.2))),
+          const SizedBox(height: 12),
+
+          // Template-Liste
+          ...widget.templates.map((t) {
+            final active = _selected?.id == t.id;
+            return GestureDetector(
+              onTap: () => setState(() => _selected = t),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: active ? MFColors.tealBg : MFColors.bg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: active ? MFColors.teal : MFColors.border),
+                ),
+                child: Row(children: [
+                  Text(t.emoji, style: const TextStyle(fontSize: 20)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(t.name, style: TextStyle(
+                        fontSize: 13, color: active ? MFColors.teal : MFColors.textPrimary,
+                        fontWeight: FontWeight.w600)),
+                    Text('${t.fields.map((f) => f.key).join(', ')}',
+                        style: const TextStyle(fontSize: 10, color: MFColors.textMuted),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ])),
+                  if (active)
+                    const Icon(Icons.check_circle, size: 18, color: MFColors.teal),
+                ]),
+              ),
+            );
+          }),
+
+          const SizedBox(height: 12),
+
+          // Modus
+          Container(
+            decoration: BoxDecoration(
+              color: MFColors.bg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(children: [
+              _ModeRow(
+                label: 'Ergänzen',
+                sub: 'Nur fehlende Felder hinzufügen',
+                active: !_overwrite,
+                onTap: () => setState(() => _overwrite = false),
+              ),
+              const Divider(height: 1, color: MFColors.border),
+              _ModeRow(
+                label: 'Überschreiben',
+                sub: 'Bestehende Felder ersetzen',
+                active: _overwrite,
+                onTap: () => setState(() => _overwrite = true),
+              ),
+            ]),
+          ),
+
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity, child: FilledButton(
+            onPressed: _selected == null ? null : () =>
+                Navigator.pop(context, (_selected!, _overwrite)),
+            style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+            child: const Text('Anwenden',
+                style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
+          )),
+        ]),
+      );
+}
+
+class _ModeRow extends StatelessWidget {
+  final String label, sub;
+  final bool active;
+  final VoidCallback onTap;
+  const _ModeRow({required this.label, required this.sub,
+      required this.active, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            Icon(active ? Icons.radio_button_checked : Icons.radio_button_off,
+                size: 16, color: active ? MFColors.teal : MFColors.textMuted),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: TextStyle(
+                  fontSize: 12, color: active ? MFColors.teal : MFColors.textPrimary,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
+              Text(sub, style: const TextStyle(fontSize: 10, color: MFColors.textMuted)),
+            ])),
+          ]),
+        ),
+      );
 }
 
 // ─── Result-Datenklasse für das Add-Sheet ─────────────────────────────────────

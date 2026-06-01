@@ -7,6 +7,7 @@ import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
+import '../../domain/feed_filter.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
@@ -49,12 +50,35 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     });
   }
 
-  List<EntryWithDetails> _filterAndSort(List<EntryWithDetails> entries) {
+  List<EntryWithDetails> _filterAndSort(
+      List<EntryWithDetails> entries, FeedFilter filter) {
     final status = _filterStatuses[_filterIndex];
-    var result = entries.where((e) => switch (status) {
-      'inbox'  => e.entry.status == 'inbox',
-      'pinned' => e.entry.pinned,
-      _        => true,
+    var result = entries.where((e) {
+      // Status-Filter
+      final statusOk = switch (status) {
+        'inbox'  => e.entry.status == 'inbox',
+        'pinned' => e.entry.pinned,
+        _        => true,
+      };
+      if (!statusOk) return false;
+
+      // Entry-Typ-Filter
+      if (filter.entryType != null && e.entry.type != filter.entryType) {
+        return false;
+      }
+
+      // Property-Regeln
+      for (final rule in filter.propRules.entries) {
+        final match = e.properties.where((p) =>
+            p.key.toLowerCase() == rule.key.toLowerCase()).firstOrNull;
+        if (match == null) return false; // Key existiert nicht
+        if (rule.value != null &&
+            rule.value!.isNotEmpty &&
+            !(match.value ?? '').toLowerCase().contains(rule.value!.toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
     }).toList();
 
     switch (_sortBy) {
@@ -69,7 +93,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         result.sort((a, b) =>
             (b.entry.title ?? '').toLowerCase()
                 .compareTo((a.entry.title ?? '').toLowerCase()));
-      // date_desc: Provider sortiert bereits desc
     }
     return result;
   }
@@ -90,12 +113,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     final feedAsync = ref.watch(feedProvider);
+    final filter   = ref.watch(feedFilterProvider);
 
     return Scaffold(
       body: CustomScrollView(
         controller: _scrollController,
         slivers: [
-          // SliverAppBar: floating + snap = Gmail-Style sanfte Animation
           SliverAppBar(
             floating: true,
             snap: true,
@@ -114,10 +137,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               ),
             ),
             actions: [
+              // Filter-Button (leuchtet wenn aktiv)
+              IconButton(
+                icon: Icon(
+                  filter.isActive ? Icons.filter_alt : Icons.filter_alt_outlined,
+                  color: filter.isActive ? MFColors.teal : MFColors.textSecondary,
+                  size: 22,
+                ),
+                tooltip: 'Filter',
+                onPressed: () => _showFilterSheet(context, filter),
+              ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert,
                     color: MFColors.textSecondary, size: 22),
-                tooltip: 'Ansicht & Filter',
+                tooltip: 'Ansicht',
                 color: MFColors.surface,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -135,11 +168,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               ),
             ],
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(44),
-              child: _QuickFilterBar(
-                selectedIndex: _filterIndex,
-                onChanged: (i) => setState(() => _filterIndex = i),
-              ),
+              preferredSize: Size.fromHeight(filter.isActive ? 88 : 44),
+              child: Column(children: [
+                _QuickFilterBar(
+                  selectedIndex: _filterIndex,
+                  onChanged: (i) => setState(() => _filterIndex = i),
+                ),
+                if (filter.isActive)
+                  _ActiveFilterBar(filter: filter),
+              ]),
             ),
           ),
 
@@ -155,7 +192,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       style: const TextStyle(color: Colors.red))),
             ),
             data: (allEntries) {
-              final entries = _filterAndSort(allEntries);
+              final entries = _filterAndSort(allEntries, filter);
               if (entries.isEmpty) {
                 return SliverFillRemaining(
                   child: _EmptyFeed(
@@ -260,6 +297,312 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         onPressed: () => context.push(AppRoutes.capture),
         tooltip: 'Neuer Eintrag',
         child: const Icon(Icons.edit_outlined),
+      ),
+    );
+  }
+
+  // ── Filter-Sheet ────────────────────────────────────────────────────────────
+  Future<void> _showFilterSheet(BuildContext ctx, FeedFilter current) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FilterSheet(
+        current: current,
+        propertyDao: ref.read(propertyDaoProvider),
+        onApply: (f) => ref.read(feedFilterProvider.notifier).state = f,
+      ),
+    );
+  }
+}
+
+// ─── Aktive Filter als Chips ──────────────────────────────────────────────────
+class _ActiveFilterBar extends ConsumerWidget {
+  final FeedFilter filter;
+  const _ActiveFilterBar({required this.filter});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Row(children: [
+        // Typ-Chip
+        if (filter.entryType != null)
+          _FilterChip(
+            label: _typeLabel(filter.entryType!),
+            onRemove: () => ref.read(feedFilterProvider.notifier).update(
+              (f) => FeedFilter(propRules: f.propRules),
+            ),
+          ),
+        // Property-Chips
+        ...filter.propRules.entries.map((r) => _FilterChip(
+          label: r.value != null && r.value!.isNotEmpty
+              ? '${r.key}: ${r.value}'
+              : r.key,
+          onRemove: () {
+            final rules = Map<String, String?>.from(filter.propRules)
+              ..remove(r.key);
+            ref.read(feedFilterProvider.notifier).update(
+              (f) => FeedFilter(entryType: f.entryType, propRules: rules),
+            );
+          },
+        )),
+        // Alle löschen
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: () => ref.read(feedFilterProvider.notifier).state = const FeedFilter(),
+          child: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
+        ),
+      ]),
+    );
+  }
+
+  String _typeLabel(String t) => switch (t) {
+    'link'  => '🔗 Link',
+    'image' => '🖼️ Bild',
+    'audio' => '🎙️ Audio',
+    _       => '📝 Text',
+  };
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onRemove;
+  const _FilterChip({required this.label, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(right: 6),
+    padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+    decoration: BoxDecoration(
+      color: MFColors.tealBg,
+      borderRadius: BorderRadius.circular(99),
+      border: Border.all(color: MFColors.tealDark),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(label, style: const TextStyle(
+          fontSize: 10, color: MFColors.teal, fontWeight: FontWeight.w600)),
+      const SizedBox(width: 4),
+      GestureDetector(
+        onTap: onRemove,
+        child: const Icon(Icons.close, size: 12, color: MFColors.teal),
+      ),
+    ]),
+  );
+}
+
+// ─── Filter-Bottom-Sheet ──────────────────────────────────────────────────────
+class _FilterSheet extends StatefulWidget {
+  final FeedFilter current;
+  final dynamic propertyDao;
+  final ValueChanged<FeedFilter> onApply;
+  const _FilterSheet({
+    required this.current,
+    required this.propertyDao,
+    required this.onApply,
+  });
+
+  @override
+  State<_FilterSheet> createState() => _FilterSheetState();
+}
+
+class _FilterSheetState extends State<_FilterSheet> {
+  String? _entryType;
+  Map<String, String?> _propRules = {};
+  List<String> _availableKeys = [];
+  String? _selectedKey;
+  final _valueCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _entryType = widget.current.entryType;
+    _propRules = Map.from(widget.current.propRules);
+    _loadKeys();
+  }
+
+  @override
+  void dispose() {
+    _valueCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadKeys() async {
+    final keys = await widget.propertyDao.getUniqueKeys();
+    if (mounted) setState(() => _availableKeys = keys);
+  }
+
+  void _addRule() {
+    final key = _selectedKey;
+    if (key == null || key.isEmpty) return;
+    setState(() {
+      _propRules[key] = _valueCtrl.text.trim().isEmpty ? null : _valueCtrl.text.trim();
+      _selectedKey = null;
+      _valueCtrl.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 16, 20,
+          24 + MediaQuery.of(context).viewInsets.bottom),
+      decoration: const BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(color: MFColors.border,
+                borderRadius: BorderRadius.circular(99)),
+          )),
+          const Text('FILTER', style: TextStyle(
+              fontSize: 10, fontWeight: FontWeight.bold,
+              color: MFColors.textMuted, letterSpacing: 1.2)),
+          const SizedBox(height: 14),
+
+          // Entry-Typ
+          const Text('Eintragstyp', style: TextStyle(
+              fontSize: 11, color: MFColors.textMuted)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6,
+            children: [
+              for (final (type, label) in [
+                (null, 'Alle'), ('text', '📝 Text'),
+                ('link', '🔗 Link'), ('image', '🖼️ Bild'),
+                ('audio', '🎙️ Audio'),
+              ])
+                GestureDetector(
+                  onTap: () => setState(() => _entryType = type),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 100),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _entryType == type
+                          ? MFColors.tealBg : MFColors.bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _entryType == type ? MFColors.teal : MFColors.border,
+                      ),
+                    ),
+                    child: Text(label, style: TextStyle(
+                        fontSize: 12,
+                        color: _entryType == type
+                            ? MFColors.teal : MFColors.textSecondary)),
+                  ),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Aktive Property-Regeln
+          if (_propRules.isNotEmpty) ...[
+            const Text('Aktive Filter', style: TextStyle(
+                fontSize: 11, color: MFColors.textMuted)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 5, runSpacing: 4,
+              children: _propRules.entries.map((r) => _FilterChip(
+                label: r.value != null && r.value!.isNotEmpty
+                    ? '${r.key}: ${r.value}' : r.key,
+                onRemove: () => setState(() => _propRules.remove(r.key)),
+              )).toList(),
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Neue Property-Regel hinzufügen
+          const Text('Property-Filter', style: TextStyle(
+              fontSize: 11, color: MFColors.textMuted)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              flex: 2,
+              child: DropdownButtonFormField<String>(
+                value: _selectedKey,
+                hint: const Text('Key', style: TextStyle(
+                    fontSize: 12, color: MFColors.textMuted)),
+                dropdownColor: MFColors.surface,
+                style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
+                items: _availableKeys.map((k) => DropdownMenuItem(
+                  value: k,
+                  child: Text(k, style: const TextStyle(fontSize: 12)),
+                )).toList(),
+                onChanged: (v) => setState(() => _selectedKey = v),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: TextField(
+                controller: _valueCtrl,
+                style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Wert (optional)',
+                  hintStyle: TextStyle(fontSize: 11, color: MFColors.textMuted),
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            IconButton(
+              onPressed: _addRule,
+              icon: const Icon(Icons.add, color: MFColors.teal, size: 20),
+              padding: EdgeInsets.zero,
+            ),
+          ]),
+
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  widget.onApply(const FeedFilter());
+                  Navigator.pop(context);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: MFColors.textMuted,
+                  side: const BorderSide(color: MFColors.border),
+                ),
+                child: const Text('Zurücksetzen'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: () {
+                  widget.onApply(FeedFilter(
+                    entryType: _entryType,
+                    propRules: _propRules,
+                  ));
+                  Navigator.pop(context);
+                },
+                style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+                child: const Text('Anwenden',
+                    style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ]),
+        ],
       ),
     );
   }

@@ -6,6 +6,8 @@ import '../data/db/daos/container_dao.dart';
 import '../data/db/daos/attachment_dao.dart';
 import '../data/db/daos/property_dao.dart';
 import '../data/repositories/entry_repository.dart';
+import '../domain/feed_filter.dart';
+import '../services/app_settings.dart';
 
 // ─── Database (wird in main.dart via override initialisiert) ──────────────────
 final databaseProvider = Provider<AppDatabase>(
@@ -34,3 +36,14 @@ final entryRepositoryProvider = Provider<EntryRepository>((ref) {
     propertyDao: ref.watch(propertyDaoProvider),
   );
 });
+
+// ─── App-weite Einstellungen (reaktiv) ────────────────────────────────────────
+final tagStyleProvider =
+    StateProvider<TagStyle>((ref) => AppSettings.loadTagStyle());
+
+final templatesProvider =
+    StateProvider<List<PropTemplate>>((ref) => AppSettings.loadTemplates());
+
+// ─── Feed-Filter ──────────────────────────────────────────────────────────────
+final feedFilterProvider =
+    StateProvider<FeedFilter>((ref) => const FeedFilter());

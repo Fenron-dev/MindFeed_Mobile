@@ -1,8 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../core/di.dart';
 import '../core/theme.dart';
 import '../data/repositories/entry_repository.dart';
+import '../domain/prop_type.dart';
 
 class EntryCard extends StatelessWidget {
   final EntryWithDetails item;
@@ -256,25 +259,26 @@ class _TypeIcon extends StatelessWidget {
   }
 }
 
-class _TagChip extends StatelessWidget {
+class _TagChip extends ConsumerWidget {
   final String tag;
   const _TagChip(this.tag);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = ref.watch(tagStyleProvider);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: MFColors.tealBg,
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: const Color(0xFF0F766E), width: 0.5),
+        color: style.bgColor,
+        borderRadius: BorderRadius.circular(style.borderRadius),
+        border: Border.all(color: style.borderColor, width: 0.5),
       ),
       child: Text(
-        '#$tag',
-        style: const TextStyle(
+        style.showHash ? '#$tag' : tag,
+        style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,
-          color: MFColors.teal,
+          color: style.textColor,
           fontFamily: 'monospace',
         ),
       ),
@@ -295,43 +299,93 @@ class _PropertiesRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final visible = properties
         .where((p) => !_excludedKeys.contains(p.key.toLowerCase()))
-        .take(3)
+        .take(4)
         .toList();
     if (visible.isEmpty) return const SizedBox.shrink();
 
     return Wrap(
-      spacing: 6,
+      spacing: 5,
       runSpacing: 3,
-      children: visible.map((p) {
-        final valStr = p.value ?? '';
-        final display = valStr.length > 20 ? '${valStr.substring(0, 20)}…' : valStr;
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: MFColors.bg,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: MFColors.border),
-          ),
-          child: RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                    text: '${p.key}: ',
-                    style: const TextStyle(
-                        fontSize: 10,
-                        color: MFColors.textMuted,
-                        fontFamily: 'monospace')),
-                TextSpan(
-                    text: display,
-                    style: const TextStyle(
-                        fontSize: 10,
-                        color: MFColors.textPrimary,
-                        fontFamily: 'monospace')),
-              ],
-            ),
+      children: visible.map((p) => _PropChip(p)).toList(),
+    );
+  }
+}
+
+class _PropChip extends StatelessWidget {
+  final dynamic prop;
+  const _PropChip(this.prop);
+
+  @override
+  Widget build(BuildContext context) {
+    final type = PropType.fromString(prop.type as String? ?? 'text');
+    final val = prop.value as String? ?? '';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: MFColors.bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(type.icon, size: 9, color: type.color),
+        const SizedBox(width: 3),
+        Text(
+          '${prop.key}: ',
+          style: const TextStyle(
+              fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
+        ),
+        _renderValue(type, val),
+      ]),
+    );
+  }
+
+  Widget _renderValue(PropType type, String val) {
+    if (val.isEmpty) {
+      return const Text('—',
+          style: TextStyle(fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'));
+    }
+    switch (type) {
+      case PropType.boolean:
+        final isOn = val == 'true';
+        return Icon(
+          isOn ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+          size: 11,
+          color: isOn ? const Color(0xFF10B981) : MFColors.textMuted,
+        );
+      case PropType.rating:
+        final stars = int.tryParse(val) ?? 0;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(
+            stars.clamp(0, 5),
+            (_) => const Icon(Icons.star_rounded, size: 10, color: Color(0xFFF59E0B)),
           ),
         );
-      }).toList(),
-    );
+      case PropType.date:
+        final dt = DateTime.tryParse(val);
+        final label = dt != null
+            ? '${dt.day.toString().padLeft(2,'0')}.${dt.month.toString().padLeft(2,'0')}.${dt.year}'
+            : val;
+        return Text(label,
+            style: const TextStyle(
+                fontSize: 10, color: MFColors.textPrimary, fontFamily: 'monospace'));
+      case PropType.url:
+        final host = Uri.tryParse(val)?.host.replaceFirst('www.', '') ?? val;
+        final display = host.length > 18 ? '${host.substring(0, 18)}…' : host;
+        return Text(display,
+            style: const TextStyle(
+                fontSize: 10, color: Color(0xFF60A5FA), fontFamily: 'monospace'));
+      case PropType.tags:
+        final first = val.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).take(2).join(', ');
+        return Text(first,
+            style: const TextStyle(
+                fontSize: 10, color: MFColors.teal, fontFamily: 'monospace'));
+      default:
+        final display = val.length > 22 ? '${val.substring(0, 22)}…' : val;
+        return Text(display,
+            style: const TextStyle(
+                fontSize: 10, color: MFColors.textPrimary, fontFamily: 'monospace'));
+    }
   }
 }
