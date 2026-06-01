@@ -934,11 +934,20 @@ class _PropertiesTable extends ConsumerWidget {
                     child: Row(children: [
                       SizedBox(
                         width: 110,
-                        child: Text(p.key,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: MFColors.textMuted,
-                                fontFamily: 'monospace')),
+                        child: Row(children: [
+                          Icon(PropType.fromString(p.type).icon,
+                              size: 11,
+                              color: PropType.fromString(p.type).color),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(p.key,
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: MFColors.textMuted,
+                                    fontFamily: 'monospace'),
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                        ]),
                       ),
                       Expanded(
                         child: _EditablePropValue(
@@ -1005,58 +1014,13 @@ class _PropertiesTable extends ConsumerWidget {
 
   Future<void> _showAddPropertyDialog(
       BuildContext context, WidgetRef ref) async {
-    final keyCtrl = TextEditingController();
-    final valCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final result = await showModalBottomSheet<_NewPropData>(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: MFColors.surface,
-        title: const Text('Eigenschaft hinzufügen',
-            style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: keyCtrl,
-            autofocus: true,
-            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
-            decoration: const InputDecoration(
-              labelText: 'Name (z.B. Bewertung, Status)',
-              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-              enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: MFColors.border)),
-              focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: MFColors.teal)),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: valCtrl,
-            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
-            decoration: const InputDecoration(
-              labelText: 'Wert',
-              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-              enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: MFColors.border)),
-              focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: MFColors.teal)),
-            ),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Abbrechen',
-                  style: TextStyle(color: MFColors.textMuted))),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Hinzufügen',
-                  style: TextStyle(color: MFColors.teal))),
-        ],
-      ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddPropertySheet(entryId: entryId),
     );
-    if (ok != true) return;
-    final key = keyCtrl.text.trim();
-    final val = valCtrl.text.trim();
-    if (key.isEmpty) return;
+    if (result == null) return;
 
     final allProps =
         await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
@@ -1064,19 +1028,20 @@ class _PropertiesTable extends ConsumerWidget {
     final newProp = EntryPropertiesCompanion(
       id: drift.Value(uuid),
       entryId: drift.Value(entryId),
-      key: drift.Value(key),
-      value: drift.Value(val.isEmpty ? null : val),
-      type: const drift.Value('string'),
+      key: drift.Value(result.key),
+      value: drift.Value(result.value.isEmpty ? null : result.value),
+      type: drift.Value(result.type),
     );
-    await ref
-        .read(propertyDaoProvider)
-        .setProperties(entryId, [...allProps.map((p) => EntryPropertiesCompanion(
-              id: drift.Value(p.id),
-              entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key),
-              value: drift.Value(p.value),
-              type: drift.Value(p.type),
-            )), newProp]);
+    await ref.read(propertyDaoProvider).setProperties(entryId, [
+      ...allProps.map((p) => EntryPropertiesCompanion(
+            id: drift.Value(p.id),
+            entryId: drift.Value(p.entryId),
+            key: drift.Value(p.key),
+            value: drift.Value(p.value),
+            type: drift.Value(p.type),
+          )),
+      newProp,
+    ]);
   }
 }
 
@@ -1085,12 +1050,10 @@ class _EditablePropValue extends ConsumerStatefulWidget {
   final String entryId;
   const _EditablePropValue({required this.prop, required this.entryId});
   @override
-  ConsumerState<_EditablePropValue> createState() =>
-      _EditablePropValueState();
+  ConsumerState<_EditablePropValue> createState() => _EditablePropValueState();
 }
 
-class _EditablePropValueState
-    extends ConsumerState<_EditablePropValue> {
+class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
   bool _editing = false;
   late TextEditingController _ctrl;
 
@@ -1106,7 +1069,7 @@ class _EditablePropValueState
     super.dispose();
   }
 
-  Future<void> _save() async {
+  Future<void> _saveValue(String newValue) async {
     final allProps =
         await ref.read(propertyDaoProvider).watchByEntry(widget.entryId).first;
     final updated = allProps
@@ -1114,49 +1077,538 @@ class _EditablePropValueState
               id: drift.Value(p.id),
               entryId: drift.Value(p.entryId),
               key: drift.Value(p.key),
-              value: drift.Value(
-                  p.id == widget.prop.id ? _ctrl.text : p.value),
+              value: drift.Value(p.id == widget.prop.id ? newValue : p.value),
               type: drift.Value(p.type),
             ))
         .toList();
-    await ref
-        .read(propertyDaoProvider)
-        .setProperties(widget.entryId, updated);
+    await ref.read(propertyDaoProvider).setProperties(widget.entryId, updated);
     if (mounted) setState(() => _editing = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final type = PropType.fromString(widget.prop.type);
+    return switch (type) {
+      PropType.boolean  => _buildBoolean(),
+      PropType.date     => _buildDate(context),
+      PropType.rating   => _buildRating(),
+      PropType.url      => _buildUrl(context),
+      PropType.tags     => _buildTags(),
+      _                 => _buildText(type),
+    };
+  }
+
+  // ── boolean ────────────────────────────────────────────────────────────────
+  Widget _buildBoolean() {
+    final isOn = widget.prop.value == 'true';
+    return Switch(
+      value: isOn,
+      activeThumbColor: MFColors.teal,
+      onChanged: (v) => _saveValue(v ? 'true' : 'false'),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  // ── date ───────────────────────────────────────────────────────────────────
+  Widget _buildDate(BuildContext context) {
+    DateTime? parsed;
+    if (widget.prop.value != null && widget.prop.value!.isNotEmpty) {
+      parsed = DateTime.tryParse(widget.prop.value!);
+    }
+    final label = parsed != null
+        ? '${parsed.day.toString().padLeft(2, '0')}.${parsed.month.toString().padLeft(2, '0')}.${parsed.year}'
+        : '—';
+    return GestureDetector(
+      onTap: () async {
+        final now = DateTime.now();
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: parsed?.toLocal() ?? now,
+          firstDate: DateTime(2000),
+          lastDate: DateTime(2100),
+          builder: (_, child) => Theme(
+            data: ThemeData.dark().copyWith(
+              colorScheme: const ColorScheme.dark(primary: MFColors.teal),
+            ),
+            child: child!,
+          ),
+        );
+        if (picked != null) {
+          await _saveValue(picked.toIso8601String().substring(0, 10));
+        }
+      },
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: MFColors.textPrimary)),
+        const SizedBox(width: 4),
+        const Icon(Icons.edit_calendar_outlined, size: 12, color: MFColors.textMuted),
+      ]),
+    );
+  }
+
+  // ── rating (1–5 Sterne) ────────────────────────────────────────────────────
+  Widget _buildRating() {
+    final current = int.tryParse(widget.prop.value ?? '') ?? 0;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        final filled = i < current;
+        return GestureDetector(
+          onTap: () => _saveValue((i + 1).toString()),
+          child: Icon(
+            filled ? Icons.star_rounded : Icons.star_outline_rounded,
+            size: 18,
+            color: filled ? const Color(0xFFF59E0B) : MFColors.textMuted,
+          ),
+        );
+      }),
+    );
+  }
+
+  // ── url ────────────────────────────────────────────────────────────────────
+  Widget _buildUrl(BuildContext context) {
     if (_editing) {
       return Row(children: [
         Expanded(
           child: TextField(
             controller: _ctrl,
             autofocus: true,
-            style: const TextStyle(
-                fontSize: 12, color: MFColors.textPrimary),
+            keyboardType: TextInputType.url,
+            style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
             decoration: const InputDecoration(
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-              filled: false,
-              isDense: true,
+              border: InputBorder.none, contentPadding: EdgeInsets.zero,
+              filled: false, isDense: true,
             ),
-            onSubmitted: (_) => _save(),
+            onSubmitted: (v) => _saveValue(v),
           ),
         ),
         GestureDetector(
-          onTap: _save,
+          onTap: () => _saveValue(_ctrl.text),
+          child: const Icon(Icons.check, size: 16, color: MFColors.teal),
+        ),
+      ]);
+    }
+    final url = widget.prop.value ?? '';
+    return Row(children: [
+      Expanded(
+        child: GestureDetector(
+          onTap: () async {
+            final uri = Uri.tryParse(url);
+            if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+          },
+          child: Text(
+            url.isEmpty ? '—' : url,
+            style: TextStyle(
+              fontSize: 12,
+              color: url.isEmpty ? MFColors.textMuted : const Color(0xFF60A5FA),
+              decoration: url.isEmpty ? null : TextDecoration.underline,
+              decorationColor: const Color(0xFF60A5FA),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+      GestureDetector(
+        onTap: () => setState(() { _ctrl.text = url; _editing = true; }),
+        child: const Icon(Icons.edit_outlined, size: 13, color: MFColors.textMuted),
+      ),
+    ]);
+  }
+
+  // ── tags (komma-getrennte Liste als Chips) ─────────────────────────────────
+  Widget _buildTags() {
+    if (_editing) {
+      return Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _ctrl,
+            autofocus: true,
+            style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+            decoration: const InputDecoration(
+              hintText: 'tag1, tag2, tag3',
+              hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+              border: InputBorder.none, contentPadding: EdgeInsets.zero,
+              filled: false, isDense: true,
+            ),
+            onSubmitted: (v) => _saveValue(v),
+          ),
+        ),
+        GestureDetector(
+          onTap: () => _saveValue(_ctrl.text),
+          child: const Icon(Icons.check, size: 16, color: MFColors.teal),
+        ),
+      ]);
+    }
+    final raw = widget.prop.value ?? '';
+    final chips = raw.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    if (chips.isEmpty) {
+      return GestureDetector(
+        onTap: () => setState(() { _ctrl.text = raw; _editing = true; }),
+        child: const Text('—', style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
+      );
+    }
+    return GestureDetector(
+      onTap: () => setState(() { _ctrl.text = raw; _editing = true; }),
+      child: Wrap(
+        spacing: 4, runSpacing: 2,
+        children: chips.map((t) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: MFColors.tealBg,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: const Color(0xFF0F766E), width: 0.5),
+          ),
+          child: Text(t, style: const TextStyle(fontSize: 10, color: MFColors.teal, fontFamily: 'monospace')),
+        )).toList(),
+      ),
+    );
+  }
+
+  // ── text / number / select ─────────────────────────────────────────────────
+  Widget _buildText(PropType type) {
+    if (_editing) {
+      return Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: type == PropType.number
+                ? const TextInputType.numberWithOptions(decimal: true)
+                : TextInputType.text,
+            style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+            decoration: const InputDecoration(
+              border: InputBorder.none, contentPadding: EdgeInsets.zero,
+              filled: false, isDense: true,
+            ),
+            onSubmitted: (v) => _saveValue(v),
+          ),
+        ),
+        GestureDetector(
+          onTap: () => _saveValue(_ctrl.text),
           child: const Icon(Icons.check, size: 16, color: MFColors.teal),
         ),
       ]);
     }
     return GestureDetector(
-      onTap: () => setState(() => _editing = true),
+      onTap: () => setState(() { _ctrl.text = widget.prop.value ?? ''; _editing = true; }),
       child: Text(
         widget.prop.value ?? '—',
         style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
       ),
     );
+  }
+}
+
+// ─── PropType Enum ────────────────────────────────────────────────────────────
+
+enum PropType {
+  text('text', 'Text', Icons.notes_rounded, Color(0xFF6B7280)),
+  number('number', 'Zahl', Icons.pin_outlined, Color(0xFF3B82F6)),
+  date('date', 'Datum', Icons.calendar_today_outlined, Color(0xFF8B5CF6)),
+  boolean('boolean', 'Toggle', Icons.toggle_on_outlined, Color(0xFF10B981)),
+  url('url', 'Link/URL', Icons.link_rounded, Color(0xFF60A5FA)),
+  rating('rating', 'Bewertung', Icons.star_outline_rounded, Color(0xFFF59E0B)),
+  tags('tags', 'Tags-Liste', Icons.label_outlined, Color(0xFF14B8A6)),
+  select('select', 'Auswahl', Icons.list_outlined, Color(0xFFF97316));
+
+  const PropType(this.value, this.label, this.icon, this.color);
+  final String value;
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  static PropType fromString(String s) =>
+      PropType.values.firstWhere((t) => t.value == s,
+          orElse: () => PropType.text);
+}
+
+// ─── Result-Datenklasse für das Add-Sheet ─────────────────────────────────────
+
+class _NewPropData {
+  final String key;
+  final String value;
+  final String type;
+  const _NewPropData({required this.key, required this.value, required this.type});
+}
+
+// ─── Bottom Sheet: Eigenschaft hinzufügen ─────────────────────────────────────
+
+class _AddPropertySheet extends StatefulWidget {
+  final String entryId;
+  const _AddPropertySheet({required this.entryId});
+
+  @override
+  State<_AddPropertySheet> createState() => _AddPropertySheetState();
+}
+
+class _AddPropertySheetState extends State<_AddPropertySheet> {
+  PropType _selectedType = PropType.text;
+  final _keyCtrl = TextEditingController();
+  final _valCtrl = TextEditingController();
+  bool _boolValue = false;
+  DateTime? _dateValue;
+  int _ratingValue = 0;
+
+  @override
+  void dispose() {
+    _keyCtrl.dispose();
+    _valCtrl.dispose();
+    super.dispose();
+  }
+
+  String _getEncodedValue() {
+    return switch (_selectedType) {
+      PropType.boolean => _boolValue ? 'true' : 'false',
+      PropType.date    => _dateValue?.toIso8601String().substring(0, 10) ?? '',
+      PropType.rating  => _ratingValue > 0 ? _ratingValue.toString() : '',
+      _                => _valCtrl.text.trim(),
+    };
+  }
+
+  void _submit() {
+    final key = _keyCtrl.text.trim();
+    if (key.isEmpty) return;
+    Navigator.pop(context, _NewPropData(
+      key: key,
+      value: _getEncodedValue(),
+      type: _selectedType.value,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 24 + bottom),
+      decoration: const BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Griff
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: MFColors.border,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ),
+          const Text('EIGENSCHAFT HINZUFÜGEN',
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.bold,
+                  color: MFColors.textMuted, letterSpacing: 1.2)),
+          const SizedBox(height: 14),
+
+          // Typ-Auswahl
+          const Text('Typ', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6, runSpacing: 6,
+            children: PropType.values.map((t) {
+              final active = t == _selectedType;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedType = t),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active ? t.color.withAlpha(38) : MFColors.bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: active ? t.color : MFColors.border,
+                      width: active ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(t.icon, size: 13, color: active ? t.color : MFColors.textMuted),
+                    const SizedBox(width: 5),
+                    Text(t.label,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: active ? t.color : MFColors.textMuted,
+                            fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
+                  ]),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+
+          // Name
+          TextField(
+            controller: _keyCtrl,
+            autofocus: true,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: 'Name der Eigenschaft',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Wert je nach Typ
+          _buildValueInput(),
+          const SizedBox(height: 20),
+
+          // Speichern
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _submit,
+              style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+              child: const Text('Hinzufügen',
+                  style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildValueInput() {
+    switch (_selectedType) {
+      case PropType.boolean:
+        return Row(children: [
+          const Text('Wert:', style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
+          const Spacer(),
+          Switch(
+            value: _boolValue,
+            activeThumbColor: MFColors.teal,
+            onChanged: (v) => setState(() => _boolValue = v),
+          ),
+        ]);
+
+      case PropType.date:
+        final label = _dateValue != null
+            ? '${_dateValue!.day.toString().padLeft(2,'0')}.${_dateValue!.month.toString().padLeft(2,'0')}.${_dateValue!.year}'
+            : 'Datum wählen…';
+        return OutlinedButton.icon(
+          onPressed: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _dateValue ?? DateTime.now(),
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+              builder: (_, child) => Theme(
+                data: ThemeData.dark().copyWith(
+                  colorScheme: const ColorScheme.dark(primary: MFColors.teal),
+                ),
+                child: child!,
+              ),
+            );
+            if (picked != null) setState(() => _dateValue = picked);
+          },
+          icon: const Icon(Icons.calendar_today_outlined, size: 15),
+          label: Text(label),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _dateValue != null ? MFColors.teal : MFColors.textMuted,
+            side: const BorderSide(color: MFColors.border),
+          ),
+        );
+
+      case PropType.rating:
+        return Row(children: [
+          const Text('Bewertung:', style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
+          const SizedBox(width: 12),
+          ...List.generate(5, (i) => GestureDetector(
+            onTap: () => setState(() => _ratingValue = i + 1),
+            child: Icon(
+              i < _ratingValue ? Icons.star_rounded : Icons.star_outline_rounded,
+              size: 24,
+              color: i < _ratingValue ? const Color(0xFFF59E0B) : MFColors.textMuted,
+            ),
+          )),
+          if (_ratingValue > 0) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => setState(() => _ratingValue = 0),
+              child: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
+            ),
+          ],
+        ]);
+
+      case PropType.url:
+        return TextField(
+          controller: _valCtrl,
+          keyboardType: TextInputType.url,
+          style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'https://…',
+            labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.border)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.teal)),
+          ),
+        );
+
+      case PropType.number:
+        return TextField(
+          controller: _valCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'Zahl',
+            labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.border)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.teal)),
+          ),
+        );
+
+      case PropType.tags:
+        return TextField(
+          controller: _valCtrl,
+          style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'tag1, tag2, tag3 (komma-getrennt)',
+            labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.border)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.teal)),
+          ),
+        );
+
+      case PropType.select:
+        return TextField(
+          controller: _valCtrl,
+          style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'Ausgewählter Wert',
+            labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.border)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.teal)),
+          ),
+        );
+
+      default: // text
+        return TextField(
+          controller: _valCtrl,
+          style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+          decoration: const InputDecoration(
+            labelText: 'Wert',
+            labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.border)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: MFColors.teal)),
+          ),
+        );
+    }
   }
 }
 

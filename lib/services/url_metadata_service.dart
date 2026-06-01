@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
+import 'bgg_service.dart';
 
 class UrlMetadata {
   final String title;
@@ -39,6 +40,9 @@ class UrlMetadataService {
       }
       if (host.contains('anilist.co')) {
         return _fetchAniList(uri);
+      }
+      if (host.contains('boardgamegeek.com')) {
+        return _fetchBgg(url);
       }
 
       final response = await http
@@ -192,6 +196,41 @@ class UrlMetadataService {
       );
     } catch (_) {
       return _domainFallback(uri);
+    }
+  }
+
+  // ─── BoardGameGeek XML API ────────────────────────────────────────────────
+
+  static Future<UrlMetadata?> _fetchBgg(String url) async {
+    try {
+      final id = BggService.extractBggId(url);
+      if (id == null) return _domainFallback(Uri.parse(url));
+      final game = await BggService.fetchById(id);
+      if (game == null) return _domainFallback(Uri.parse(url));
+
+      final details = [
+        if (game.year.isNotEmpty) game.year,
+        if (game.playersLabel.isNotEmpty) game.playersLabel,
+        if (game.avgRating != null)
+          '⭐ ${game.avgRating!.toStringAsFixed(1)}/10',
+        if (game.categories.isNotEmpty) game.categories.take(3).join(', '),
+      ].join(' · ');
+
+      final desc = game.description.length > 400
+          ? '${game.description.substring(0, 400)}…'
+          : game.description;
+
+      return UrlMetadata(
+        title: game.name,
+        description: details.isNotEmpty ? '$details\n\n$desc' : desc,
+        image: game.image ?? game.thumbnail,
+        domain: 'boardgamegeek.com',
+        genres: game.categories,
+        score: game.avgRating != null ? (game.avgRating! * 10).round() : null,
+        mediaType: game.type == 'rpgitem' ? 'TTRPG' : 'BOARDGAME',
+      );
+    } catch (_) {
+      return _domainFallback(Uri.parse(url));
     }
   }
 

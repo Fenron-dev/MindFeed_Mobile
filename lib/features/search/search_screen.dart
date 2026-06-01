@@ -100,7 +100,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => context.pop(),
+            onPressed: () => context.go(AppRoutes.feed),
             child: const Text('Abbrechen',
                 style: TextStyle(color: MFColors.textSecondary)),
           ),

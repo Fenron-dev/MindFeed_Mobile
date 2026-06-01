@@ -110,10 +110,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     setState(() {
       _parsedTags = TagParser.parse(_bodyCtrl.text);
     });
-    if (_autoSave && _bodyCtrl.text.trim().isNotEmpty) {
+    if (_autoSave && (_bodyCtrl.text.trim().isNotEmpty || _pendingImages.isNotEmpty)) {
       _autoSaveDebounce?.cancel();
       _autoSaveDebounce = Timer(const Duration(seconds: 3), () {
-        if (mounted && _bodyCtrl.text.trim().isNotEmpty && !_isSaving) _save();
+        if (mounted && !_isSaving) _save();
       });
     }
     _scheduleUrlCheck();
@@ -331,7 +331,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Future<void> _save() async {
     final rawBody = _bodyCtrl.text.trim();
-    if (rawBody.isEmpty) return;
+    if (rawBody.isEmpty && _pendingImages.isEmpty && _recordedAudioPath == null) return;
 
     setState(() => _isSaving = true);
 
@@ -347,7 +347,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     final cleanBody = detectedUrl != null
         ? rawBody.replaceAll(detectedUrl, '').trim()
         : rawBody;
-    final finalBody = cleanBody.isEmpty ? 'Link-Verweis' : cleanBody;
+    final finalBody = cleanBody;
 
     // Titel: explizit > URL-Vorschau-Titel > aus Body
     final explicitTitle = _titleCtrl.text.trim();
@@ -369,6 +369,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             urlMediaType: _urlPreview?.mediaType,
           );
       await _saveAttachments(createdEntry.entry.id);
+
+      // Anhänge gespeichert → Entry touchen damit der Feed-Stream neu emittiert
+      // (Stream hört nur auf entries-Tabelle, nicht auf attachments)
+      if (_pendingImages.isNotEmpty || _recordedAudioPath != null) {
+        await ref.read(entryRepositoryProvider).updateEntry(createdEntry.entry.id);
+      }
 
       // Auto-KI Anreicherung wenn Toggle aktiv
       if (_autoAi) {
@@ -416,7 +422,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canSave = _bodyCtrl.text.trim().isNotEmpty && !_isSaving;
+    final canSave = (_bodyCtrl.text.trim().isNotEmpty || _pendingImages.isNotEmpty || _recordedAudioPath != null) && !_isSaving;
 
     return Scaffold(
       backgroundColor: MFColors.bg,

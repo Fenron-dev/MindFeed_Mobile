@@ -92,12 +92,12 @@ class EntryRepository {
     final hasUrl = sourceUrl != null && sourceUrl.isNotEmpty;
     final resolvedType = hasUrl ? 'link' : type;
 
-    // Titel: URL-Titel bevorzugen, dann explizit, dann aus Body
+    // Titel: explizit, dann URL-Titel — nie automatisch aus Body extrahieren
     final resolvedTitle = (title != null && title.trim().isNotEmpty)
         ? title.trim()
         : (urlTitle != null && urlTitle.isNotEmpty)
             ? urlTitle
-            : _extractTitle(body);
+            : null;
 
     final companion = EntriesCompanion(
       id: Value(id),
@@ -280,10 +280,5 @@ class EntryRepository {
     return result;
   }
 
-  String _extractTitle(String body) {
-    final firstLine = body.split('\n').first.replaceAll(RegExp(r'[#*`_]'), '').trim();
-    if (firstLine.isEmpty) return 'Neue Aufzeichnung';
-    return firstLine.length > 50 ? '${firstLine.substring(0, 50)}…' : firstLine;
-  }
 }
 
