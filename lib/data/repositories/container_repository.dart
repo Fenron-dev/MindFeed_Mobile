@@ -26,7 +26,14 @@ class ContainerRepository {
 
   Stream<List<ContainerWithChildren>> watchTree(String kind) {
     return containerDao.watchByKind(kind).asyncMap((flat) async {
-      return _buildTree(flat, null);
+      // Counts parallel laden
+      final counts = await Future.wait(
+        flat.map((c) => entryDao.countByContainer(c.id)),
+      );
+      final countMap = {
+        for (var i = 0; i < flat.length; i++) flat[i].id: counts[i]
+      };
+      return _buildTree(flat, null, countMap);
     });
   }
 
@@ -64,13 +71,13 @@ class ContainerRepository {
   Future<void> delete(String id) => containerDao.deleteById(id);
 
   List<ContainerWithChildren> _buildTree(
-      List<Container> all, String? parentId) {
+      List<Container> all, String? parentId, Map<String, int> counts) {
     return all
         .where((c) => c.parentId == parentId)
         .map((c) => ContainerWithChildren(
               container: c,
-              children: _buildTree(all, c.id),
-              entryCount: 0, // TODO: count via DAO
+              children: _buildTree(all, c.id, counts),
+              entryCount: counts[c.id] ?? 0,
             ))
         .toList();
   }

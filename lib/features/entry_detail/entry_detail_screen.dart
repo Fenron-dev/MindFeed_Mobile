@@ -8,6 +8,7 @@ import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
+import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
 
@@ -297,6 +298,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     ),
                   ),
                 ],
+
+                // Backlinks
+                _BacklinksSection(entryId: entry.id),
               ],
             ),
           ),
@@ -656,4 +660,65 @@ class _AttachmentTile extends StatelessWidget {
           ),
         ]),
       );
+}
+
+// ─── Backlinks ────────────────────────────────────────────────────────────────
+class _BacklinksSection extends ConsumerWidget {
+  final String entryId;
+  const _BacklinksSection({required this.entryId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(backlinksProvider(entryId));
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (backlinks) {
+        if (backlinks.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 20),
+            Row(children: [
+              const Icon(Icons.link_rounded, size: 13, color: MFColors.textMuted),
+              const SizedBox(width: 6),
+              Text(
+                'VERKNÜPFT MIT DIESEM EINTRAG'.toUpperCase(),
+                style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: MFColors.textMuted,
+                    letterSpacing: 1.2),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  '${backlinks.length}',
+                  style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: MFColors.teal),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            ...backlinks.map((bl) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: EntryCard(
+                    item: bl,
+                    compact: true,
+                    onTap: () => context.push(
+                        AppRoutes.entryDetailPath(bl.entry.id)),
+                  ),
+                )),
+          ],
+        );
+      },
+    );
+  }
 }

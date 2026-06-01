@@ -73,4 +73,11 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
         .get();
     return result.isEmpty ? null : result.first;
   }
+
+  Future<int> countByContainer(String containerId) async {
+    final rows = await (select(entryContainers)
+          ..where((ec) => ec.containerId.equals(containerId)))
+        .get();
+    return rows.length;
+  }
 }

@@ -213,9 +213,29 @@ class _ContainerTileState extends State<_ContainerTile> {
           visualDensity: VisualDensity.compact,
           leading: Icon(_iconFor(c.icon), size: 17,
               color: _parseColor(c.color)),
-          title: Text(c.name,
-              style: const TextStyle(
-                  fontSize: 13, color: MFColors.textPrimary)),
+          title: Row(children: [
+            Expanded(
+              child: Text(c.name,
+                  style: const TextStyle(
+                      fontSize: 13, color: MFColors.textPrimary)),
+            ),
+            if (widget.node.entryCount > 0)
+              Container(
+                margin: const EdgeInsets.only(left: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: MFColors.border,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  '${widget.node.entryCount}',
+                  style: const TextStyle(
+                      fontSize: 10,
+                      color: MFColors.textMuted,
+                      fontFamily: 'monospace'),
+                ),
+              ),
+          ]),
           trailing: hasChildren
               ? GestureDetector(
                   onTap: () =>

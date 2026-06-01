@@ -7,6 +7,7 @@ import '../features/search/search_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/entry_detail/entry_detail_screen.dart';
 import '../features/capture/capture_screen.dart';
+import '../features/containers/container_detail_screen.dart';
 import '../widgets/app_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -38,6 +39,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.entryDetail,
         builder: (context, state) => EntryDetailScreen(
           entryId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.containerDetail,
+        builder: (context, state) => ContainerDetailScreen(
+          containerId: state.pathParameters['id']!,
         ),
       ),
 
