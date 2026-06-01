@@ -7,12 +7,14 @@ class EntryCard extends StatelessWidget {
   final EntryWithDetails item;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool compact;
 
   const EntryCard({
     super.key,
     required this.item,
     required this.onTap,
     this.onLongPress,
+    this.compact = false,
   });
 
   @override
@@ -21,6 +23,54 @@ class EntryCard extends StatelessWidget {
     final isPinned = entry.pinned;
     final isInbox = entry.status == 'inbox';
     final isDone = entry.status == 'done';
+
+    if (compact) {
+      return InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isPinned ? const Color(0xFF831843) : MFColors.border,
+            ),
+          ),
+          child: Row(children: [
+            _TypeIcon(entry.type),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                entry.title ?? _stripMarkdown(entry.body),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDone ? MFColors.textMuted : MFColors.textPrimary,
+                  decoration: isDone ? TextDecoration.lineThrough : null,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              DateFormat('dd.MM.yy').format(entry.createdAt.toLocal()),
+              style: const TextStyle(
+                  fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
+            ),
+            if (isPinned) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.push_pin_rounded, size: 12, color: MFColors.pinned),
+            ],
+            if (isInbox) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.inbox_outlined, size: 12, color: MFColors.inbox),
+            ],
+          ]),
+        ),
+      );
+    }
 
     // Cover-Bild aus Properties (og_image)
     final coverUrl = item.properties

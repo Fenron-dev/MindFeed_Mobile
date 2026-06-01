@@ -1,3 +1,4 @@
+import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 
 class UrlMetadata {
@@ -17,18 +18,14 @@ class UrlMetadata {
 class UrlMetadataService {
   static final _urlPattern = RegExp(r'https?://\S+', caseSensitive: false);
 
-  /// Erkennt die erste URL im Text.
   static String? extractUrl(String text) =>
       _urlPattern.firstMatch(text)?.group(0);
 
-  /// Holt OpenGraph-Metadaten für eine URL.
-  /// Gibt null zurück bei Fehlern (keine Exception nach oben).
   static Future<UrlMetadata?> fetch(String url) async {
     try {
       final uri = Uri.parse(url.startsWith('http') ? url : 'https://$url');
       final host = uri.host.toLowerCase();
 
-      // YouTube: oEmbed statt HTML-Scraping (YouTube blockiert Scraping)
       if (host.contains('youtube.com') || host.contains('youtu.be')) {
         return _fetchYoutube(uri);
       }
@@ -36,21 +33,51 @@ class UrlMetadataService {
       final response = await http
           .get(uri, headers: {
             'User-Agent':
-                'Mozilla/5.0 (compatible; MindFeed/1.0; +https://github.com/Fenron-dev)',
-            'Accept': 'text/html',
+                'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
           })
-          .timeout(const Duration(seconds: 6));
+          .timeout(const Duration(seconds: 8));
 
-      if (!response.ok) return null;
-      return _parseOg(response.body, host);
+      if (response.statusCode < 200 || response.statusCode >= 400) {
+        return _domainFallback(uri);
+      }
+
+      final doc = html_parser.parse(response.body);
+
+      String? og(String prop) =>
+          doc.querySelector('meta[property="og:$prop"]')?.attributes['content'] ??
+          doc.querySelector('meta[name="og:$prop"]')?.attributes['content'];
+
+      final title = og('title') ??
+          doc.querySelector('title')?.text.trim() ??
+          doc.querySelector('meta[name="title"]')?.attributes['content'];
+
+      final desc = og('description') ??
+          doc.querySelector('meta[name="description"]')?.attributes['content'];
+
+      final image = og('image');
+
+      return UrlMetadata(
+        title: (title?.isNotEmpty == true) ? title!.trim() : _hostLabel(uri),
+        description: desc?.trim() ?? '',
+        image: image,
+        domain: host.replaceFirst('www.', ''),
+      );
     } catch (_) {
-      return null;
+      try {
+        return _domainFallback(Uri.parse(url));
+      } catch (_) {
+        return null;
+      }
     }
   }
 
+  // ─── YouTube oEmbed ────────────────────────────────────────────────────────
+
   static Future<UrlMetadata?> _fetchYoutube(Uri uri) async {
     try {
-      // Video-ID extrahieren
       String? vid = uri.queryParameters['v'];
       if (vid == null && uri.host.contains('youtu.be')) {
         vid = uri.pathSegments.firstOrNull;
@@ -58,17 +85,24 @@ class UrlMetadataService {
       if (vid == null) return null;
       if (vid.contains('?')) vid = vid.split('?').first;
 
-      final oembedUri = Uri.parse(
-          'https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=$vid&format=json');
-      final res = await http.get(oembedUri)
-          .timeout(const Duration(seconds: 5));
-      if (!res.ok) return null;
+      final res = await http
+          .get(Uri.parse(
+              'https://www.youtube.com/oembed'
+              '?url=https://www.youtube.com/watch?v=$vid&format=json'))
+          .timeout(const Duration(seconds: 6));
 
-      // Manuelles JSON-Parsing (kein dart:convert nötig für diesen kleinen Fall)
-      final body = res.body;
-      final title = _jsonStr(body, 'title') ?? 'YouTube Video';
-      final author = _jsonStr(body, 'author_name') ?? 'YouTube';
-      final thumb = _jsonStr(body, 'thumbnail_url') ??
+      if (res.statusCode != 200) {
+        return UrlMetadata(
+          title: 'YouTube Video',
+          description: '',
+          image: 'https://img.youtube.com/vi/$vid/hqdefault.jpg',
+          domain: 'youtube.com',
+        );
+      }
+
+      final title = _jsonStr(res.body, 'title') ?? 'YouTube Video';
+      final author = _jsonStr(res.body, 'author_name') ?? 'YouTube';
+      final thumb = _jsonStr(res.body, 'thumbnail_url') ??
           'https://img.youtube.com/vi/$vid/hqdefault.jpg';
 
       return UrlMetadata(
@@ -82,56 +116,30 @@ class UrlMetadataService {
     }
   }
 
-  static UrlMetadata _parseOg(String html, String domain) {
-    String? og(String prop) {
-      final patterns = [
-        RegExp(
-            '<meta[^>]*property=["\']og:$prop["\'][^>]*content=["\']([^"\']+)["\']',
-            caseSensitive: false),
-        RegExp(
-            '<meta[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:$prop["\']',
-            caseSensitive: false),
-      ];
-      for (final p in patterns) {
-        final m = p.firstMatch(html);
-        if (m != null) return _decodeHtml(m.group(1)!.trim());
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  static UrlMetadata _domainFallback(Uri uri) => UrlMetadata(
+        title: _hostLabel(uri),
+        description: '',
+        domain: uri.host.replaceFirst('www.', ''),
+      );
+
+  static String _hostLabel(Uri uri) {
+    final host = uri.host.replaceFirst('www.', '');
+    // Versuche einen lesbaren Titel aus dem Pfad zu bauen
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.isNotEmpty) {
+      final last = segments.last.replaceAll(RegExp(r'[-_]'), ' ');
+      if (last.length > 3 && !last.contains('.')) {
+        final readable = last.split(' ')
+            .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
+            .join(' ');
+        return '$readable — $host';
       }
-      return null;
     }
-
-    final titleMeta = RegExp(r'<title>([^<]+)</title>', caseSensitive: false)
-        .firstMatch(html)
-        ?.group(1)
-        ?.trim();
-
-    final descMeta = RegExp(
-            r'''<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']''',
-            caseSensitive: false)
-        .firstMatch(html)
-        ?.group(1)
-        ?.trim();
-
-    return UrlMetadata(
-      title: og('title') ?? titleMeta ?? 'Link: $domain',
-      description: og('description') ?? descMeta ?? '',
-      image: og('image'),
-      domain: domain,
-    );
+    return host;
   }
 
-  static String? _jsonStr(String json, String key) {
-    final m = RegExp('"$key"\\s*:\\s*"([^"]+)"').firstMatch(json);
-    return m?.group(1);
-  }
-
-  static String _decodeHtml(String s) => s
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'");
-}
-
-extension on http.Response {
-  bool get ok => statusCode >= 200 && statusCode < 300;
+  static String? _jsonStr(String json, String key) =>
+      RegExp('"$key"\\s*:\\s*"([^"]+)"').firstMatch(json)?.group(1);
 }

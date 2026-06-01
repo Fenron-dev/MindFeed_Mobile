@@ -65,4 +65,12 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
         .get();
     return rows.map((r) => r.containerId).toList();
   }
+
+  Future<Entry?> findByTitle(String title) async {
+    final result = await (select(entries)
+          ..where((e) => e.title.lower().equals(title.toLowerCase()))
+          ..limit(1))
+        .get();
+    return result.isEmpty ? null : result.first;
+  }
 }

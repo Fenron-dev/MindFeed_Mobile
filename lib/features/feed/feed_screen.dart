@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
+import '../../data/repositories/entry_repository.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
@@ -18,6 +20,11 @@ class FeedScreen extends ConsumerStatefulWidget {
 class _FeedScreenState extends ConsumerState<FeedScreen> {
   final _scrollController = ScrollController();
   bool _barsVisible = true;
+  String _viewMode = 'view_cards'; // 'view_list' | 'view_cards' | 'view_grid'
+  String _sortBy = 'date_desc';    // 'date_desc' | 'name_asc'
+  int _filterIndex = 0;            // 0=Alle 1=Inbox 2=Angeheftet
+
+  static const _filterStatuses = ['all', 'inbox', 'pinned'];
 
   @override
   void initState() {
@@ -39,6 +46,35 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     } else if (direction == ScrollDirection.forward && !_barsVisible) {
       setState(() => _barsVisible = true);
     }
+  }
+
+  void _onMenuAction(String value) {
+    setState(() {
+      switch (value) {
+        case 'view_list': _viewMode = 'view_list'; break;
+        case 'view_cards': _viewMode = 'view_cards'; break;
+        case 'view_grid': _viewMode = 'view_grid'; break;
+        case 'sort_date': _sortBy = 'date_desc'; break;
+        case 'sort_name': _sortBy = 'name_asc'; break;
+      }
+    });
+  }
+
+  List<EntryWithDetails> _filterAndSort(List<EntryWithDetails> entries) {
+    final status = _filterStatuses[_filterIndex];
+    var result = entries.where((e) => switch (status) {
+      'inbox'  => e.entry.status == 'inbox',
+      'pinned' => e.entry.pinned,
+      _        => true,
+    }).toList();
+
+    if (_sortBy == 'name_asc') {
+      result.sort((a, b) =>
+          (a.entry.title ?? '').toLowerCase()
+              .compareTo((b.entry.title ?? '').toLowerCase()));
+    }
+    // date_desc: bereits vom Provider sortiert
+    return result;
   }
 
   @override
@@ -72,18 +108,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     borderRadius: BorderRadius.circular(12),
                     side: const BorderSide(color: MFColors.border),
                   ),
-                  onSelected: (value) {
-                    // TODO: Aktionen implementieren
-                  },
+                  onSelected: _onMenuAction,
                   itemBuilder: (_) => [
-                    _menuItem('view_list', Icons.view_list_outlined, 'Listenansicht'),
-                    _menuItem('view_cards', Icons.dashboard_outlined, 'Kartenansicht'),
-                    _menuItem('view_grid', Icons.grid_view_outlined, 'Thumbnail-Ansicht'),
+                    _menuItem('view_list',  Icons.view_list_outlined,   'Listenansicht',      _viewMode == 'view_list'),
+                    _menuItem('view_cards', Icons.dashboard_outlined,   'Kartenansicht',      _viewMode == 'view_cards'),
+                    _menuItem('view_grid',  Icons.grid_view_outlined,   'Thumbnail-Ansicht',  _viewMode == 'view_grid'),
                     const PopupMenuDivider(),
-                    _menuItem('sort_date', Icons.access_time_outlined, 'Sortierung: Datum'),
-                    _menuItem('sort_name', Icons.sort_by_alpha_outlined, 'Sortierung: Name'),
-                    const PopupMenuDivider(),
-                    _menuItem('filter', Icons.tune_outlined, 'Filter & Quickfilter…'),
+                    _menuItem('sort_date',  Icons.access_time_outlined, 'Sortierung: Datum',  _sortBy == 'date_desc'),
+                    _menuItem('sort_name',  Icons.sort_by_alpha_outlined,'Sortierung: Name',  _sortBy == 'name_asc'),
                   ],
                 ),
               ],
@@ -92,7 +124,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
       body: Column(
         children: [
-          if (_barsVisible) const _QuickFilterBar(),
+          if (_barsVisible)
+            _QuickFilterBar(
+              selectedIndex: _filterIndex,
+              onChanged: (i) => setState(() => _filterIndex = i),
+            ),
           Expanded(
             child: feedAsync.when(
               loading: () => const Center(
@@ -102,12 +138,34 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 child: Text('Fehler: $err',
                     style: const TextStyle(color: Colors.red)),
               ),
-              data: (entries) {
+              data: (allEntries) {
+                final entries = _filterAndSort(allEntries);
                 if (entries.isEmpty) {
                   return _EmptyFeed(
                     onCapture: () => context.push(AppRoutes.capture),
                   );
                 }
+
+                if (_viewMode == 'view_grid') {
+                  return GridView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 0.8,
+                    ),
+                    itemCount: entries.length,
+                    itemBuilder: (ctx, i) => _GridCard(
+                      item: entries[i],
+                      onTap: () => context.push(
+                        AppRoutes.entryDetailPath(entries[i].entry.id),
+                      ),
+                    ),
+                  );
+                }
+
                 return ListView.separated(
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
@@ -115,6 +173,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (ctx, i) => EntryCard(
                     item: entries[i],
+                    compact: _viewMode == 'view_list',
                     onTap: () => context.push(
                       AppRoutes.entryDetailPath(entries[i].entry.id),
                     ),
@@ -139,64 +198,173 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 }
 
-PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
+PopupMenuItem<String> _menuItem(
+    String value, IconData icon, String label, [bool active = false]) =>
     PopupMenuItem(
       value: value,
       child: Row(children: [
-        Icon(icon, size: 18, color: MFColors.textSecondary),
+        Icon(icon, size: 18,
+            color: active ? MFColors.teal : MFColors.textSecondary),
         const SizedBox(width: 12),
-        Text(label,
-            style: const TextStyle(
-                color: MFColors.textPrimary, fontSize: 13)),
+        Expanded(
+          child: Text(label,
+              style: TextStyle(
+                  color: active ? MFColors.teal : MFColors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
+        ),
+        if (active)
+          const Icon(Icons.check_rounded, size: 16, color: MFColors.teal),
       ]),
     );
 
 // ─── Schnellfilter-Leiste ────────────────────────────────────────────────────
-class _QuickFilterBar extends StatefulWidget {
-  const _QuickFilterBar();
+class _QuickFilterBar extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
 
-  @override
-  State<_QuickFilterBar> createState() => _QuickFilterBarState();
-}
+  const _QuickFilterBar({
+    required this.selectedIndex,
+    required this.onChanged,
+  });
 
-class _QuickFilterBarState extends State<_QuickFilterBar> {
-  int _selected = 0;
   static const _filters = ['Alle', 'Inbox', 'Angeheftet'];
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        itemCount: _filters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
-        itemBuilder: (_, i) {
-          final active = i == _selected;
-          return ChoiceChip(
-            label: Text(
-              _filters[i],
-              style: TextStyle(
-                fontSize: 12,
-                color: active ? MFColors.teal : MFColors.textSecondary,
-                fontWeight: active ? FontWeight.bold : FontWeight.w500,
+    // SingleChildScrollView + Row: Row misst Chips sofort korrekt (kein Clip).
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Row(
+        children: _filters.asMap().entries.map((entry) {
+          final i = entry.key;
+          final label = entry.value;
+          final active = i == selectedIndex;
+          return Padding(
+            padding: EdgeInsets.only(right: i < _filters.length - 1 ? 6 : 0),
+            child: GestureDetector(
+              onTap: () => onChanged(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: active ? MFColors.tealBg : MFColors.surface,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(
+                    color: active ? MFColors.tealDark : MFColors.border,
+                  ),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: active
+                        ? MFColors.teal
+                        : MFColors.textSecondary,
+                    fontWeight:
+                        active ? FontWeight.bold : FontWeight.w500,
+                  ),
+                ),
               ),
             ),
-            selected: active,
-            onSelected: (_) => setState(() => _selected = i),
-            backgroundColor: MFColors.surface,
-            selectedColor: MFColors.tealBg,
-            checkmarkColor: MFColors.teal,
-            side: BorderSide(
-              color: active ? MFColors.tealDark : MFColors.border,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-            visualDensity: VisualDensity.compact,
-            showCheckmark: false,
           );
-        },
+        }).toList(),
       ),
+    );
+  }
+}
+
+// ─── Grid-Karte (Thumbnail-Ansicht) ──────────────────────────────────────────
+class _GridCard extends StatelessWidget {
+  final EntryWithDetails item;
+  final VoidCallback onTap;
+  const _GridCard({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = item.entry;
+    final coverUrl = item.properties
+        .where((p) =>
+            ['og_image', 'cover_image', 'cover', 'bild'].contains(p.key.toLowerCase()))
+        .firstOrNull
+        ?.value;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: MFColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: entry.pinned ? const Color(0xFF831843) : MFColors.border,
+            width: entry.pinned ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+              child: coverUrl != null
+                  ? Image.network(
+                      coverUrl,
+                      width: double.infinity,
+                      height: 90,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _placeholder(entry.type),
+                    )
+                  : _placeholder(entry.type),
+            ),
+            // Text
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (entry.title != null && entry.title!.isNotEmpty)
+                      Text(
+                        entry.title!,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: MFColors.textPrimary),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    const Spacer(),
+                    Text(
+                      DateFormat('dd.MM.yy').format(entry.createdAt.toLocal()),
+                      style: const TextStyle(
+                          fontSize: 10, color: MFColors.textMuted,
+                          fontFamily: 'monospace'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder(String type) {
+    final (icon, color) = switch (type) {
+      'link'  => (Icons.link_rounded,     const Color(0xFF60A5FA)),
+      'image' => (Icons.image_outlined,   const Color(0xFFA78BFA)),
+      'audio' => (Icons.mic_outlined,     const Color(0xFFC084FC)),
+      _       => (Icons.notes_rounded,    MFColors.textMuted),
+    };
+    return Container(
+      width: double.infinity,
+      height: 90,
+      color: MFColors.surfaceAlt,
+      child: Icon(icon, size: 28, color: color),
     );
   }
 }

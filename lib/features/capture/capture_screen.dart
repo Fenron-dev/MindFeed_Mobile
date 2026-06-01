@@ -30,6 +30,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   // Wikilink-Autocomplete
   List<EntryWithDetails> _wikilinkSuggestions = [];
+  bool _wikilinkLoading = false;
   Timer? _wikilinkDebounce;
   String? _partialWikilink; // Text nach [[
 
@@ -70,18 +71,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     // Letztes [[ das kein ]] danach hat → aktive Wikilink-Eingabe
     final openIdx = text.lastIndexOf('[[');
     if (openIdx == -1) {
-      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
       return;
     }
     final afterOpen = text.substring(openIdx + 2);
     if (afterOpen.contains(']]')) {
-      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
       return;
     }
 
     final partial = afterOpen.trim();
     if (partial == _partialWikilink) return;
     _partialWikilink = partial;
+    setState(() => _wikilinkLoading = true); // sofort Ladeindikator zeigen
 
     _wikilinkDebounce?.cancel();
     _wikilinkDebounce = Timer(const Duration(milliseconds: 180), () async {
@@ -89,10 +91,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           .read(entryRepositoryProvider)
           .search(partial.isEmpty ? '' : partial);
       if (mounted) {
-        setState(() => _wikilinkSuggestions = results
-            .where((e) => e.entry.id != '') // alle zeigen
-            .take(8)
-            .toList());
+        setState(() {
+          _wikilinkSuggestions = results.take(8).toList();
+          _wikilinkLoading = false;
+        });
       }
     });
   }
@@ -292,7 +294,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           ),
 
           // Wikilink-Autocomplete Suggestion Bar
-          if (_wikilinkSuggestions.isNotEmpty)
+          if (_wikilinkSuggestions.isNotEmpty || _wikilinkLoading)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
@@ -302,12 +304,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(left: 4, bottom: 3),
-                    child: Text('Wikilink einfügen:',
-                        style: TextStyle(
-                            fontSize: 10, color: MFColors.textMuted,
-                            fontFamily: 'monospace')),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 3),
+                    child: Row(children: [
+                      const Text('Wikilink einfügen:',
+                          style: TextStyle(
+                              fontSize: 10, color: MFColors.textMuted,
+                              fontFamily: 'monospace')),
+                      if (_wikilinkLoading) ...[
+                        const SizedBox(width: 6),
+                        const SizedBox(
+                          width: 8, height: 8,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 1.5, color: MFColors.teal),
+                        ),
+                      ],
+                    ]),
                   ),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,

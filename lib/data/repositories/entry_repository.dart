@@ -136,8 +136,16 @@ class EntryRepository {
       }
     }
 
-    // Wikilinks als EntryLinks speichern (Zielauflösung kommt in Phase 2)
-    WikilinkParser.parse(body); // bereits extrahiert, Persistenz TODO
+    // Wikilinks auflösen und als EntryLinks persistieren
+    final wikilinkTitles = WikilinkParser.parse(body);
+    if (wikilinkTitles.isNotEmpty) {
+      final resolvedIds = <String>[];
+      for (final t in wikilinkTitles) {
+        final target = await entryDao.findByTitle(t);
+        if (target != null) resolvedIds.add(target.id);
+      }
+      await propertyDao.setOutgoingLinks(id, resolvedIds);
+    }
 
     // Container-Zuordnungen
     if (containerIds.isNotEmpty) {
@@ -169,6 +177,14 @@ class EntryRepository {
 
     if (body != null) {
       await tagDao.setEntryTags(id, TagParser.parse(body));
+      // Wikilinks neu auflösen
+      final titles = WikilinkParser.parse(body);
+      final resolved = <String>[];
+      for (final t in titles) {
+        final target = await entryDao.findByTitle(t);
+        if (target != null) resolved.add(target.id);
+      }
+      await propertyDao.setOutgoingLinks(id, resolved);
     }
     if (containerIds != null) {
       await entryDao.setContainers(id, containerIds);

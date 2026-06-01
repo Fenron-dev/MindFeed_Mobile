@@ -27,4 +27,11 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
 
   Future<List<EntryLink>> getBacklinks(String entryId) =>
       (select(entryLinks)..where((l) => l.toId.equals(entryId))).get();
+
+  Future<void> setOutgoingLinks(String fromId, List<String> toIds) async {
+    await (delete(entryLinks)..where((l) => l.fromId.equals(fromId))).go();
+    for (final toId in toIds) {
+      await upsertLink(fromId, toId);
+    }
+  }
 }
