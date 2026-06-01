@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
+import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey;
 import '../../widgets/entry_card.dart';
@@ -187,12 +188,66 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 sliver: SliverList.separated(
                   itemCount: entries.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) => EntryCard(
-                    item: entries[i],
-                    compact: _viewMode == 'view_list',
-                    onTap: () => context.push(
-                        AppRoutes.entryDetailPath(entries[i].entry.id)),
-                  ),
+                  itemBuilder: (ctx, i) {
+                    final item = entries[i];
+                    return Dismissible(
+                      key: ValueKey(item.entry.id),
+                      // Rechts wischen → Erledigt
+                      background: _SwipeBg(
+                        color: const Color(0xFF14B8A6),
+                        icon: Icons.check_circle_outline,
+                        label: 'Erledigt',
+                        alignment: Alignment.centerLeft,
+                      ),
+                      // Links wischen → Archivieren
+                      secondaryBackground: _SwipeBg(
+                        color: const Color(0xFF6366F1),
+                        icon: Icons.archive_outlined,
+                        label: 'Archivieren',
+                        alignment: Alignment.centerRight,
+                      ),
+                      confirmDismiss: (dir) async {
+                        // Nicht wischen wenn bereits in diesem Status
+                        if (dir == DismissDirection.startToEnd &&
+                            item.entry.status == 'done') return false;
+                        if (dir == DismissDirection.endToStart &&
+                            item.entry.status == 'archived') return false;
+                        return true;
+                      },
+                      onDismissed: (dir) async {
+                        final newStatus = dir == DismissDirection.startToEnd
+                            ? 'done'
+                            : 'archived';
+                        final label = newStatus == 'done'
+                            ? 'Erledigt'
+                            : 'Archiviert';
+                        await ref
+                            .read(entryRepositoryProvider)
+                            .updateEntry(item.entry.id, status: newStatus);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                            content: Text(
+                                '${item.entry.title ?? 'Eintrag'} → $label'),
+                            action: SnackBarAction(
+                              label: 'Rückgängig',
+                              onPressed: () => ref
+                                  .read(entryRepositoryProvider)
+                                  .updateEntry(item.entry.id,
+                                      status: item.entry.status),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 4),
+                          ));
+                        }
+                      },
+                      child: EntryCard(
+                        item: item,
+                        compact: _viewMode == 'view_list',
+                        onTap: () => context.push(
+                            AppRoutes.entryDetailPath(item.entry.id)),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -207,6 +262,42 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       ),
     );
   }
+}
+
+// ─── Swipe-Hintergrund ────────────────────────────────────────────────────────
+class _SwipeBg extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String label;
+  final Alignment alignment;
+  const _SwipeBg({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.alignment,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        alignment: alignment,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 22),
+            const SizedBox(height: 3),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
 }
 
 PopupMenuItem<String> _menuItem(

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'core/constants.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
 import 'core/di.dart';
@@ -45,11 +47,50 @@ Future<void> _launchApp() async {
   );
 }
 
-class MindFeedApp extends ConsumerWidget {
+class MindFeedApp extends ConsumerStatefulWidget {
   const MindFeedApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MindFeedApp> createState() => _MindFeedAppState();
+}
+
+class _MindFeedAppState extends ConsumerState<MindFeedApp> {
+  @override
+  void initState() {
+    super.initState();
+    _initShareIntent();
+  }
+
+  void _initShareIntent() {
+    // App war geschlossen und wurde über Share Intent geöffnet
+    ReceiveSharingIntent.instance.getInitialMedia().then((media) {
+      final text = media
+          .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
+          .map((m) => m.path)
+          .firstOrNull;
+      if (text != null && text.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ref.read(routerProvider).push(
+              '${AppRoutes.capture}?sharedText=${Uri.encodeComponent(text)}');
+        });
+      }
+    });
+
+    // App war bereits offen
+    ReceiveSharingIntent.instance.getMediaStream().listen((media) {
+      final text = media
+          .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
+          .map((m) => m.path)
+          .firstOrNull;
+      if (text != null && text.isNotEmpty) {
+        ref.read(routerProvider).push(
+            '${AppRoutes.capture}?sharedText=${Uri.encodeComponent(text)}');
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
       title: 'MindFeed',

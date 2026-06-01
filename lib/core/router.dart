@@ -8,6 +8,7 @@ import '../features/settings/settings_screen.dart';
 import '../features/entry_detail/entry_detail_screen.dart';
 import '../features/capture/capture_screen.dart';
 import '../features/containers/container_detail_screen.dart';
+import '../features/containers/container_form_screen.dart';
 import '../widgets/app_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -19,7 +20,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.capture,
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const CaptureScreen(),
+          child: CaptureScreen(
+            initialText: state.uri.queryParameters['sharedText'] != null
+                ? Uri.decodeComponent(
+                    state.uri.queryParameters['sharedText']!)
+                : null,
+          ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             // Slide von rechts rein (Gmail-Compose Style)
             return SlideTransition(
@@ -45,6 +51,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.containerDetail,
         builder: (context, state) => ContainerDetailScreen(
           containerId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.containerNew,
+        builder: (context, state) {
+          final kind = state.uri.queryParameters['kind'] ?? 'project';
+          return ContainerFormScreen(initialKind: kind);
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.containerEdit,
+        builder: (context, state) => ContainerFormScreen(
+          editId: state.pathParameters['id'],
         ),
       ),
 

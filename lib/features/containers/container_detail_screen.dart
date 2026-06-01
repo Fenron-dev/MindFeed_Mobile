@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
+import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../features/feed/feed_provider.dart';
@@ -92,6 +93,53 @@ class _ContainerDetailScreenState
               ])
             : const SizedBox.shrink(),
         actions: [
+          // Bearbeiten-Button
+          if (container != null)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined,
+                  color: MFColors.textSecondary, size: 20),
+              tooltip: 'Bearbeiten',
+              onPressed: () =>
+                  context.push(AppRoutes.containerEditPath(container.id)),
+            ),
+          // Löschen-Button
+          if (container != null)
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: MFColors.textSecondary, size: 20),
+              tooltip: 'Löschen',
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    backgroundColor: MFColors.surface,
+                    title: const Text('Container löschen?',
+                        style: TextStyle(color: MFColors.textPrimary)),
+                    content: Text(
+                        '"${container.name}" wird gelöscht. '
+                        'Die enthaltenen Einträge bleiben erhalten.',
+                        style: const TextStyle(
+                            color: MFColors.textSecondary, fontSize: 13)),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Abbrechen',
+                              style: TextStyle(color: MFColors.textMuted))),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Löschen',
+                              style: TextStyle(color: Colors.redAccent))),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  await ref
+                      .read(containerRepositoryProvider)
+                      .delete(container.id);
+                  context.pop();
+                }
+              },
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.sort_outlined,
                 color: MFColors.textSecondary, size: 22),

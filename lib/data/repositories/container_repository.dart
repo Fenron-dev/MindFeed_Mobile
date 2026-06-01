@@ -70,6 +70,36 @@ class ContainerRepository {
 
   Future<void> delete(String id) => containerDao.deleteById(id);
 
+  Future<void> update(
+    String id, {
+    String? name,
+    String? description,
+    String? icon,
+    String? color,
+    String? filterTag,
+    String? filterStatus,
+    String? filterType,
+  }) async {
+    final all = await containerDao.watchAll().first;
+    final existing = all.firstWhere((c) => c.id == id);
+    await containerDao.upsert(ContainersCompanion(
+      id: Value(id),
+      kind: Value(existing.kind),
+      name: Value(name ?? existing.name),
+      description: Value(description ?? existing.description),
+      icon: Value(icon ?? existing.icon),
+      color: Value(color ?? existing.color),
+      filterTag: Value(filterTag ?? existing.filterTag),
+      filterStatus: Value(filterStatus ?? existing.filterStatus),
+      filterType: Value(filterType ?? existing.filterType),
+      parentId: Value(existing.parentId),
+      createdAt: Value(existing.createdAt),
+      archived: Value(existing.archived),
+      sortOrder: Value(existing.sortOrder),
+      viewMode: Value(existing.viewMode),
+    ));
+  }
+
   List<ContainerWithChildren> _buildTree(
       List<Container> all, String? parentId, Map<String, int> counts) {
     return all

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,9 +12,14 @@ import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
+import '../../services/openrouter_service.dart';
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
+
+const _storage = FlutterSecureStorage();
+const _keyApiKey = 'openrouter_api_key';
+const _keyAiModel = 'openrouter_model';
 
 class EntryDetailScreen extends ConsumerStatefulWidget {
   final String entryId;
@@ -25,6 +31,7 @@ class EntryDetailScreen extends ConsumerStatefulWidget {
 
 class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _isEditing = false;
+  bool _enriching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
 
@@ -100,6 +107,58 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       selection: TextSelection.collapsed(offset: newText.length),
     );
     setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+  }
+
+  Future<void> _enrichWithAi(String entryId, String body, String? title) async {
+    final apiKey = await _storage.read(key: _keyApiKey) ?? '';
+    if (apiKey.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Kein OpenRouter API-Key in Einstellungen gesetzt.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    setState(() => _enriching = true);
+    try {
+      final model = await _storage.read(key: _keyAiModel) ?? '';
+      final svc = OpenRouterService(
+        apiKey: apiKey,
+        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
+      );
+      final result = await svc.enrichEntry(body, existingTitle: title);
+
+      // Titel updaten falls KI einen besseren vorschlägt
+      if (result.title != null) {
+        await ref.read(entryRepositoryProvider).updateEntry(entryId, title: result.title);
+      }
+
+      // Tags in Body einfügen (werden auto-geparst)
+      if (result.tags.isNotEmpty) {
+        final current = (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? body;
+        final tagLine = result.tags.map((t) => '#$t').join(' ');
+        await ref.read(entryRepositoryProvider).updateEntry(entryId, body: '$current\n$tagLine');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('KI fertig: ${result.tags.length} Tags${result.title != null ? ", Titel verbessert" : ""}'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: MFColors.teal,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('KI-Fehler: $e'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red.shade900,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _enriching = false);
+    }
   }
 
   Future<void> _save() async {
@@ -237,12 +296,18 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 ),
                 onSelected: (v) async {
                   if (v == 'delete') await _delete();
+                  if (v == 'ai') await _enrichWithAi(entry.id, entry.body, entry.title);
                   if (v == 'done' || v == 'inbox' || v == 'archive') {
                     await ref.read(entryRepositoryProvider).updateEntry(
                         entry.id, status: v == 'archive' ? 'archived' : v);
                   }
                 },
                 itemBuilder: (_) => [
+                  _popItem('ai',
+                    _enriching ? Icons.hourglass_top_rounded : Icons.auto_awesome_outlined,
+                    _enriching ? 'KI läuft…' : 'KI anreichern',
+                    color: const Color(0xFF8B5CF6)),
+                  const PopupMenuDivider(),
                   if (entry.status != 'done')
                     _popItem('done', Icons.check_circle_outline, 'Erledigt'),
                   if (entry.status != 'inbox')

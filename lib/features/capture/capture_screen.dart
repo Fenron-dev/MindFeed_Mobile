@@ -1,14 +1,21 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../core/vault_manager.dart';
+import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/url_metadata_service.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({super.key});
+  final String? initialText;
+  const CaptureScreen({super.key, this.initialText});
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -34,6 +41,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Timer? _wikilinkDebounce;
   String? _partialWikilink; // Text nach [[
 
+  // Bild-Anhänge
+  final List<XFile> _pendingImages = [];
+
   // Capture-Optionen
   bool _autoSave = false;
   bool _autoAi = false;
@@ -43,6 +53,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     super.initState();
     _bodyCtrl.addListener(_onBodyChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.initialText != null && widget.initialText!.isNotEmpty) {
+        _bodyCtrl.text = widget.initialText!;
+        _onBodyChanged();
+      }
       _bodyFocus.requestFocus();
     });
   }
@@ -119,6 +133,80 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _urlDebounce = Timer(const Duration(milliseconds: 600), _checkUrl);
   }
 
+  Future<void> _pickImage() async {
+    final choice = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: MFColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 10, bottom: 12),
+            decoration: BoxDecoration(
+                color: MFColors.border,
+                borderRadius: BorderRadius.circular(99)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined,
+                color: MFColors.teal),
+            title: const Text('Kamera',
+                style: TextStyle(color: MFColors.textPrimary)),
+            onTap: () => Navigator.pop(context, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined,
+                color: MFColors.teal),
+            title: const Text('Galerie',
+                style: TextStyle(color: MFColors.textPrimary)),
+            onTap: () => Navigator.pop(context, ImageSource.gallery),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+    if (choice == null) return;
+    final picker = ImagePicker();
+    final image = await picker.pickImage(
+        source: choice, imageQuality: 85, maxWidth: 1920);
+    if (image != null && mounted) {
+      setState(() => _pendingImages.add(image));
+    }
+  }
+
+  Future<void> _saveAttachments(String entryId) async {
+    if (_pendingImages.isEmpty) return;
+    final attachmentsBase = await VaultManager.getAttachmentsPath();
+    final now = DateTime.now();
+    final subDir = Directory(
+        p.join(attachmentsBase, '${now.year}', now.month.toString().padLeft(2, '0')));
+    await subDir.create(recursive: true);
+
+    for (final img in _pendingImages) {
+      final ext = p.extension(img.path).toLowerCase().isEmpty
+          ? '.jpg'
+          : p.extension(img.path).toLowerCase();
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}$ext';
+      final destPath = p.join(subDir.path, fileName);
+      await File(img.path).copy(destPath);
+
+      final relPath = p.relative(destPath,
+          from: p.dirname(p.dirname(attachmentsBase)));
+      await ref.read(attachmentDaoProvider).upsert(AttachmentsCompanion(
+        id: drift.Value('att-${DateTime.now().millisecondsSinceEpoch}'),
+        entryId: drift.Value(entryId),
+        type: const drift.Value('image'),
+        mimeType: drift.Value(ext == '.png' ? 'image/png' : 'image/jpeg'),
+        localPath: drift.Value(relPath),
+        fileName: drift.Value(fileName),
+        fileSize: drift.Value(await File(destPath).length()),
+      ));
+    }
+  }
+
   Future<void> _checkUrl() async {
     final url = UrlMetadataService.extractUrl(_bodyCtrl.text);
     if (url == null || url == _lastCheckedUrl) return;
@@ -166,7 +254,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         : (_urlPreview?.title.isNotEmpty == true ? _urlPreview!.title : null);
 
     try {
-      await ref.read(entryRepositoryProvider).createEntry(
+      final createdEntry = await ref.read(entryRepositoryProvider).createEntry(
             body: finalBody,
             title: resolvedTitle,
             sourceUrl: detectedUrl,
@@ -178,6 +266,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             urlScore: _urlPreview?.score,
             urlMediaType: _urlPreview?.mediaType,
           );
+      await _saveAttachments(createdEntry.entry.id);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() => _isSaving = false);
@@ -459,10 +548,50 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
             ),
 
+          // Bild-Thumbnails
+          if (_pendingImages.isNotEmpty)
+            Container(
+              height: 72,
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: MFColors.border))),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                itemCount: _pendingImages.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => Stack(children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(_pendingImages[i].path),
+                      width: 56, height: 56, fit: BoxFit.cover,
+                    ),
+                  ),
+                  Positioned(
+                    top: 0, right: 0,
+                    child: GestureDetector(
+                      onTap: () =>
+                          setState(() => _pendingImages.removeAt(i)),
+                      child: Container(
+                        width: 18, height: 18,
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: const Icon(Icons.close,
+                            size: 12, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+
           // Toolbar
           _CaptureToolbar(
             onTitleToggle: () =>
                 setState(() => _showTitle = !_showTitle),
+            onImagePick: _pickImage,
           ),
         ],
       ),
@@ -492,7 +621,11 @@ class _TagPreviewChip extends StatelessWidget {
 
 class _CaptureToolbar extends StatelessWidget {
   final VoidCallback onTitleToggle;
-  const _CaptureToolbar({required this.onTitleToggle});
+  final VoidCallback onImagePick;
+  const _CaptureToolbar({
+    required this.onTitleToggle,
+    required this.onImagePick,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
@@ -502,10 +635,8 @@ class _CaptureToolbar extends StatelessWidget {
           border: Border(top: BorderSide(color: MFColors.border))),
         child: Row(children: [
           _TBtn(Icons.title_rounded, 'Titel', onTitleToggle),
-          _TBtn(Icons.link_rounded, 'Link einfügen', () {}),
-          _TBtn(Icons.image_outlined, 'Bild anhängen', () {}),
+          _TBtn(Icons.image_outlined, 'Bild anhängen', onImagePick),
           _TBtn(Icons.mic_outlined, 'Sprachaufnahme', () {}),
-          _TBtn(Icons.location_on_outlined, 'Standort', () {}),
           const Spacer(),
           _TBtn(Icons.tag_rounded, 'Tag', () {}),
         ]),

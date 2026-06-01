@@ -101,14 +101,16 @@ class MindFeedDrawer extends ConsumerWidget {
                       Navigator.pop(context);
                     },
                   ),
-                  _SectionHeader('BEREICHE'),
+                  _SectionHeaderWithAdd('BEREICHE',
+                      onAdd: () { context.push('${AppRoutes.containerNew}?kind=area'); Navigator.pop(context); }),
                   areasAsync.when(
                     loading: () => const _LoadingTile(),
                     error: (_, __) => const SizedBox.shrink(),
                     data: (tree) => _ContainerTree(
                         tree: tree, onTap: navigate),
                   ),
-                  _SectionHeader('PROJEKTE'),
+                  _SectionHeaderWithAdd('PROJEKTE',
+                      onAdd: () { context.push('${AppRoutes.containerNew}?kind=project'); Navigator.pop(context); }),
                   projectsAsync.when(
                     loading: () => const _LoadingTile(),
                     error: (_, __) => const SizedBox.shrink(),
@@ -116,7 +118,8 @@ class MindFeedDrawer extends ConsumerWidget {
                         ? const _EmptyHint('Noch keine Projekte')
                         : _ContainerTree(tree: tree, onTap: navigate),
                   ),
-                  _SectionHeader('SMART HUBS'),
+                  _SectionHeaderWithAdd('SMART HUBS',
+                      onAdd: () { context.push('${AppRoutes.containerNew}?kind=hub'); Navigator.pop(context); }),
                   hubsAsync.when(
                     loading: () => const _LoadingTile(),
                     error: (_, __) => const SizedBox.shrink(),
@@ -262,16 +265,30 @@ class _ContainerTileState extends State<_ContainerTile> {
 
 // ─── Hilfswidgets ─────────────────────────────────────────────────────────────
 
-class _SectionHeader extends StatelessWidget {
+class _SectionHeaderWithAdd extends StatelessWidget {
   final String label;
-  const _SectionHeader(this.label);
+  final VoidCallback onAdd;
+  const _SectionHeaderWithAdd(this.label, {required this.onAdd});
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 8, 2),
-        child: Text(label,
-            style: const TextStyle(
-                fontSize: 10, fontWeight: FontWeight.bold,
-                color: MFColors.textMuted, letterSpacing: 1.2)),
+        padding: const EdgeInsets.fromLTRB(16, 14, 4, 2),
+        child: Row(children: [
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.bold,
+                    color: MFColors.textMuted, letterSpacing: 1.2)),
+          ),
+          InkWell(
+            onTap: onAdd,
+            borderRadius: BorderRadius.circular(99),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.add_rounded,
+                  size: 15, color: MFColors.textMuted),
+            ),
+          ),
+        ]),
       );
 }
 

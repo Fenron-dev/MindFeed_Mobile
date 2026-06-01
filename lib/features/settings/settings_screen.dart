@@ -1,11 +1,16 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../main.dart' show onRestartApp;
 import '../../services/backup_service.dart';
+
+const _storage = FlutterSecureStorage();
+const _keyApiKey = 'openrouter_api_key';
+const _keyAiModel = 'openrouter_model';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -20,10 +25,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<BackupResult> _localBackups = [];
   bool _backupsLoaded = false;
 
+  // AI Settings
+  final _apiKeyCtrl = TextEditingController();
+  final _modelCtrl = TextEditingController();
+  bool _apiKeySaved = false;
+  bool _apiKeyVisible = false;
+
   @override
   void initState() {
     super.initState();
     _loadBackups();
+    _loadAiSettings();
+  }
+
+  @override
+  void dispose() {
+    _apiKeyCtrl.dispose();
+    _modelCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAiSettings() async {
+    final key = await _storage.read(key: _keyApiKey) ?? '';
+    final model = await _storage.read(key: _keyAiModel) ?? '';
+    if (mounted) {
+      setState(() {
+        _apiKeyCtrl.text = key;
+        _modelCtrl.text = model;
+        _apiKeySaved = key.isNotEmpty;
+      });
+    }
+  }
+
+  Future<void> _saveAiSettings() async {
+    await _storage.write(key: _keyApiKey, value: _apiKeyCtrl.text.trim());
+    await _storage.write(key: _keyAiModel, value: _modelCtrl.text.trim());
+    if (mounted) {
+      setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('AI-Einstellungen gespeichert.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
   Future<void> _loadBackups() async {
@@ -240,6 +283,151 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ]),
             ),
           ],
+
+          // ─── AI ───────────────────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('KI-ANREICHERUNG (OPENROUTER)'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.auto_awesome_outlined,
+                        size: 18, color: Color(0xFF8B5CF6)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('OpenRouter API',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: MFColors.textPrimary)),
+                        Text(
+                            _apiKeySaved
+                                ? 'API-Key gespeichert ✓'
+                                : 'API-Key nicht gesetzt',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: _apiKeySaved
+                                    ? MFColors.teal
+                                    : MFColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _apiKeyCtrl,
+                  obscureText: !_apiKeyVisible,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: MFColors.textPrimary,
+                      fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    labelText: 'API-Key (openrouter.ai)',
+                    labelStyle: const TextStyle(
+                        color: MFColors.textMuted, fontSize: 12),
+                    hintText: 'sk-or-...',
+                    hintStyle: const TextStyle(
+                        color: MFColors.textMuted, fontSize: 12),
+                    filled: true,
+                    fillColor: MFColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.teal),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                          _apiKeyVisible
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          size: 18,
+                          color: MFColors.textMuted),
+                      onPressed: () => setState(
+                          () => _apiKeyVisible = !_apiKeyVisible),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _modelCtrl,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: MFColors.textPrimary,
+                      fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    labelText: 'Modell (leer = kostenlos)',
+                    labelStyle: const TextStyle(
+                        color: MFColors.textMuted, fontSize: 12),
+                    hintText: 'meta-llama/llama-3.1-8b-instruct:free',
+                    hintStyle: const TextStyle(
+                        color: MFColors.textMuted, fontSize: 11),
+                    filled: true,
+                    fillColor: MFColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.teal),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _saveAiSettings,
+                    icon: const Icon(Icons.save_outlined, size: 16),
+                    label: const Text('Speichern',
+                        style: TextStyle(fontSize: 13)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MFColors.teal,
+                      foregroundColor: MFColors.bg,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Kostenloser Account auf openrouter.ai reicht aus. '
+                  'Free-Tier Modelle haben ein Rate-Limit.',
+                  style: TextStyle(fontSize: 10, color: MFColors.textMuted),
+                ),
+              ],
+            ),
+          ),
 
           // ─── Info ──────────────────────────────────────────────────────────
           const SizedBox(height: 28),
