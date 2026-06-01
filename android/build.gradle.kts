@@ -20,18 +20,20 @@ subprojects {
 }
 
 // JVM 17 für alle Subprojects erzwingen (löst receive_sharing_intent JVM-Konflikt)
+// Lazy APIs (plugins.withId + configureEach) statt afterEvaluate — vermeidet
+// "already evaluated" Fehler wenn evaluationDependsOn(":app") greift.
 subprojects {
-    afterEvaluate {
-        extensions.findByType<com.android.build.gradle.LibraryExtension>()?.apply {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension> {
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
                 targetCompatibility = JavaVersion.VERSION_17
             }
         }
-        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
-            compilerOptions {
-                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-            }
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 }
