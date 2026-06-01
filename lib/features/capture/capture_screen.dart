@@ -382,9 +382,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         if (apiKey.isNotEmpty) {
           try {
             final model = await _storage.read(key: _keyAiModel) ?? '';
+            final tempStr = await _storage.read(key: 'openrouter_temperature');
+            final tokStr = await _storage.read(key: 'openrouter_max_tokens');
             final svc = OpenRouterService(
               apiKey: apiKey,
               model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
+              temperature: double.tryParse(tempStr ?? '') ?? 0.3,
+              maxTokens: int.tryParse(tokStr ?? '') ?? 400,
             );
             final result = await svc.enrichEntry(
               createdEntry.entry.body,

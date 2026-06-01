@@ -25,10 +25,14 @@ class OpenRouterService {
 
   final String apiKey;
   final String model;
+  final double temperature;
+  final int maxTokens;
 
   const OpenRouterService({
     required this.apiKey,
     this.model = defaultModel,
+    this.temperature = 0.3,
+    this.maxTokens = 400,
   });
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
@@ -65,8 +69,8 @@ Regeln:
             'messages': [
               {'role': 'user', 'content': prompt},
             ],
-            'max_tokens': 400,
-            'temperature': 0.3,
+            'max_tokens': maxTokens,
+            'temperature': temperature,
           }),
         )
         .timeout(const Duration(seconds: 30));

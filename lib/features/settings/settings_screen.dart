@@ -9,10 +9,13 @@ import '../../domain/prop_type.dart';
 import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
+import '../../services/openrouter_service.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
+const _keyTemperature = 'openrouter_temperature';
+const _keyMaxTokens = 'openrouter_max_tokens';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -29,9 +32,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // AI Settings
   final _apiKeyCtrl = TextEditingController();
-  final _modelCtrl = TextEditingController();
   bool _apiKeySaved = false;
   bool _apiKeyVisible = false;
+  String _selectedModel = '';
+  double _temperature = 0.3;
+  int _maxTokens = 400;
+
+  // Modell-Picker
+  List<Map<String, dynamic>> _models = [];
+  bool _loadingModels = false;
+  bool _freeOnly = true;
+  String _modelSearch = '';
+
+  // Verbindungstest
+  String _testState = 'idle'; // idle | loading | ok | error
+  String _testError = '';
 
   @override
   void initState() {
@@ -43,25 +58,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
-    _modelCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadAiSettings() async {
     final key = await _storage.read(key: _keyApiKey) ?? '';
     final model = await _storage.read(key: _keyAiModel) ?? '';
+    final tempStr = await _storage.read(key: _keyTemperature);
+    final tokStr = await _storage.read(key: _keyMaxTokens);
     if (mounted) {
       setState(() {
         _apiKeyCtrl.text = key;
-        _modelCtrl.text = model;
         _apiKeySaved = key.isNotEmpty;
+        _selectedModel = model;
+        _temperature = double.tryParse(tempStr ?? '') ?? 0.3;
+        _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
       });
     }
   }
 
   Future<void> _saveAiSettings() async {
     await _storage.write(key: _keyApiKey, value: _apiKeyCtrl.text.trim());
-    await _storage.write(key: _keyAiModel, value: _modelCtrl.text.trim());
+    await _storage.write(key: _keyAiModel, value: _selectedModel);
+    await _storage.write(key: _keyTemperature, value: _temperature.toString());
+    await _storage.write(key: _keyMaxTokens, value: _maxTokens.toString());
     if (mounted) {
       setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -69,6 +89,74 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         behavior: SnackBarBehavior.floating,
       ));
     }
+  }
+
+  Future<void> _loadModels() async {
+    final key = _apiKeyCtrl.text.trim();
+    if (key.isEmpty) {
+      _showSnack('Bitte zuerst API-Key eingeben.', success: false);
+      return;
+    }
+    setState(() => _loadingModels = true);
+    try {
+      final models = await OpenRouterService.getModels(key);
+      if (mounted) setState(() { _models = models; _loadingModels = false; });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadingModels = false);
+        _showSnack('Modelle konnten nicht geladen werden: $e', success: false);
+      }
+    }
+  }
+
+  Future<void> _testConnection() async {
+    final key = _apiKeyCtrl.text.trim();
+    if (key.isEmpty) {
+      setState(() { _testState = 'error'; _testError = 'Kein API-Key eingegeben'; });
+      return;
+    }
+    setState(() { _testState = 'loading'; _testError = ''; });
+    try {
+      final svc = OpenRouterService(
+        apiKey: key,
+        model: _selectedModel.isNotEmpty ? _selectedModel : OpenRouterService.defaultModel,
+        temperature: 0.1,
+        maxTokens: 20,
+      );
+      await svc.enrichEntry('Test');
+      if (mounted) setState(() => _testState = 'ok');
+    } catch (e) {
+      if (mounted) setState(() { _testState = 'error'; _testError = e.toString(); });
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredModels {
+    return _models.where((m) {
+      final id = (m['id'] as String? ?? '').toLowerCase();
+      final name = (m['name'] as String? ?? '').toLowerCase();
+      final isFree = id.endsWith(':free') ||
+          ((m['pricing'] as Map?)?.entries.every(
+                (e) => e.value == '0' || e.value == null,
+              ) ??
+              false);
+      if (_freeOnly && !isFree) return false;
+      if (_modelSearch.isNotEmpty) {
+        final q = _modelSearch.toLowerCase();
+        if (!id.contains(q) && !name.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  String _priceLabel(Map<String, dynamic> m) {
+    final id = (m['id'] as String? ?? '');
+    final pricing = m['pricing'] as Map?;
+    final isFree = id.endsWith(':free') ||
+        (pricing?.entries.every((e) => e.value == '0' || e.value == null) ?? false);
+    if (isFree) return 'Free';
+    final p = double.tryParse(pricing?['prompt']?.toString() ?? '') ?? 0;
+    if (p > 0) return '\$${(p * 1000000).toStringAsFixed(2)}/M';
+    return '—';
   }
 
   Future<void> _loadBackups() async {
@@ -139,15 +227,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() => _restoreLoading = true);
     try {
       final db = ref.read(databaseProvider);
-      // restore() schreibt zuerst in Temp, schließt dann DB, benennt atomar um
+      // restore() schreibt Temp, schließt DB, benennt atomar um
       await BackupService.restore(zipPath, db);
-      if (mounted) {
-        _showSnack('Backup wiederhergestellt. App startet neu…',
-            success: true);
-        await Future.delayed(const Duration(milliseconds: 800));
-        // Awaited: onRestartApp ist Future<void> Function() — kein fire-and-forget
-        await onRestartApp?.call();
-      }
+      // Sofortiger Neustart — kein Delay nötig, da _AppRoot via setState
+      // einen neuen ProviderScope aufbaut statt runApp() erneut aufzurufen.
+      await onRestartApp?.call();
+      if (mounted) setState(() => _restoreLoading = false);
     } catch (e) {
       if (mounted) {
         setState(() => _restoreLoading = false);
@@ -302,6 +387,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Header
                 Row(children: [
                   Container(
                     width: 36, height: 36,
@@ -318,111 +404,335 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text('OpenRouter API',
-                            style: TextStyle(
-                                fontSize: 13,
+                            style: TextStyle(fontSize: 13,
                                 fontWeight: FontWeight.w600,
                                 color: MFColors.textPrimary)),
                         Text(
-                            _apiKeySaved
-                                ? 'API-Key gespeichert ✓'
-                                : 'API-Key nicht gesetzt',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: _apiKeySaved
-                                    ? MFColors.teal
-                                    : MFColors.textMuted)),
+                            _apiKeySaved ? 'API-Key gespeichert ✓' : 'API-Key nicht gesetzt',
+                            style: TextStyle(fontSize: 11,
+                                color: _apiKeySaved ? MFColors.teal : MFColors.textMuted)),
                       ],
                     ),
                   ),
                 ]),
                 const SizedBox(height: 14),
+
+                // API-Key
                 TextField(
                   controller: _apiKeyCtrl,
                   obscureText: !_apiKeyVisible,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: MFColors.textPrimary,
-                      fontFamily: 'monospace'),
+                  style: const TextStyle(fontSize: 13,
+                      color: MFColors.textPrimary, fontFamily: 'monospace'),
                   decoration: InputDecoration(
                     labelText: 'API-Key (openrouter.ai)',
-                    labelStyle: const TextStyle(
-                        color: MFColors.textMuted, fontSize: 12),
+                    labelStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
                     hintText: 'sk-or-...',
-                    hintStyle: const TextStyle(
-                        color: MFColors.textMuted, fontSize: 12),
-                    filled: true,
-                    fillColor: MFColors.bg,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.teal),
-                    ),
+                    hintStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
+                    filled: true, fillColor: MFColors.bg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.teal)),
                     suffixIcon: IconButton(
                       icon: Icon(
-                          _apiKeyVisible
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          size: 18,
-                          color: MFColors.textMuted),
-                      onPressed: () => setState(
-                          () => _apiKeyVisible = !_apiKeyVisible),
+                          _apiKeyVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          size: 18, color: MFColors.textMuted),
+                      onPressed: () => setState(() => _apiKeyVisible = !_apiKeyVisible),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _modelCtrl,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: MFColors.textPrimary,
-                      fontFamily: 'monospace'),
+                const SizedBox(height: 14),
+
+                // ── Modell-Picker ──────────────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Modell', style: TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w600,
+                        color: MFColors.textSecondary)),
+                    Row(children: [
+                      Checkbox(
+                        value: _freeOnly,
+                        onChanged: (v) => setState(() => _freeOnly = v ?? true),
+                        visualDensity: VisualDensity.compact,
+                        activeColor: MFColors.teal,
+                      ),
+                      const Text('Nur Free',
+                          style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+                      const SizedBox(width: 8),
+                      _SmallBtn(
+                        label: _loadingModels ? 'Lädt…' : 'Laden',
+                        onTap: _loadingModels ? null : _loadModels,
+                        icon: _loadingModels
+                            ? const SizedBox(width: 10, height: 10,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 1.5, color: MFColors.teal))
+                            : const Icon(Icons.refresh, size: 12, color: MFColors.teal),
+                      ),
+                    ]),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                if (_models.isNotEmpty) ...[
+                  TextField(
+                    onChanged: (v) => setState(() => _modelSearch = v),
+                    style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Filter…',
+                      hintStyle: const TextStyle(fontSize: 12, color: MFColors.textMuted),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      filled: true, fillColor: MFColors.bg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: MFColors.border)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: MFColors.border)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: MFColors.teal)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 180,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: MFColors.border),
+                      borderRadius: BorderRadius.circular(8),
+                      color: MFColors.bg,
+                    ),
+                    child: _filteredModels.isEmpty
+                        ? const Center(child: Text('Keine Modelle gefunden',
+                            style: TextStyle(fontSize: 11, color: MFColors.textMuted)))
+                        : ListView.builder(
+                            itemCount: _filteredModels.length,
+                            itemBuilder: (ctx, i) {
+                              final m = _filteredModels[i];
+                              final id = m['id'] as String? ?? '';
+                              final name = m['name'] as String? ?? id;
+                              final isFree = id.endsWith(':free') ||
+                                  ((m['pricing'] as Map?)?.entries.every(
+                                        (e) => e.value == '0' || e.value == null) ?? false);
+                              final selected = id == _selectedModel;
+                              return InkWell(
+                                onTap: () => setState(() => _selectedModel = id),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? MFColors.teal.withAlpha(25)
+                                        : Colors.transparent,
+                                    border: selected
+                                        ? const Border(
+                                            left: BorderSide(
+                                                color: MFColors.teal, width: 2))
+                                        : null,
+                                  ),
+                                  child: Row(children: [
+                                    Expanded(child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(name,
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: selected
+                                                    ? MFColors.teal
+                                                    : MFColors.textPrimary),
+                                            overflow: TextOverflow.ellipsis),
+                                        Text(id,
+                                            style: const TextStyle(
+                                                fontSize: 10,
+                                                color: MFColors.textMuted,
+                                                fontFamily: 'monospace'),
+                                            overflow: TextOverflow.ellipsis),
+                                      ],
+                                    )),
+                                    Text(
+                                      _priceLabel(m),
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: isFree
+                                              ? MFColors.teal
+                                              : MFColors.textMuted),
+                                    ),
+                                  ]),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  if (_selectedModel.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text('✓ $_selectedModel',
+                        style: const TextStyle(
+                            fontSize: 10, color: MFColors.teal,
+                            fontFamily: 'monospace'),
+                        overflow: TextOverflow.ellipsis),
+                  ],
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: MFColors.bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: MFColors.border),
+                    ),
+                    child: Text(
+                      _selectedModel.isNotEmpty
+                          ? _selectedModel
+                          : 'meta-llama/llama-3.1-8b-instruct:free',
+                      style: const TextStyle(
+                          fontSize: 12, color: MFColors.textSecondary,
+                          fontFamily: 'monospace'),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '← „Laden" drücken um Modelle von OpenRouter abzurufen',
+                    style: TextStyle(fontSize: 10, color: MFColors.textMuted),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // ── Temperature ────────────────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Temperature',
+                        style: TextStyle(fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: MFColors.textSecondary)),
+                    Text(_temperature.toStringAsFixed(2),
+                        style: const TextStyle(
+                            fontSize: 11, color: MFColors.teal,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Slider(
+                  value: _temperature,
+                  min: 0.0, max: 2.0, divisions: 40,
+                  activeColor: MFColors.teal,
+                  inactiveColor: MFColors.border,
+                  onChanged: (v) => setState(() => _temperature = v),
+                ),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Präzise (0.0)',
+                        style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
+                    Text('Kreativ (2.0)',
+                        style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // ── Max Output-Tokens ──────────────────────────────────────
+                const Text('Max Output-Tokens',
+                    style: TextStyle(fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: MFColors.textSecondary)),
+                const SizedBox(height: 6),
+                TextFormField(
+                  initialValue: _maxTokens.toString(),
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(fontSize: 13,
+                      color: MFColors.textPrimary, fontFamily: 'monospace'),
+                  onChanged: (v) {
+                    final n = int.tryParse(v);
+                    if (n != null && n >= 64) setState(() => _maxTokens = n);
+                  },
                   decoration: InputDecoration(
-                    labelText: 'Modell (leer = kostenlos)',
-                    labelStyle: const TextStyle(
-                        color: MFColors.textMuted, fontSize: 12),
-                    hintText: 'meta-llama/llama-3.1-8b-instruct:free',
-                    hintStyle: const TextStyle(
-                        color: MFColors.textMuted, fontSize: 11),
-                    filled: true,
-                    fillColor: MFColors.bg,
+                    hintText: '400',
+                    helperText: 'Erhöhen wenn Antworten abgeschnitten werden',
+                    helperStyle: const TextStyle(
+                        fontSize: 10, color: MFColors.textMuted),
+                    filled: true, fillColor: MFColors.bg,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 10),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.border),
-                    ),
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.border),
-                    ),
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: MFColors.teal),
-                    ),
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.teal)),
                   ),
                 ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _saveAiSettings,
-                    icon: const Icon(Icons.save_outlined, size: 16),
-                    label: const Text('Speichern',
-                        style: TextStyle(fontSize: 13)),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MFColors.teal,
-                      foregroundColor: MFColors.bg,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 14),
+
+                // ── Verbindungstest + Speichern ────────────────────────────
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _testState == 'loading' ? null : _testConnection,
+                      icon: _testState == 'loading'
+                          ? const SizedBox(width: 14, height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: MFColors.teal))
+                          : Icon(
+                              _testState == 'ok'
+                                  ? Icons.check_circle_outline
+                                  : _testState == 'error'
+                                      ? Icons.error_outline
+                                      : Icons.wifi_tethering,
+                              size: 15),
+                      label: Text(
+                        _testState == 'loading'
+                            ? 'Teste…'
+                            : _testState == 'ok'
+                                ? 'Verbunden'
+                                : _testState == 'error'
+                                    ? 'Fehler'
+                                    : 'Verbindung testen',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _testState == 'ok'
+                            ? MFColors.teal
+                            : _testState == 'error'
+                                ? Colors.redAccent
+                                : MFColors.textSecondary,
+                        side: BorderSide(
+                          color: _testState == 'ok'
+                              ? MFColors.teal
+                              : _testState == 'error'
+                                  ? Colors.redAccent
+                                  : MFColors.border,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saveAiSettings,
+                      icon: const Icon(Icons.save_outlined, size: 15),
+                      label: const Text('Speichern',
+                          style: TextStyle(fontSize: 12)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: MFColors.teal,
+                        foregroundColor: MFColors.bg,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                ]),
+                if (_testState == 'error' && _testError.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(_testError,
+                      style: const TextStyle(
+                          fontSize: 10, color: Colors.redAccent)),
+                ],
                 const SizedBox(height: 6),
                 const Text(
                   'Kostenloser Account auf openrouter.ai reicht aus. '
@@ -1046,6 +1356,32 @@ class _FieldDialogState extends State<_FieldDialog> {
                 style: TextStyle(color: MFColors.teal)),
           ),
         ],
+      );
+}
+
+class _SmallBtn extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final Widget? icon;
+  const _SmallBtn({required this.label, this.onTap, this.icon});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            border: Border.all(color: MFColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[icon!, const SizedBox(width: 4)],
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 11, color: MFColors.textSecondary)),
+          ]),
+        ),
       );
 }
 

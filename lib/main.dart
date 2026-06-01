@@ -10,47 +10,93 @@ import 'data/db/app_database.dart' hide Container;
 import 'services/notification_service.dart';
 import 'services/app_settings.dart';
 
-/// Globaler Callback — wird nach einem Restore aufgerufen um die App neu zu starten.
-/// Future<void> damit der Aufrufer awaiten kann (kein fire-and-forget).
+/// Globaler Callback — nach einem Restore aufgerufen, um die App neu zu starten.
 Future<void> Function()? onRestartApp;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
-
-  await _launchApp();
+  runApp(const _AppRoot());
 }
 
-Future<void> _launchApp() async {
-  AppDatabase? db;
-  String? startupError;
+// ─── App-Root mit Restart-Fähigkeit ──────────────────────────────────────────
 
-  await NotificationService.init();
-  await AppSettings.init();
+class _AppRoot extends StatefulWidget {
+  const _AppRoot();
 
-  try {
-    db = await VaultManager.openDefaultVault();
-  } catch (e, stack) {
-    startupError = 'Vault konnte nicht geöffnet werden:\n$e';
-    debugPrint('[Startup] FEHLER: $e\n$stack');
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
+  Key _scopeKey = UniqueKey();
+  AppDatabase? _db;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
   }
 
-  // Restart-Callback registrieren
-  onRestartApp = _launchApp;
+  Future<void> _boot() async {
+    await NotificationService.init();
+    await AppSettings.init();
+    try {
+      final db = await VaultManager.openDefaultVault();
+      if (mounted) setState(() { _db = db; _loading = false; });
+    } catch (e, stack) {
+      debugPrint('[Boot] $e\n$stack');
+      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+    }
+    // Restart-Callback registrieren: öffnet neue DB und tauscht ProviderScope
+    onRestartApp = _restart;
+  }
 
-  runApp(
-    db != null
-        ? ProviderScope(
-            overrides: [databaseProvider.overrideWithValue(db)],
-            child: const MindFeedApp(),
-          )
-        : _StartupErrorApp(message: startupError ?? 'Unbekannter Fehler'),
-  );
+  Future<void> _restart() async {
+    try {
+      final newDb = await VaultManager.openDefaultVault();
+      if (mounted) {
+        setState(() {
+          _db = newDb;
+          _scopeKey = UniqueKey(); // reißt ProviderScope + MindFeedApp ab und baut neu
+        });
+      }
+    } catch (e, stack) {
+      debugPrint('[Restart] $e\n$stack');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return MaterialApp(
+        theme: MFTheme.dark,
+        debugShowCheckedModeBanner: false,
+        home: const Scaffold(
+          backgroundColor: MFColors.bg,
+          body: Center(
+            child: CircularProgressIndicator(color: MFColors.teal),
+          ),
+        ),
+      );
+    }
+    if (_error != null) return _StartupErrorApp(message: _error!);
+    return KeyedSubtree(
+      key: _scopeKey,
+      child: ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(_db!)],
+        child: const MindFeedApp(),
+      ),
+    );
+  }
 }
+
+// ─── Haupt-App ────────────────────────────────────────────────────────────────
 
 class MindFeedApp extends ConsumerStatefulWidget {
   const MindFeedApp({super.key});
@@ -67,7 +113,6 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   }
 
   void _initShareIntent() {
-    // App war geschlossen und wurde über Share Intent geöffnet
     ReceiveSharingIntent.instance.getInitialMedia().then((media) {
       final text = media
           .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
@@ -81,7 +126,6 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
       }
     });
 
-    // App war bereits offen
     ReceiveSharingIntent.instance.getMediaStream().listen((media) {
       final text = media
           .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
@@ -106,8 +150,8 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   }
 }
 
-/// Wird angezeigt wenn der Vault-Init fehlschlägt — zeigt den Fehler
-/// statt schweigend schwarz zu bleiben.
+// ─── Fehler-Anzeige beim Start ────────────────────────────────────────────────
+
 class _StartupErrorApp extends StatelessWidget {
   final String message;
   const _StartupErrorApp({required this.message});
@@ -125,8 +169,7 @@ class _StartupErrorApp extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline,
-                    color: Colors.redAccent, size: 48),
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
                 const SizedBox(height: 16),
                 const Text(
                   'MindFeed konnte nicht starten',
