@@ -30,6 +30,7 @@ dependencies:
   # media_kit & media_kit_native_event_loop: werden bei Audio-Feature
   # korrekt mit media_kit_libs_android_audio eingebunden (Phase 2)
   record: ^6.0.0           # Audio Recording
+  audioplayers: ^6.1.0    # Audio Playback
   image: ^4.2.0
 
   # ─── Markdown ────────────────────────────────────────────────────

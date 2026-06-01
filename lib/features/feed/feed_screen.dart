@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -392,6 +393,12 @@ class _GridCard extends StatelessWidget {
             ['og_image', 'cover_image', 'cover', 'bild'].contains(p.key.toLowerCase()))
         .firstOrNull
         ?.value;
+    final coverLocalPath = coverUrl == null
+        ? item.attachments
+            .where((a) => a.type == 'image')
+            .firstOrNull
+            ?.localPath
+        : null;
 
     return InkWell(
       onTap: onTap,
@@ -419,7 +426,15 @@ class _GridCard extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => _placeholder(entry.type),
                     )
-                  : _placeholder(entry.type),
+                  : coverLocalPath != null
+                      ? Image.file(
+                          File(coverLocalPath),
+                          width: double.infinity,
+                          height: 90,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _placeholder(entry.type),
+                        )
+                      : _placeholder(entry.type),
             ),
             // Text
             Expanded(

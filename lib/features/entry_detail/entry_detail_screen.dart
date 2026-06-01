@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -1162,36 +1164,160 @@ class _AttachmentTile extends StatelessWidget {
   final Attachment att;
   const _AttachmentTile(this.att);
   @override
+  Widget build(BuildContext context) {
+    if (att.type == 'audio') return _AudioTile(att);
+    if (att.type == 'image') return _ImageTile(att);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        const Icon(Icons.attach_file, size: 18, color: MFColors.textSecondary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(att.fileName,
+              style: const TextStyle(fontSize: 13, color: MFColors.textPrimary)),
+        ),
+      ]),
+    );
+  }
+}
+
+// ─── Bild-Vorschau ────────────────────────────────────────────────────────────
+class _ImageTile extends StatelessWidget {
+  final Attachment att;
+  const _ImageTile(this.att);
+  @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(children: [
-          Icon(
-            att.type == 'image'
-                ? Icons.image_outlined
-                : att.type == 'audio'
-                    ? Icons.mic_outlined
-                    : Icons.attach_file,
-            size: 18, color: MFColors.textSecondary,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(att.fileName,
-                    style: const TextStyle(
-                        fontSize: 13, color: MFColors.textPrimary)),
-                if (att.ocrText != null)
-                  Text('OCR: ${att.ocrText}',
-                      style: const TextStyle(
-                          fontSize: 11, color: MFColors.teal),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-              ],
+        padding: const EdgeInsets.only(bottom: 8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(
+            File(att.localPath),
+            width: double.infinity,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              height: 60,
+              color: MFColors.surface,
+              child: const Icon(Icons.broken_image_outlined,
+                  color: MFColors.textMuted),
             ),
           ),
-        ]),
+        ),
       );
+}
+
+// ─── Audio-Player ─────────────────────────────────────────────────────────────
+class _AudioTile extends StatefulWidget {
+  final Attachment att;
+  const _AudioTile(this.att);
+  @override
+  State<_AudioTile> createState() => _AudioTileState();
+}
+
+class _AudioTileState extends State<_AudioTile> {
+  final _player = AudioPlayer();
+  PlayerState _state = PlayerState.stopped;
+  Duration _pos = Duration.zero;
+  Duration _dur = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _player.onPlayerStateChanged.listen((s) {
+      if (mounted) setState(() => _state = s);
+    });
+    _player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _pos = p);
+    });
+    _player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _dur = d);
+    });
+    // Initiale Dauer aus DB
+    if (widget.att.durationMs != null) {
+      _dur = Duration(milliseconds: widget.att.durationMs!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isPlaying = _state == PlayerState.playing;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () async {
+            if (isPlaying) {
+              await _player.pause();
+            } else {
+              await _player.play(DeviceFileSource(widget.att.localPath));
+            }
+          },
+          child: Container(
+            width: 36, height: 36,
+            decoration: const BoxDecoration(
+              color: MFColors.teal, shape: BoxShape.circle),
+            child: Icon(
+              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              color: Colors.white, size: 22,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.att.fileName,
+                  style: const TextStyle(
+                      fontSize: 12, color: MFColors.textPrimary),
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 4),
+              SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                  activeTrackColor: MFColors.teal,
+                  inactiveTrackColor: MFColors.border,
+                  thumbColor: MFColors.teal,
+                ),
+                child: Slider(
+                  value: _dur.inSeconds > 0
+                      ? _pos.inSeconds.toDouble().clamp(0, _dur.inSeconds.toDouble())
+                      : 0,
+                  min: 0,
+                  max: _dur.inSeconds > 0 ? _dur.inSeconds.toDouble() : 1,
+                  onChanged: (v) =>
+                      _player.seek(Duration(seconds: v.toInt())),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text('${_fmt(_pos)} / ${_fmt(_dur)}',
+            style: const TextStyle(
+                fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace')),
+      ]),
+    );
+  }
 }
 
 // ─── Backlinks ────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../core/theme.dart';
@@ -72,12 +73,18 @@ class EntryCard extends StatelessWidget {
       );
     }
 
-    // Cover-Bild aus Properties (og_image)
+    // Cover-Bild: erst Properties (og_image), dann Bild-Anhänge
     final coverUrl = item.properties
         .where((p) =>
             ['og_image', 'cover_image', 'cover', 'bild'].contains(p.key.toLowerCase()))
         .firstOrNull
         ?.value;
+    final coverLocalPath = coverUrl == null
+        ? item.attachments
+            .where((a) => a.type == 'image')
+            .firstOrNull
+            ?.localPath
+        : null;
 
     return InkWell(
       onTap: onTap,
@@ -98,16 +105,24 @@ class EntryCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ─── Cover-Bild (optional) ───────────────────────────
-              if (coverUrl != null) ...[
+              if (coverUrl != null || coverLocalPath != null) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    coverUrl,
-                    width: 56,
-                    height: 72,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
+                  child: coverUrl != null
+                      ? Image.network(
+                          coverUrl,
+                          width: 56,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        )
+                      : Image.file(
+                          File(coverLocalPath!),
+                          width: 56,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
                 ),
                 const SizedBox(width: 10),
               ],

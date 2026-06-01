@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:record/record.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
@@ -50,6 +51,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   // Bild-Anhänge
   final List<XFile> _pendingImages = [];
 
+  // Audio-Aufnahme
+  final _recorder = AudioRecorder();
+  bool _isRecording = false;
+  String? _recordedAudioPath;
+  Duration _recordingDuration = Duration.zero;
+  Timer? _recordingTimer;
+
   // Capture-Optionen
   bool _autoSave = false;
   bool _autoAi = false;
@@ -74,6 +82,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _urlDebounce?.cancel();
     _wikilinkDebounce?.cancel();
     _autoSaveDebounce?.cancel();
+    _recordingTimer?.cancel();
+    _recorder.dispose();
     _bodyCtrl.removeListener(_onBodyChanged);
     _bodyCtrl.dispose();
     _titleCtrl.dispose();
@@ -207,7 +217,70 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
   }
 
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      // Aufnahme stoppen
+      _recordingTimer?.cancel();
+      final path = await _recorder.stop();
+      setState(() {
+        _isRecording = false;
+        _recordedAudioPath = path;
+      });
+    } else {
+      // Aufnahme starten
+      final hasPermission = await _recorder.hasPermission();
+      if (!hasPermission) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Mikrofon-Berechtigung fehlt.'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
+      final attachmentsBase = await VaultManager.getAttachmentsPath();
+      final now = DateTime.now();
+      final subDir = Directory(
+          p.join(attachmentsBase, '${now.year}', now.month.toString().padLeft(2, '0')));
+      await subDir.create(recursive: true);
+      final audioPath = p.join(subDir.path, '${now.millisecondsSinceEpoch}.m4a');
+
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000),
+        path: audioPath,
+      );
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = Duration.zero;
+      });
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _recordingDuration += const Duration(seconds: 1));
+      });
+    }
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
   Future<void> _saveAttachments(String entryId) async {
+    // Audio-Anhang speichern
+    if (_recordedAudioPath != null && File(_recordedAudioPath!).existsSync()) {
+      final f = File(_recordedAudioPath!);
+      await ref.read(attachmentDaoProvider).upsert(AttachmentsCompanion(
+        id: drift.Value('att-audio-${DateTime.now().millisecondsSinceEpoch}'),
+        entryId: drift.Value(entryId),
+        type: const drift.Value('audio'),
+        mimeType: const drift.Value('audio/mp4'),
+        localPath: drift.Value(_recordedAudioPath!),
+        fileName: drift.Value(p.basename(_recordedAudioPath!)),
+        fileSize: drift.Value(await f.length()),
+        durationMs: drift.Value(_recordingDuration.inMilliseconds),
+      ));
+    }
+
     if (_pendingImages.isEmpty) return;
     final attachmentsBase = await VaultManager.getAttachmentsPath();
     final now = DateTime.now();
@@ -223,14 +296,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       final destPath = p.join(subDir.path, fileName);
       await File(img.path).copy(destPath);
 
-      final relPath = p.relative(destPath,
-          from: p.dirname(p.dirname(attachmentsBase)));
+      // Absoluter Pfad — auf Mobile ändert sich der App-Pfad nicht
       await ref.read(attachmentDaoProvider).upsert(AttachmentsCompanion(
         id: drift.Value('att-${DateTime.now().millisecondsSinceEpoch}'),
         entryId: drift.Value(entryId),
         type: const drift.Value('image'),
         mimeType: drift.Value(ext == '.png' ? 'image/png' : 'image/jpeg'),
-        localPath: drift.Value(relPath),
+        localPath: drift.Value(destPath),
         fileName: drift.Value(fileName),
         fileSize: drift.Value(await File(destPath).length()),
       ));
@@ -649,12 +721,66 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             ),
 
           // Toolbar
+          // Audio-Aufnahme-Anzeige
+          if (_isRecording || _recordedAudioPath != null)
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: MFColors.border))),
+              child: Row(children: [
+                Icon(
+                  _isRecording ? Icons.fiber_manual_record : Icons.mic_rounded,
+                  size: 16,
+                  color: _isRecording ? Colors.redAccent : MFColors.teal,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _isRecording
+                      ? 'Aufnahme: ${_formatDuration(_recordingDuration)}'
+                      : 'Aufnahme: ${_formatDuration(_recordingDuration)} ✓',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _isRecording ? Colors.redAccent : MFColors.teal,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const Spacer(),
+                if (_recordedAudioPath != null && !_isRecording)
+                  GestureDetector(
+                    onTap: () => setState(() {
+                      _recordedAudioPath = null;
+                      _recordingDuration = Duration.zero;
+                    }),
+                    child: const Icon(Icons.close, size: 16, color: MFColors.textMuted),
+                  ),
+                if (_isRecording)
+                  GestureDetector(
+                    onTap: _toggleRecording,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: const Text('Stopp',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+              ]),
+            ),
+
           _CaptureToolbar(
             onTitleToggle: () =>
                 setState(() => _showTitle = !_showTitle),
             onImagePick: _pickImage,
             onTagInsert: () => _insertAtCursor('#'),
             onLinkInsert: () => _insertAtCursor('https://'),
+            onMicTap: _toggleRecording,
+            isRecording: _isRecording,
+            hasAudio: _recordedAudioPath != null,
           ),
         ],
       ),
@@ -687,11 +813,17 @@ class _CaptureToolbar extends StatelessWidget {
   final VoidCallback onImagePick;
   final VoidCallback onTagInsert;
   final VoidCallback onLinkInsert;
+  final VoidCallback onMicTap;
+  final bool isRecording;
+  final bool hasAudio;
   const _CaptureToolbar({
     required this.onTitleToggle,
     required this.onImagePick,
     required this.onTagInsert,
     required this.onLinkInsert,
+    required this.onMicTap,
+    this.isRecording = false,
+    this.hasAudio = false,
   });
 
   @override
@@ -704,7 +836,23 @@ class _CaptureToolbar extends StatelessWidget {
           _TBtn(Icons.title_rounded, 'Titel', onTitleToggle),
           _TBtn(Icons.image_outlined, 'Bild', onImagePick),
           _TBtn(Icons.link_rounded, 'Link', onLinkInsert),
-          _TBtn(Icons.mic_outlined, 'Audio', () {}),
+          IconButton(
+            icon: Icon(
+              isRecording
+                  ? Icons.stop_rounded
+                  : hasAudio
+                      ? Icons.mic_rounded
+                      : Icons.mic_outlined,
+              size: 20,
+              color: isRecording
+                  ? Colors.redAccent
+                  : hasAudio
+                      ? MFColors.teal
+                      : MFColors.textSecondary,
+            ),
+            tooltip: isRecording ? 'Aufnahme stoppen' : 'Sprachaufnahme',
+            onPressed: onMicTap,
+          ),
           const Spacer(),
           _TBtn(Icons.tag_rounded, '#Tag', onTagInsert),
         ]),
