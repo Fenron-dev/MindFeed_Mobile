@@ -35,7 +35,11 @@ class BackupService {
 
   // ─── Backup erstellen ──────────────────────────────────────────────────────
 
-  static Future<BackupResult> createBackup() async {
+  static Future<BackupResult> createBackup(AppDatabase db) async {
+    // WAL vollständig in Hauptdatei schreiben bevor wir kopieren
+    // → Backup enthält konsistenten Snapshot, kein WAL nötig
+    await db.customStatement('PRAGMA wal_checkpoint(FULL)');
+
     final root = await _vaultRoot();
     final dbPath = p.join(root, 'mindfeed.db');
     final backupsDir = Directory(p.join(root, 'backups'));
@@ -47,15 +51,9 @@ class BackupService {
     final encoder = ZipFileEncoder();
     encoder.create(zipPath);
 
-    // DB-Datei
+    // Nur Hauptdatei — nach FULL checkpoint sind alle Daten drin
     if (File(dbPath).existsSync()) {
       encoder.addFile(File(dbPath), 'mindfeed.db');
-    }
-
-    // WAL + SHM falls vorhanden (laufende Transaktion)
-    for (final ext in ['-wal', '-shm']) {
-      final extra = File('$dbPath$ext');
-      if (extra.existsSync()) encoder.addFile(extra, 'mindfeed.db$ext');
     }
 
     // Anhänge
@@ -92,37 +90,47 @@ class BackupService {
 
   // ─── Backup wiederherstellen ──────────────────────────────────────────────
 
-  /// Gibt true zurück wenn erfolgreich — der Aufrufer muss danach die App
-  /// neu starten (DB-Verbindung wird geschlossen).
+  /// Stellt ein Backup wieder her.
+  /// Reihenfolge: Temp-Extraktion → DB schließen → atomar umbenennen → WAL löschen
+  /// So wird verhindert dass _launchApp() eine halb-geschriebene DB öffnet.
   static Future<void> restore(
       String zipPath, AppDatabase currentDb) async {
     final bytes = await File(zipPath).readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
 
-    // Validierung: mindfeed.db muss enthalten sein
+    // Validierung
     final dbEntry = archive.findFile('mindfeed.db');
     if (dbEntry == null) {
-      throw Exception(
-          'Ungültige Backup-Datei: mindfeed.db nicht gefunden.');
+      throw Exception('Ungültige Backup-Datei: mindfeed.db nicht gefunden.');
     }
 
     final root = await _vaultRoot();
     final dbPath = p.join(root, 'mindfeed.db');
+    final tempDbPath = p.join(root, 'mindfeed_restore.db');
 
-    // DB schließen bevor wir die Datei ersetzen
-    await currentDb.close();
+    // 1. DB-Datei zuerst in TEMP schreiben (DB läuft noch)
+    await File(tempDbPath).writeAsBytes(dbEntry.content as List<int>);
 
-    // Alle Dateien extrahieren
+    // 2. Anhänge in korrekten Pfad schreiben (bevor DB geschlossen wird)
     for (final file in archive) {
-      if (!file.isFile) continue;
+      if (!file.isFile || file.name == 'mindfeed.db') continue;
       final target = File(p.join(root, file.name));
       await target.parent.create(recursive: true);
       await target.writeAsBytes(file.content as List<int>);
     }
 
-    // Sicherstellen dass mindfeed.db vollständig geschrieben ist
-    if (!File(dbPath).existsSync()) {
-      throw Exception('Wiederherstellen fehlgeschlagen: DB-Datei fehlt.');
+    // 3. Jetzt erst DB schließen (alle Dateien sind bereits auf Disk)
+    await currentDb.close();
+
+    // 4. Temp-Datei atomar in echten DB-Pfad verschieben
+    if (await File(tempDbPath).exists()) {
+      await File(tempDbPath).rename(dbPath);
+    }
+
+    // 5. WAL + SHM löschen → neue DB startet sauber ohne Konflikte
+    for (final ext in ['-wal', '-shm']) {
+      final f = File('$dbPath$ext');
+      if (await f.exists()) await f.delete();
     }
   }
 

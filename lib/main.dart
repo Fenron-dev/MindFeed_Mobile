@@ -9,9 +9,9 @@ import 'core/vault_manager.dart';
 import 'data/db/app_database.dart' hide Container;
 import 'services/notification_service.dart';
 
-/// Globaler Callback — wird von BackupService nach einem Restore aufgerufen
-/// um die App mit der neuen Datenbank neu zu starten.
-void Function()? onRestartApp;
+/// Globaler Callback — wird nach einem Restore aufgerufen um die App neu zu starten.
+/// Future<void> damit der Aufrufer awaiten kann (kein fire-and-forget).
+Future<void> Function()? onRestartApp;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

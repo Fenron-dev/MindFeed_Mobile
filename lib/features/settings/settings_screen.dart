@@ -84,7 +84,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _createBackup() async {
     setState(() => _backupLoading = true);
     try {
-      final result = await BackupService.createBackup();
+      final result = await BackupService.createBackup(ref.read(databaseProvider));
       await BackupService.shareBackup(result);
       await _loadBackups();
       if (mounted) {
@@ -137,12 +137,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() => _restoreLoading = true);
     try {
       final db = ref.read(databaseProvider);
+      // restore() schreibt zuerst in Temp, schließt dann DB, benennt atomar um
       await BackupService.restore(zipPath, db);
       if (mounted) {
         _showSnack('Backup wiederhergestellt. App startet neu…',
             success: true);
-        await Future.delayed(const Duration(milliseconds: 1500));
-        onRestartApp?.call();
+        await Future.delayed(const Duration(milliseconds: 800));
+        // Awaited: onRestartApp ist Future<void> Function() — kein fire-and-forget
+        await onRestartApp?.call();
       }
     } catch (e) {
       if (mounted) {
