@@ -26,6 +26,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   // 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc'
   String _sortBy = 'date_desc';
   int _filterIndex = 0; // 0=Alle 1=Inbox 2=Angeheftet
+  // IDs von gerade gewischten Einträgen – sofort aus der Liste entfernen,
+  // bevor die DB-Aktualisierung den Stream neu aufbaut.
+  final _dismissedIds = <String>{};
 
   static const _filterStatuses = ['all', 'inbox', 'pinned'];
 
@@ -192,7 +195,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       style: const TextStyle(color: Colors.red))),
             ),
             data: (allEntries) {
-              final entries = _filterAndSort(allEntries, filter);
+              final entries = _filterAndSort(allEntries, filter)
+                  .where((e) => !_dismissedIds.contains(e.entry.id))
+                  .toList();
               if (entries.isEmpty) {
                 return SliverFillRemaining(
                   child: _EmptyFeed(
@@ -252,26 +257,31 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                             item.entry.status == 'archived') return false;
                         return true;
                       },
-                      onDismissed: (dir) async {
+                      onDismissed: (dir) {
                         final newStatus = dir == DismissDirection.startToEnd
                             ? 'done'
                             : 'archived';
                         final label = newStatus == 'done'
                             ? 'Erledigt'
                             : 'Archiviert';
-                        await ref
-                            .read(entryRepositoryProvider)
-                            .updateEntry(item.entry.id, status: newStatus);
+                        final oldStatus = item.entry.status;
+                        final entryId = item.entry.id;
+                        // Sofort aus der Liste entfernen — synchron, vor dem DB-Aufruf
+                        setState(() => _dismissedIds.add(entryId));
+                        // DB-Aktualisierung fire-and-forget
+                        ref.read(entryRepositoryProvider)
+                            .updateEntry(entryId, status: newStatus);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                             content: Text(
                                 '${item.entry.title ?? 'Eintrag'} → $label'),
                             action: SnackBarAction(
                               label: 'Rückgängig',
-                              onPressed: () => ref
-                                  .read(entryRepositoryProvider)
-                                  .updateEntry(item.entry.id,
-                                      status: item.entry.status),
+                              onPressed: () {
+                                setState(() => _dismissedIds.remove(entryId));
+                                ref.read(entryRepositoryProvider)
+                                    .updateEntry(entryId, status: oldStatus);
+                              },
                             ),
                             behavior: SnackBarBehavior.floating,
                             duration: const Duration(seconds: 4),

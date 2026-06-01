@@ -76,8 +76,17 @@ Regeln:
         .timeout(const Duration(seconds: 30));
 
     if (res.statusCode != 200) {
-      throw Exception(
-          'OpenRouter-Fehler ${res.statusCode}: ${res.body}');
+      // Kurze, lesbare Fehlermeldung aus dem OpenRouter-JSON extrahieren
+      String errMsg;
+      try {
+        final errJson = jsonDecode(res.body) as Map<String, dynamic>;
+        errMsg = (errJson['error']?['message'] as String?) ??
+            errJson['error']?.toString() ??
+            res.body.substring(0, res.body.length.clamp(0, 200));
+      } catch (_) {
+        errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+      }
+      throw Exception('OpenRouter ${res.statusCode}: $errMsg');
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;

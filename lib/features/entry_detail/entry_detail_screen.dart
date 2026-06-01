@@ -250,8 +250,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('KI-Fehler: $e'),
+          content: Text(
+            msg.length > 150 ? '${msg.substring(0, 150)}…' : msg,
+          ),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.red.shade900,
         ));
