@@ -6,15 +6,22 @@ import 'core/di.dart';
 import 'core/vault_manager.dart';
 import 'data/db/app_database.dart' hide Container;
 
+/// Globaler Callback — wird von BackupService nach einem Restore aufgerufen
+/// um die App mit der neuen Datenbank neu zu starten.
+void Function()? onRestartApp;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Globale Flutter-Fehler abfangen (z.B. Layout-Overflows)
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
 
+  await _launchApp();
+}
+
+Future<void> _launchApp() async {
   AppDatabase? db;
   String? startupError;
 
@@ -24,6 +31,9 @@ void main() async {
     startupError = 'Vault konnte nicht geöffnet werden:\n$e';
     debugPrint('[Startup] FEHLER: $e\n$stack');
   }
+
+  // Restart-Callback registrieren
+  onRestartApp = _launchApp;
 
   runApp(
     db != null
