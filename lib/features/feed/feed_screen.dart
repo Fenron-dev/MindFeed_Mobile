@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -19,43 +18,31 @@ class FeedScreen extends ConsumerStatefulWidget {
 
 class _FeedScreenState extends ConsumerState<FeedScreen> {
   final _scrollController = ScrollController();
-  bool _barsVisible = true;
-  String _viewMode = 'view_cards'; // 'view_list' | 'view_cards' | 'view_grid'
-  String _sortBy = 'date_desc';    // 'date_desc' | 'name_asc'
-  int _filterIndex = 0;            // 0=Alle 1=Inbox 2=Angeheftet
+  // 'view_list' | 'view_cards' | 'view_grid'
+  String _viewMode = 'view_cards';
+  // 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc'
+  String _sortBy = 'date_desc';
+  int _filterIndex = 0; // 0=Alle 1=Inbox 2=Angeheftet
 
   static const _filterStatuses = ['all', 'inbox', 'pinned'];
 
   @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    final direction = _scrollController.position.userScrollDirection;
-    if (direction == ScrollDirection.reverse && _barsVisible) {
-      setState(() => _barsVisible = false);
-    } else if (direction == ScrollDirection.forward && !_barsVisible) {
-      setState(() => _barsVisible = true);
-    }
   }
 
   void _onMenuAction(String value) {
     setState(() {
       switch (value) {
-        case 'view_list': _viewMode = 'view_list'; break;
+        case 'view_list':  _viewMode = 'view_list'; break;
         case 'view_cards': _viewMode = 'view_cards'; break;
-        case 'view_grid': _viewMode = 'view_grid'; break;
-        case 'sort_date': _sortBy = 'date_desc'; break;
-        case 'sort_name': _sortBy = 'name_asc'; break;
+        case 'view_grid':  _viewMode = 'view_grid'; break;
+        // Toggle beim erneuten Tippen
+        case 'sort_date':
+          _sortBy = _sortBy == 'date_desc' ? 'date_asc' : 'date_desc'; break;
+        case 'sort_name':
+          _sortBy = _sortBy == 'name_asc' ? 'name_desc' : 'name_asc'; break;
       }
     });
   }
@@ -68,131 +55,155 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       _        => true,
     }).toList();
 
-    if (_sortBy == 'name_asc') {
-      result.sort((a, b) =>
-          (a.entry.title ?? '').toLowerCase()
-              .compareTo((b.entry.title ?? '').toLowerCase()));
+    switch (_sortBy) {
+      case 'date_asc':
+        result.sort((a, b) =>
+            a.entry.createdAt.compareTo(b.entry.createdAt));
+      case 'name_asc':
+        result.sort((a, b) =>
+            (a.entry.title ?? '').toLowerCase()
+                .compareTo((b.entry.title ?? '').toLowerCase()));
+      case 'name_desc':
+        result.sort((a, b) =>
+            (b.entry.title ?? '').toLowerCase()
+                .compareTo((a.entry.title ?? '').toLowerCase()));
+      // date_desc: Provider sortiert bereits desc
     }
-    // date_desc: bereits vom Provider sortiert
     return result;
   }
+
+  String get _sortDateLabel => _sortBy == 'date_asc'
+      ? 'Datum ↑ (älteste zuerst)'
+      : 'Datum ↓ (neueste zuerst)';
+  String get _sortNameLabel =>
+      _sortBy == 'name_desc' ? 'Name Z → A' : 'Name A → Z';
+
+  IconData get _sortDateIcon => _sortBy == 'date_asc'
+      ? Icons.arrow_upward_rounded
+      : Icons.arrow_downward_rounded;
+  IconData get _sortNameIcon => _sortBy == 'name_desc'
+      ? Icons.text_rotation_angledown_outlined
+      : Icons.sort_by_alpha_outlined;
 
   @override
   Widget build(BuildContext context) {
     final feedAsync = ref.watch(feedProvider);
 
     return Scaffold(
-      // ─── AppBar (Gmail-Style: verschwindet beim Runterscrollen) ──
-      appBar: _barsVisible
-          ? AppBar(
-              leading: IconButton(
-                icon: const Icon(Icons.menu, color: MFColors.textSecondary),
-                // GlobalKey öffnet den Drawer des äußeren AppShell-Scaffolds
-                onPressed: () => appScaffoldKey.currentState?.openDrawer(),
-              ),
-              title: const Text(
-                'MindFeed',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: MFColors.textPrimary,
-                ),
-              ),
-              actions: [
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert,
-                      color: MFColors.textSecondary, size: 22),
-                  tooltip: 'Ansicht & Filter',
-                  color: MFColors.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: const BorderSide(color: MFColors.border),
-                  ),
-                  onSelected: _onMenuAction,
-                  itemBuilder: (_) => [
-                    _menuItem('view_list',  Icons.view_list_outlined,   'Listenansicht',      _viewMode == 'view_list'),
-                    _menuItem('view_cards', Icons.dashboard_outlined,   'Kartenansicht',      _viewMode == 'view_cards'),
-                    _menuItem('view_grid',  Icons.grid_view_outlined,   'Thumbnail-Ansicht',  _viewMode == 'view_grid'),
-                    const PopupMenuDivider(),
-                    _menuItem('sort_date',  Icons.access_time_outlined, 'Sortierung: Datum',  _sortBy == 'date_desc'),
-                    _menuItem('sort_name',  Icons.sort_by_alpha_outlined,'Sortierung: Name',  _sortBy == 'name_asc'),
-                  ],
-                ),
-              ],
-            )
-          : null,
-
-      body: Column(
-        children: [
-          if (_barsVisible)
-            _QuickFilterBar(
-              selectedIndex: _filterIndex,
-              onChanged: (i) => setState(() => _filterIndex = i),
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // SliverAppBar: floating + snap = Gmail-Style sanfte Animation
+          SliverAppBar(
+            floating: true,
+            snap: true,
+            backgroundColor: MFColors.bg,
+            surfaceTintColor: Colors.transparent,
+            leading: IconButton(
+              icon: const Icon(Icons.menu, color: MFColors.textSecondary),
+              onPressed: () => appScaffoldKey.currentState?.openDrawer(),
             ),
-          Expanded(
-            child: feedAsync.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: MFColors.teal),
+            title: const Text(
+              'MindFeed',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: MFColors.textPrimary,
               ),
-              error: (err, _) => Center(
-                child: Text('Fehler: $err',
-                    style: const TextStyle(color: Colors.red)),
+            ),
+            actions: [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert,
+                    color: MFColors.textSecondary, size: 22),
+                tooltip: 'Ansicht & Filter',
+                color: MFColors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: MFColors.border),
+                ),
+                onSelected: _onMenuAction,
+                itemBuilder: (_) => [
+                  _menuItem('view_list',  Icons.view_list_outlined,  'Listenansicht',    _viewMode == 'view_list'),
+                  _menuItem('view_cards', Icons.dashboard_outlined,  'Kartenansicht',    _viewMode == 'view_cards'),
+                  _menuItem('view_grid',  Icons.grid_view_outlined,  'Thumbnail-Ansicht',_viewMode == 'view_grid'),
+                  const PopupMenuDivider(),
+                  _menuItem('sort_date', _sortDateIcon, _sortDateLabel, _sortBy.startsWith('date')),
+                  _menuItem('sort_name', _sortNameIcon, _sortNameLabel, _sortBy.startsWith('name')),
+                ],
               ),
-              data: (allEntries) {
-                final entries = _filterAndSort(allEntries);
-                if (entries.isEmpty) {
-                  return _EmptyFeed(
-                    onCapture: () => context.push(AppRoutes.capture),
-                  );
-                }
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(44),
+              child: _QuickFilterBar(
+                selectedIndex: _filterIndex,
+                onChanged: (i) => setState(() => _filterIndex = i),
+              ),
+            ),
+          ),
 
-                if (_viewMode == 'view_grid') {
-                  return GridView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          // Inhalt
+          feedAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(
+                  child: CircularProgressIndicator(color: MFColors.teal)),
+            ),
+            error: (err, _) => SliverFillRemaining(
+              child: Center(
+                  child: Text('Fehler: $err',
+                      style: const TextStyle(color: Colors.red))),
+            ),
+            data: (allEntries) {
+              final entries = _filterAndSort(allEntries);
+              if (entries.isEmpty) {
+                return SliverFillRemaining(
+                  child: _EmptyFeed(
+                      onCapture: () => context.push(AppRoutes.capture)),
+                );
+              }
+              if (_viewMode == 'view_grid') {
+                return SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
                       childAspectRatio: 0.8,
                     ),
-                    itemCount: entries.length,
-                    itemBuilder: (ctx, i) => _GridCard(
-                      item: entries[i],
-                      onTap: () => context.push(
-                        AppRoutes.entryDetailPath(entries[i].entry.id),
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) => _GridCard(
+                        item: entries[i],
+                        onTap: () => context.push(
+                            AppRoutes.entryDetailPath(entries[i].entry.id)),
                       ),
+                      childCount: entries.length,
                     ),
-                  );
-                }
-
-                return ListView.separated(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                  ),
+                );
+              }
+              return SliverPadding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                sliver: SliverList.separated(
                   itemCount: entries.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (ctx, i) => EntryCard(
                     item: entries[i],
                     compact: _viewMode == 'view_list',
                     onTap: () => context.push(
-                      AppRoutes.entryDetailPath(entries[i].entry.id),
-                    ),
+                        AppRoutes.entryDetailPath(entries[i].entry.id)),
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
           ),
         ],
       ),
 
-      floatingActionButton: AnimatedScale(
-        scale: 1.0,
-        duration: const Duration(milliseconds: 200),
-        child: FloatingActionButton(
-          onPressed: () => context.push(AppRoutes.capture),
-          tooltip: 'Neuer Eintrag',
-          child: const Icon(Icons.edit_outlined),
-        ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.push(AppRoutes.capture),
+        tooltip: 'Neuer Eintrag',
+        child: const Icon(Icons.edit_outlined),
       ),
     );
   }

@@ -174,6 +174,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             urlDescription: _urlPreview?.description,
             urlImage: _urlPreview?.image,
             urlDomain: _urlPreview?.domain,
+            urlGenres: _urlPreview?.genres ?? [],
+            urlScore: _urlPreview?.score,
+            urlMediaType: _urlPreview?.mediaType,
           );
       if (mounted) Navigator.pop(context);
     } catch (e) {

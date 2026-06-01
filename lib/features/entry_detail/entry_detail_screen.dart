@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,8 @@ import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
+import '../../data/repositories/entry_repository.dart';
+import '../../features/containers/container_provider.dart';
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
@@ -25,11 +28,78 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
 
+  // Wikilink-Autocomplete
+  List<EntryWithDetails> _wikilinkSuggestions = [];
+  bool _wikilinkLoading = false;
+  String? _partialWikilink;
+  Timer? _wikilinkDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _bodyCtrl.addListener(_checkWikilinkContext);
+  }
+
   @override
   void dispose() {
+    _wikilinkDebounce?.cancel();
+    _bodyCtrl.removeListener(_checkWikilinkContext);
     _titleCtrl.dispose();
     _bodyCtrl.dispose();
     super.dispose();
+  }
+
+  void _checkWikilinkContext() {
+    if (!_isEditing) return;
+    final text = _bodyCtrl.text;
+    final openIdx = text.lastIndexOf('[[');
+    if (openIdx == -1) {
+      if (_partialWikilink != null) {
+        setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
+      }
+      return;
+    }
+    final afterOpen = text.substring(openIdx + 2);
+    if (afterOpen.contains(']]')) {
+      if (_partialWikilink != null) {
+        setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
+      }
+      return;
+    }
+    final partial = afterOpen.trim();
+    if (partial == _partialWikilink) return;
+    _partialWikilink = partial;
+    setState(() => _wikilinkLoading = true);
+
+    _wikilinkDebounce?.cancel();
+    _wikilinkDebounce = Timer(const Duration(milliseconds: 180), () async {
+      final results = await ref
+          .read(entryRepositoryProvider)
+          .search(partial.isEmpty ? '' : partial);
+      if (mounted) {
+        setState(() {
+          // Aktuellen Eintrag ausblenden
+          _wikilinkSuggestions = results
+              .where((e) => e.entry.id != widget.entryId)
+              .take(8)
+              .toList();
+          _wikilinkLoading = false;
+        });
+      }
+    });
+  }
+
+  void _insertWikilink(String title) {
+    final text = _bodyCtrl.text;
+    final openIdx = text.lastIndexOf('[[');
+    if (openIdx == -1) return;
+    final before = text.substring(0, openIdx);
+    final newText = '$before[[$title]]';
+    _bodyCtrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
+    );
+    setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
   }
 
   Future<void> _save() async {
@@ -38,7 +108,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
           title: _titleCtrl.text.trim(),
           body: _bodyCtrl.text,
         );
-    if (mounted) setState(() => _isEditing = false);
+    if (mounted) {
+      setState(() {
+        _isEditing = false;
+        _wikilinkSuggestions = [];
+        _partialWikilink = null;
+      });
+    }
   }
 
   Future<void> _delete() async {
@@ -111,6 +187,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
               onPressed: () => context.pop(),
             ),
             actions: [
+              // Home-Button: zurück zum Feed-Root
+              IconButton(
+                icon: const Icon(Icons.home_outlined,
+                    color: MFColors.textSecondary, size: 20),
+                tooltip: 'Zum Feed',
+                onPressed: () => context.go(AppRoutes.feed),
+              ),
               // Pin-Toggle
               IconButton(
                 icon: Icon(
@@ -223,17 +306,101 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
 
                 // Body
                 _isEditing
-                    ? TextField(
-                        controller: _bodyCtrl,
-                        maxLines: null,
-                        style: const TextStyle(
-                            fontSize: 15,
-                            color: MFColors.textPrimary,
-                            height: 1.6),
-                        decoration: const InputDecoration(
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                            filled: false),
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _bodyCtrl,
+                            maxLines: null,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                color: MFColors.textPrimary,
+                                height: 1.6),
+                            decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.zero,
+                                filled: false),
+                          ),
+                          // Wikilink-Autocomplete
+                          if (_wikilinkSuggestions.isNotEmpty || _wikilinkLoading)
+                            Container(
+                              margin: const EdgeInsets.only(top: 6),
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+                              decoration: BoxDecoration(
+                                color: MFColors.surfaceAlt,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: MFColors.border),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(children: [
+                                    const Text('Wikilink einfügen:',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: MFColors.textMuted,
+                                            fontFamily: 'monospace')),
+                                    if (_wikilinkLoading) ...[
+                                      const SizedBox(width: 6),
+                                      const SizedBox(
+                                        width: 8, height: 8,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 1.5,
+                                            color: MFColors.teal),
+                                      ),
+                                    ],
+                                  ]),
+                                  const SizedBox(height: 4),
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      children: _wikilinkSuggestions
+                                          .map((s) {
+                                        final t = s.entry.title ?? 'Unbenannt';
+                                        return Padding(
+                                          padding: const EdgeInsets.only(right: 6),
+                                          child: GestureDetector(
+                                            onTap: () => _insertWikilink(t),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  horizontal: 10, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF1E1B4B),
+                                                borderRadius:
+                                                    BorderRadius.circular(99),
+                                                border: Border.all(
+                                                    color: const Color(0xFF4338CA),
+                                                    width: 0.5),
+                                              ),
+                                              child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(
+                                                        Icons.layers_outlined,
+                                                        size: 11,
+                                                        color: Color(0xFFA78BFA)),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      t.length > 24
+                                                          ? '${t.substring(0, 24)}…'
+                                                          : t,
+                                                      style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color: Color(0xFFA78BFA),
+                                                          fontWeight:
+                                                              FontWeight.w500),
+                                                    ),
+                                                  ]),
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       )
                     : WikilinkText(
                         text: entry.body,
@@ -275,16 +442,17 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   ),
                 ],
 
-                // Properties
-                if (item.properties
-                    .where((p) => !_PropertiesTable._hidden
-                        .contains(p.key.toLowerCase()))
-                    .isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _PropertiesTable(
-                      properties: item.properties,
-                      entryId: entry.id),
-                ],
+                // Properties — immer sichtbar + eigene hinzufügen
+                const SizedBox(height: 16),
+                _PropertiesTable(
+                    properties: item.properties,
+                    entryId: entry.id),
+
+                // Container-Zuweisung
+                const SizedBox(height: 16),
+                _ContainerAssignment(
+                    entryId: entry.id,
+                    assignedIds: item.containerIds),
 
                 // Anhänge
                 if (item.attachments.isNotEmpty) ...[
@@ -501,48 +669,178 @@ class _PropertiesTable extends ConsumerWidget {
     final visible = properties
         .where((p) => !_hidden.contains(p.key.toLowerCase()))
         .toList();
-    if (visible.isEmpty) return const SizedBox.shrink();
 
     return _Section(
       label: 'Eigenschaften',
-      child: Container(
-        decoration: BoxDecoration(
-          color: MFColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: MFColors.border),
-        ),
-        child: Column(
-          children: visible.asMap().entries.map((e) {
-            final last = e.key == visible.length - 1;
-            final p = e.value;
-            return Container(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (visible.isNotEmpty)
+            Container(
               decoration: BoxDecoration(
-                border: last
-                    ? null
-                    : const Border(
-                        bottom: BorderSide(color: MFColors.border)),
+                color: MFColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: MFColors.border),
               ),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 9),
-              child: Row(children: [
-                SizedBox(
-                  width: 110,
-                  child: Text(p.key,
-                      style: const TextStyle(
+              child: Column(
+                children: visible.asMap().entries.map((e) {
+                  final last = e.key == visible.length - 1;
+                  final p = e.value;
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: last
+                          ? null
+                          : const Border(
+                              bottom: BorderSide(color: MFColors.border)),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 9),
+                    child: Row(children: [
+                      SizedBox(
+                        width: 110,
+                        child: Text(p.key,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: MFColors.textMuted,
+                                fontFamily: 'monospace')),
+                      ),
+                      Expanded(
+                        child: _EditablePropValue(
+                            prop: p, entryId: entryId),
+                      ),
+                      // Löschen-Button
+                      GestureDetector(
+                        onTap: () async {
+                          final allProps = await ref
+                              .read(propertyDaoProvider)
+                              .watchByEntry(entryId)
+                              .first;
+                          final remaining = allProps
+                              .where((x) => x.id != p.id)
+                              .map((x) => EntryPropertiesCompanion(
+                                    id: drift.Value(x.id),
+                                    entryId: drift.Value(x.entryId),
+                                    key: drift.Value(x.key),
+                                    value: drift.Value(x.value),
+                                    type: drift.Value(x.type),
+                                  ))
+                              .toList();
+                          await ref
+                              .read(propertyDaoProvider)
+                              .setProperties(entryId, remaining);
+                        },
+                        child: const Icon(Icons.close,
+                            size: 14, color: MFColors.textMuted),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              ),
+            ),
+          const SizedBox(height: 6),
+          // Property hinzufügen
+          GestureDetector(
+            onTap: () => _showAddPropertyDialog(context, ref),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: MFColors.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: MFColors.border),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add, size: 14, color: MFColors.teal),
+                  SizedBox(width: 6),
+                  Text('Eigenschaft hinzufügen',
+                      style: TextStyle(
                           fontSize: 12,
-                          color: MFColors.textMuted,
-                          fontFamily: 'monospace')),
-                ),
-                Expanded(
-                  child: _EditablePropValue(
-                      prop: p, entryId: entryId),
-                ),
-              ]),
-            );
-          }).toList(),
-        ),
+                          color: MFColors.teal,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  Future<void> _showAddPropertyDialog(
+      BuildContext context, WidgetRef ref) async {
+    final keyCtrl = TextEditingController();
+    final valCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Eigenschaft hinzufügen',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: keyCtrl,
+            autofocus: true,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: 'Name (z.B. Bewertung, Status)',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: valCtrl,
+            style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: 'Wert',
+              labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: MFColors.teal)),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: MFColors.textMuted))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Hinzufügen',
+                  style: TextStyle(color: MFColors.teal))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final key = keyCtrl.text.trim();
+    final val = valCtrl.text.trim();
+    if (key.isEmpty) return;
+
+    final allProps =
+        await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
+    final uuid = 'prop-${DateTime.now().millisecondsSinceEpoch}';
+    final newProp = EntryPropertiesCompanion(
+      id: drift.Value(uuid),
+      entryId: drift.Value(entryId),
+      key: drift.Value(key),
+      value: drift.Value(val.isEmpty ? null : val),
+      type: const drift.Value('string'),
+    );
+    await ref
+        .read(propertyDaoProvider)
+        .setProperties(entryId, [...allProps.map((p) => EntryPropertiesCompanion(
+              id: drift.Value(p.id),
+              entryId: drift.Value(p.entryId),
+              key: drift.Value(p.key),
+              value: drift.Value(p.value),
+              type: drift.Value(p.type),
+            )), newProp]);
   }
 }
 
@@ -660,6 +958,178 @@ class _AttachmentTile extends StatelessWidget {
           ),
         ]),
       );
+}
+
+// ─── Backlinks ────────────────────────────────────────────────────────────────
+// ─── Container-Zuweisung ──────────────────────────────────────────────────────
+class _ContainerAssignment extends ConsumerWidget {
+  final String entryId;
+  final List<String> assignedIds;
+  const _ContainerAssignment(
+      {required this.entryId, required this.assignedIds});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final containersAsync = ref.watch(allContainersProvider);
+
+    return _Section(
+      label: 'Container',
+      child: containersAsync.when(
+        loading: () => const SizedBox.shrink(),
+        error: (_, __) => const SizedBox.shrink(),
+        data: (all) {
+          // Nur project/area (keine Smart Hubs)
+          final available =
+              all.where((c) => c.kind != 'hub').toList();
+          final assigned =
+              available.where((c) => assignedIds.contains(c.id)).toList();
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (assigned.isNotEmpty)
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: assigned.map((c) {
+                    Color color;
+                    try {
+                      color = Color(int.parse(
+                          'FF${c.color.replaceFirst('#', '')}',
+                          radix: 16));
+                    } catch (_) {
+                      color = MFColors.teal;
+                    }
+                    return Container(
+                      padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+                      decoration: BoxDecoration(
+                        color: color.withAlpha(25),
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(
+                            color: color.withAlpha(80), width: 0.5),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(c.name,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: color,
+                                fontWeight: FontWeight.w500)),
+                        const SizedBox(width: 2),
+                        GestureDetector(
+                          onTap: () async {
+                            final newIds = assignedIds
+                                .where((id) => id != c.id)
+                                .toList();
+                            await ref
+                                .read(entryRepositoryProvider)
+                                .updateEntry(entryId,
+                                    containerIds: newIds);
+                          },
+                          child: Icon(Icons.close,
+                              size: 13, color: color.withAlpha(160)),
+                        ),
+                      ]),
+                    );
+                  }).toList(),
+                ),
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () => _showPicker(context, ref, available, assignedIds),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: MFColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: MFColors.border),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, size: 14, color: MFColors.teal),
+                      SizedBox(width: 6),
+                      Text('Container zuweisen',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: MFColors.teal,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context, WidgetRef ref,
+      List<dynamic> available, List<String> currentIds) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MFColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36,
+            height: 4,
+            margin: const EdgeInsets.only(top: 10, bottom: 12),
+            decoration: BoxDecoration(
+              color: MFColors.border,
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text('Container wählen',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: MFColors.textPrimary)),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: available
+                  .where((c) => !currentIds.contains(c.id))
+                  .map((c) {
+                Color color;
+                try {
+                  color = Color(int.parse(
+                      'FF${(c.color as String).replaceFirst('#', '')}',
+                      radix: 16));
+                } catch (_) {
+                  color = MFColors.teal;
+                }
+                return ListTile(
+                  dense: true,
+                  leading:
+                      Icon(Icons.folder_outlined, size: 18, color: color),
+                  title: Text(c.name as String,
+                      style: const TextStyle(
+                          fontSize: 13, color: MFColors.textPrimary)),
+                  subtitle: Text((c.kind as String).toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 10, color: MFColors.textMuted)),
+                  onTap: () =>
+                      Navigator.of(context).pop(c.id as String),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await ref.read(entryRepositoryProvider).updateEntry(entryId,
+        containerIds: [...currentIds, picked]);
+  }
 }
 
 // ─── Backlinks ────────────────────────────────────────────────────────────────

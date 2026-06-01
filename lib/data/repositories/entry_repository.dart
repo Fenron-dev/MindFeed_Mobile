@@ -81,6 +81,9 @@ class EntryRepository {
     String? urlDescription,
     String? urlImage,
     String? urlDomain,
+    List<String> urlGenres = const [],
+    int? urlScore,
+    String? urlMediaType,
     List<String> containerIds = const [],
   }) async {
     final id = 'e-${_uuid.v4()}';
@@ -131,6 +134,9 @@ class EntryRepository {
       addProp('og_description', urlDescription, 'string');
       addProp('og_image', urlImage, 'url');
       addProp('domain', urlDomain, 'string');
+      if (urlGenres.isNotEmpty) addProp('genres', urlGenres.join(', '), 'string');
+      if (urlScore != null) addProp('score', urlScore.toString(), 'number');
+      if (urlMediaType != null) addProp('media_type', urlMediaType, 'string');
       if (props.isNotEmpty) {
         await propertyDao.setProperties(id, props);
       }

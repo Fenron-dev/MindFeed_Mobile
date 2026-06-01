@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 
@@ -6,12 +7,19 @@ class UrlMetadata {
   final String description;
   final String? image;
   final String domain;
+  // Zusätzliche Felder für AniList
+  final List<String> genres;
+  final int? score;
+  final String? mediaType; // 'ANIME' | 'MANGA'
 
   const UrlMetadata({
     required this.title,
     required this.description,
     this.image,
     required this.domain,
+    this.genres = const [],
+    this.score,
+    this.mediaType,
   });
 }
 
@@ -28,6 +36,9 @@ class UrlMetadataService {
 
       if (host.contains('youtube.com') || host.contains('youtu.be')) {
         return _fetchYoutube(uri);
+      }
+      if (host.contains('anilist.co')) {
+        return _fetchAniList(uri);
       }
 
       final response = await http
@@ -71,6 +82,116 @@ class UrlMetadataService {
       } catch (_) {
         return null;
       }
+    }
+  }
+
+  // ─── AniList GraphQL ───────────────────────────────────────────────────────
+  // URL-Muster: /anime/<id>/, /manga/<id>/, /anime/<id>/title-slug/
+
+  static Future<UrlMetadata?> _fetchAniList(Uri uri) async {
+    try {
+      final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+      // segments[0] = 'anime'|'manga', segments[1] = id
+      if (segments.length < 2) return _domainFallback(uri);
+
+      final typeStr = segments[0].toUpperCase(); // ANIME | MANGA
+      final id = int.tryParse(segments[1]);
+      if (id == null) return _domainFallback(uri);
+
+      const query = r'''
+        query ($id: Int, $type: MediaType) {
+          Media(id: $id, type: $type) {
+            title { romaji english native }
+            description(asHtml: false)
+            coverImage { extraLarge large }
+            bannerImage
+            genres
+            averageScore
+            type
+            format
+            status
+            episodes
+            chapters
+            startDate { year }
+          }
+        }
+      ''';
+
+      final res = await http
+          .post(
+            Uri.parse('https://graphql.anilist.co'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'query': query,
+              'variables': {'id': id, 'type': typeStr},
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (res.statusCode != 200) return _domainFallback(uri);
+
+      final data = jsonDecode(res.body);
+      final media = data['data']?['Media'];
+      if (media == null) return _domainFallback(uri);
+
+      final titleObj = media['title'] as Map<String, dynamic>?;
+      final title = (titleObj?['english'] as String?)?.isNotEmpty == true
+          ? titleObj!['english'] as String
+          : (titleObj?['romaji'] as String?) ?? 'AniList';
+
+      final rawDesc = (media['description'] as String?) ?? '';
+      // HTML-Tags aus Beschreibung entfernen
+      final desc = rawDesc
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#039;', "'")
+          .trim();
+
+      final coverImg = (media['coverImage'] as Map<String, dynamic>?);
+      final image = (coverImg?['extraLarge'] as String?) ??
+          (coverImg?['large'] as String?) ??
+          (media['bannerImage'] as String?);
+
+      final genres = (media['genres'] as List<dynamic>?)
+              ?.map((g) => g.toString())
+              .toList() ??
+          [];
+
+      final score = media['averageScore'] as int?;
+      final mediaType = media['type'] as String?;
+      final format = media['format'] as String?;
+
+      // Beschreibungs-Prefix
+      final year = (media['startDate'] as Map?)?['year'];
+      final episodes = media['episodes'];
+      final chapters = media['chapters'];
+      final details = [
+        if (year != null) '$year',
+        ?format,
+        if (episodes != null) '$episodes Folgen',
+        if (chapters != null) '$chapters Kapitel',
+        if (score != null) '⭐ ${score / 10}',
+      ].join(' · ');
+
+      return UrlMetadata(
+        title: title,
+        description: details.isNotEmpty
+            ? '$details\n\n${desc.length > 300 ? '${desc.substring(0, 300)}…' : desc}'
+            : (desc.length > 300 ? '${desc.substring(0, 300)}…' : desc),
+        image: image,
+        domain: 'anilist.co',
+        genres: genres,
+        score: score,
+        mediaType: mediaType,
+      );
+    } catch (_) {
+      return _domainFallback(uri);
     }
   }
 
@@ -126,12 +247,12 @@ class UrlMetadataService {
 
   static String _hostLabel(Uri uri) {
     final host = uri.host.replaceFirst('www.', '');
-    // Versuche einen lesbaren Titel aus dem Pfad zu bauen
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segments.isNotEmpty) {
       final last = segments.last.replaceAll(RegExp(r'[-_]'), ' ');
       if (last.length > 3 && !last.contains('.')) {
-        final readable = last.split(' ')
+        final readable = last
+            .split(' ')
             .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
             .join(' ');
         return '$readable — $host';
