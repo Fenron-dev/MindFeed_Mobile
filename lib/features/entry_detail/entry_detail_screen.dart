@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +13,7 @@ import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
+import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
@@ -31,6 +33,7 @@ class EntryDetailScreen extends ConsumerStatefulWidget {
 
 class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _isEditing = false;
+  bool _showPreview = false; // Markdown-Preview im Edit-Modus
   bool _enriching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
@@ -107,6 +110,95 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       selection: TextSelection.collapsed(offset: newText.length),
     );
     setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+  }
+
+  String _fmtDate(DateTime dt) =>
+      DateFormat('dd.MM.yy HH:mm').format(dt.toLocal());
+
+  Future<void> _pickReminder(BuildContext ctx, String entryId,
+      DateTime? current, String label) async {
+    // Wenn bereits gesetzt → anbieten zu löschen oder zu ändern
+    if (current != null) {
+      final action = await showDialog<String>(
+        context: ctx,
+        builder: (_) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Erinnerung',
+              style: TextStyle(color: MFColors.textPrimary)),
+          content: Text('Gesetzt auf ${_fmtDate(current)}',
+              style: const TextStyle(
+                  color: MFColors.textSecondary, fontSize: 13)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'delete'),
+                child: const Text('Löschen',
+                    style: TextStyle(color: Colors.redAccent))),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'change'),
+                child: const Text('Ändern',
+                    style: TextStyle(color: MFColors.teal))),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Abbrechen',
+                    style: TextStyle(color: MFColors.textMuted))),
+          ],
+        ),
+      );
+      if (action == 'delete') {
+        await ref.read(entryRepositoryProvider)
+            .updateEntry(entryId, clearReminder: true);
+        await NotificationService.cancel(
+            NotificationService.idFromEntryId(entryId));
+        return;
+      }
+      if (action != 'change') return;
+    }
+
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: ctx,
+      initialDate: current?.toLocal() ?? now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365 * 2)),
+      builder: (_, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(primary: MFColors.teal),
+        ),
+        child: child!,
+      ),
+    );
+    if (date == null || !ctx.mounted) return;
+
+    final time = await showTimePicker(
+      context: ctx,
+      initialTime: TimeOfDay.fromDateTime(
+          current?.toLocal() ?? now.add(const Duration(hours: 1))),
+      builder: (_, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(primary: MFColors.teal),
+        ),
+        child: child!,
+      ),
+    );
+    if (time == null) return;
+
+    final reminder = DateTime(
+        date.year, date.month, date.day, time.hour, time.minute);
+    await ref.read(entryRepositoryProvider)
+        .updateEntry(entryId, reminderAt: reminder);
+    await NotificationService.schedule(
+      id: NotificationService.idFromEntryId(entryId),
+      title: 'MindFeed Erinnerung',
+      body: label.length > 80 ? '${label.substring(0, 80)}…' : label,
+      when: reminder,
+    );
+    if (ctx.mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+        content: Text('Erinnerung gesetzt: ${_fmtDate(reminder)}'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFFF59E0B),
+      ));
+    }
   }
 
   Future<void> _enrichWithAi(String entryId, String body, String? title) async {
@@ -253,6 +345,23 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 tooltip: 'Zum Feed',
                 onPressed: () => context.go(AppRoutes.feed),
               ),
+              // Erinnerung
+              IconButton(
+                icon: Icon(
+                  entry.reminderAt != null
+                      ? Icons.alarm_on_rounded
+                      : Icons.alarm_add_outlined,
+                  color: entry.reminderAt != null
+                      ? const Color(0xFFF59E0B)
+                      : MFColors.textSecondary,
+                  size: 20,
+                ),
+                tooltip: entry.reminderAt != null
+                    ? 'Erinnerung: ${_fmtDate(entry.reminderAt!)}'
+                    : 'Erinnerung setzen',
+                onPressed: () => _pickReminder(context, entry.id,
+                    entry.reminderAt, entry.title ?? entry.body),
+              ),
               // Pin-Toggle
               IconButton(
                 icon: Icon(
@@ -270,12 +379,28 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
               ),
               // Edit / Save
               _isEditing
-                  ? TextButton(
-                      onPressed: _save,
-                      child: const Text('Speichern',
-                          style: TextStyle(
-                              color: MFColors.teal,
-                              fontWeight: FontWeight.bold)))
+                  ? Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(
+                        icon: Icon(
+                          _showPreview
+                              ? Icons.edit_outlined
+                              : Icons.preview_outlined,
+                          size: 20,
+                          color: _showPreview
+                              ? MFColors.teal
+                              : MFColors.textSecondary,
+                        ),
+                        tooltip: _showPreview ? 'Bearbeiten' : 'Vorschau',
+                        onPressed: () =>
+                            setState(() => _showPreview = !_showPreview),
+                      ),
+                      TextButton(
+                        onPressed: _save,
+                        child: const Text('Speichern',
+                            style: TextStyle(
+                                color: MFColors.teal,
+                                fontWeight: FontWeight.bold))),
+                    ])
                   : IconButton(
                       icon: const Icon(Icons.edit_outlined,
                           color: MFColors.textSecondary, size: 20),
@@ -374,7 +499,51 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TextField(
+                          // Markdown-Vorschau oder Rohtext
+                          if (_showPreview)
+                            MarkdownBody(
+                              data: _bodyCtrl.text.isEmpty
+                                  ? '_Noch kein Inhalt_'
+                                  : _bodyCtrl.text,
+                              styleSheet: MarkdownStyleSheet(
+                                p: const TextStyle(
+                                    fontSize: 15,
+                                    color: MFColors.textPrimary,
+                                    height: 1.6),
+                                code: const TextStyle(
+                                    fontSize: 13,
+                                    color: MFColors.teal,
+                                    fontFamily: 'monospace',
+                                    backgroundColor: MFColors.surfaceAlt),
+                                blockquoteDecoration: BoxDecoration(
+                                  color: MFColors.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: const Border(
+                                      left: BorderSide(
+                                          color: MFColors.teal, width: 3)),
+                                ),
+                                h1: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: MFColors.textPrimary),
+                                h2: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                    color: MFColors.textPrimary),
+                                h3: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: MFColors.textPrimary),
+                                strong: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: MFColors.textPrimary),
+                                em: const TextStyle(
+                                    fontStyle: FontStyle.italic,
+                                    color: MFColors.textSecondary),
+                              ),
+                            )
+                          else
+                            TextField(
                             controller: _bodyCtrl,
                             maxLines: null,
                             style: const TextStyle(

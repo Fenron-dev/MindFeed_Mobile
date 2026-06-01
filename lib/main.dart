@@ -7,6 +7,7 @@ import 'core/router.dart';
 import 'core/di.dart';
 import 'core/vault_manager.dart';
 import 'data/db/app_database.dart' hide Container;
+import 'services/notification_service.dart';
 
 /// Globaler Callback — wird von BackupService nach einem Restore aufgerufen
 /// um die App mit der neuen Datenbank neu zu starten.
@@ -26,6 +27,8 @@ void main() async {
 Future<void> _launchApp() async {
   AppDatabase? db;
   String? startupError;
+
+  await NotificationService.init();
 
   try {
     db = await VaultManager.openDefaultVault();

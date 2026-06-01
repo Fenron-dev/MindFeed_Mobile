@@ -168,6 +168,8 @@ class EntryRepository {
     String? status,
     bool? pinned,
     List<String>? containerIds,
+    DateTime? reminderAt,
+    bool clearReminder = false,
   }) async {
     final existing = await entryDao.getById(id);
     if (existing == null) throw StateError('Entry $id nicht gefunden');
@@ -178,6 +180,11 @@ class EntryRepository {
       title: title != null ? Value(title) : Value(existing.title),
       status: status != null ? Value(status) : Value(existing.status),
       pinned: pinned != null ? Value(pinned) : Value(existing.pinned),
+      reminderAt: clearReminder
+          ? const Value(null)
+          : reminderAt != null
+              ? Value(reminderAt.toUtc())
+              : Value(existing.reminderAt),
       updatedAt: Value(DateTime.now().toUtc()),
     ));
 

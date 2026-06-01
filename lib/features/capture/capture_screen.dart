@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import '../../core/di.dart';
@@ -11,7 +12,12 @@ import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/tag_parser.dart';
+import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
+
+const _storage = FlutterSecureStorage();
+const _keyApiKey = 'openrouter_api_key';
+const _keyAiModel = 'openrouter_model';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   final String? initialText;
@@ -61,10 +67,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     });
   }
 
+  Timer? _autoSaveDebounce;
+
   @override
   void dispose() {
     _urlDebounce?.cancel();
     _wikilinkDebounce?.cancel();
+    _autoSaveDebounce?.cancel();
     _bodyCtrl.removeListener(_onBodyChanged);
     _bodyCtrl.dispose();
     _titleCtrl.dispose();
@@ -72,10 +81,31 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     super.dispose();
   }
 
+  // Fügt Text an der aktuellen Cursor-Position ein
+  void _insertAtCursor(String text) {
+    final ctrl = _bodyCtrl;
+    final sel = ctrl.selection;
+    final current = ctrl.text;
+    final start = sel.isValid ? sel.start : current.length;
+    final end = sel.isValid ? sel.end : current.length;
+    final newText = current.replaceRange(start, end, text);
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+    _bodyFocus.requestFocus();
+  }
+
   void _onBodyChanged() {
     setState(() {
       _parsedTags = TagParser.parse(_bodyCtrl.text);
     });
+    if (_autoSave && _bodyCtrl.text.trim().isNotEmpty) {
+      _autoSaveDebounce?.cancel();
+      _autoSaveDebounce = Timer(const Duration(seconds: 3), () {
+        if (mounted && _bodyCtrl.text.trim().isNotEmpty && !_isSaving) _save();
+      });
+    }
     _scheduleUrlCheck();
     _checkWikilinkContext();
   }
@@ -267,6 +297,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             urlMediaType: _urlPreview?.mediaType,
           );
       await _saveAttachments(createdEntry.entry.id);
+
+      // Auto-KI Anreicherung wenn Toggle aktiv
+      if (_autoAi) {
+        final apiKey = await _storage.read(key: _keyApiKey) ?? '';
+        if (apiKey.isNotEmpty) {
+          try {
+            final model = await _storage.read(key: _keyAiModel) ?? '';
+            final svc = OpenRouterService(
+              apiKey: apiKey,
+              model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
+            );
+            final result = await svc.enrichEntry(
+              createdEntry.entry.body,
+              existingTitle: createdEntry.entry.title,
+            );
+            if (result.tags.isNotEmpty || result.title != null) {
+              final tagLine = result.tags.map((t) => '#$t').join(' ');
+              await ref.read(entryRepositoryProvider).updateEntry(
+                    createdEntry.entry.id,
+                    title: result.title ?? createdEntry.entry.title,
+                    body: result.tags.isNotEmpty
+                        ? '${createdEntry.entry.body}\n$tagLine'
+                        : createdEntry.entry.body,
+                  );
+            }
+          } catch (_) {
+            // KI-Fehler still ignorieren — Eintrag ist gespeichert
+          }
+        }
+      }
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() => _isSaving = false);
@@ -592,6 +653,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             onTitleToggle: () =>
                 setState(() => _showTitle = !_showTitle),
             onImagePick: _pickImage,
+            onTagInsert: () => _insertAtCursor('#'),
+            onLinkInsert: () => _insertAtCursor('https://'),
           ),
         ],
       ),
@@ -622,9 +685,13 @@ class _TagPreviewChip extends StatelessWidget {
 class _CaptureToolbar extends StatelessWidget {
   final VoidCallback onTitleToggle;
   final VoidCallback onImagePick;
+  final VoidCallback onTagInsert;
+  final VoidCallback onLinkInsert;
   const _CaptureToolbar({
     required this.onTitleToggle,
     required this.onImagePick,
+    required this.onTagInsert,
+    required this.onLinkInsert,
   });
 
   @override
@@ -635,10 +702,11 @@ class _CaptureToolbar extends StatelessWidget {
           border: Border(top: BorderSide(color: MFColors.border))),
         child: Row(children: [
           _TBtn(Icons.title_rounded, 'Titel', onTitleToggle),
-          _TBtn(Icons.image_outlined, 'Bild anhängen', onImagePick),
-          _TBtn(Icons.mic_outlined, 'Sprachaufnahme', () {}),
+          _TBtn(Icons.image_outlined, 'Bild', onImagePick),
+          _TBtn(Icons.link_rounded, 'Link', onLinkInsert),
+          _TBtn(Icons.mic_outlined, 'Audio', () {}),
           const Spacer(),
-          _TBtn(Icons.tag_rounded, 'Tag', () {}),
+          _TBtn(Icons.tag_rounded, '#Tag', onTagInsert),
         ]),
       );
 }
