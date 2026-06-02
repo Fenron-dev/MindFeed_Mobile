@@ -60,8 +60,13 @@ class UrlMetadataService {
       if (host.contains('anilist.co')) {
         return _fetchAniList(uri);
       }
-      if (host.contains('boardgamegeek.com')) {
+      if (host.contains('boardgamegeek.com') ||
+          host.contains('videogamegeek.com') ||
+          host.contains('rpggeek.com')) {
         return _fetchBgg(url);
+      }
+      if (host.contains('github.com')) {
+        return _fetchGitHub(uri);
       }
 
       final response = await http
@@ -322,7 +327,7 @@ class UrlMetadataService {
     return (season, season + sequelCount);
   }
 
-  // ─── BoardGameGeek XML API ────────────────────────────────────────────────
+  // ─── BoardGameGeek / VideoGameGeek / RPGGeek JSON API ────────────────────
 
   static Future<UrlMetadata?> _fetchBgg(String url) async {
     try {
@@ -331,33 +336,28 @@ class UrlMetadataService {
       final game = await BggService.fetchById(id);
       if (game == null) return _domainFallback(Uri.parse(url));
 
-      final details = [
-        if (game.year.isNotEmpty) game.year,
-        if (game.playersLabel.isNotEmpty) game.playersLabel,
-        if (game.avgRating != null)
-          '⭐ ${game.avgRating!.toStringAsFixed(1)}/10',
-        if (game.categories.isNotEmpty) game.categories.take(3).join(', '),
-      ].join(' · ');
-
-      final desc = game.description.length > 400
-          ? '${game.description.substring(0, 400)}…'
+      // Reiner Beschreibungstext (Metadaten stehen in separaten Properties)
+      final desc = game.description.length > 600
+          ? '${game.description.substring(0, 600)}…'
           : game.description;
+
+      final domain = Uri.parse(url).host.replaceFirst('www.', '');
 
       return UrlMetadata(
         title: game.name,
-        description: details.isNotEmpty ? '$details\n\n$desc' : desc,
+        description: desc,
         image: game.image ?? game.thumbnail,
-        domain: 'boardgamegeek.com',
+        domain: domain,
         genres: game.categories,
         score: game.avgRating != null ? (game.avgRating! * 10).round() : null,
-        mediaType: game.type == 'rpgitem' ? 'TTRPG' : 'BOARDGAME',
+        mediaType: game.mediaType,
       );
     } catch (_) {
       return _domainFallback(Uri.parse(url));
     }
   }
 
-  // ─── YouTube oEmbed ────────────────────────────────────────────────────────
+  // ─── YouTube oEmbed + Beschreibung ───────────────────────────────────────
 
   static Future<UrlMetadata?> _fetchYoutube(Uri uri) async {
     try {
@@ -368,29 +368,62 @@ class UrlMetadataService {
       if (vid == null) return null;
       if (vid.contains('?')) vid = vid.split('?').first;
 
-      final res = await http
+      // oEmbed für Titel, Kanal und Thumbnail
+      final oEmbedFuture = http
           .get(Uri.parse(
               'https://www.youtube.com/oembed'
               '?url=https://www.youtube.com/watch?v=$vid&format=json'))
           .timeout(const Duration(seconds: 6));
 
-      if (res.statusCode != 200) {
-        return UrlMetadata(
-          title: 'YouTube Video',
-          description: '',
-          image: 'https://img.youtube.com/vi/$vid/hqdefault.jpg',
-          domain: 'youtube.com',
-        );
+      // Seite mit Googlebot-UA für Videobeschreibung
+      final descFuture = http
+          .get(
+            Uri.parse('https://www.youtube.com/watch?v=$vid'),
+            headers: {'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)'},
+          )
+          .timeout(const Duration(seconds: 8));
+
+      final results = await Future.wait([oEmbedFuture, descFuture],
+          eagerError: false);
+
+      final oRes = results[0];
+      final dRes = results[1];
+
+      String title = 'YouTube Video';
+      String author = 'YouTube';
+      String thumb = 'https://img.youtube.com/vi/$vid/hqdefault.jpg';
+
+      if (oRes.statusCode == 200) {
+        title = _jsonStr(oRes.body, 'title') ?? title;
+        author = _jsonStr(oRes.body, 'author_name') ?? author;
+        thumb = _jsonStr(oRes.body, 'thumbnail_url') ?? thumb;
       }
 
-      final title = _jsonStr(res.body, 'title') ?? 'YouTube Video';
-      final author = _jsonStr(res.body, 'author_name') ?? 'YouTube';
-      final thumb = _jsonStr(res.body, 'thumbnail_url') ??
-          'https://img.youtube.com/vi/$vid/hqdefault.jpg';
+      // Beschreibung aus der Seite extrahieren
+      String description = '';
+      if (dRes.statusCode == 200) {
+        final descMatch = RegExp(
+          r'<meta\s+name="description"\s+content="([^"]{10,})"',
+          caseSensitive: false,
+        ).firstMatch(dRes.body);
+        if (descMatch != null) {
+          description = descMatch.group(1) ?? '';
+          // HTML-Entities dekodieren
+          description = description
+              .replaceAll('&amp;', '&')
+              .replaceAll('&lt;', '<')
+              .replaceAll('&gt;', '>')
+              .replaceAll('&quot;', '"')
+              .replaceAll('&#39;', "'");
+          if (description.length > 500) {
+            description = '${description.substring(0, 500)}…';
+          }
+        }
+      }
 
       return UrlMetadata(
         title: title,
-        description: 'YouTube-Video von $author',
+        description: description,
         image: thumb,
         domain: 'youtube.com',
         authorName: author,
@@ -398,6 +431,163 @@ class UrlMetadataService {
       );
     } catch (_) {
       return null;
+    }
+  }
+
+  // ─── GitHub API ────────────────────────────────────────────────────────────
+  // URL-Muster:
+  //   github.com/owner/repo
+  //   github.com/owner/repo/issues/123
+  //   github.com/owner/repo/pull/123
+
+  static Future<UrlMetadata?> _fetchGitHub(Uri uri) async {
+    try {
+      final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+      if (segs.length < 2) return _domainFallback(uri);
+      final owner = segs[0];
+      final repo = segs[1];
+
+      // Issue
+      if (segs.length >= 4 && segs[2] == 'issues') {
+        final num = int.tryParse(segs[3]);
+        if (num != null) return _fetchGitHubIssue(owner, repo, num, uri);
+      }
+      // PR
+      if (segs.length >= 4 && segs[2] == 'pull') {
+        final num = int.tryParse(segs[3]);
+        if (num != null) return _fetchGitHubPr(owner, repo, num, uri);
+      }
+
+      return _fetchGitHubRepo(owner, repo, uri);
+    } catch (_) {
+      return _domainFallback(uri);
+    }
+  }
+
+  static Future<UrlMetadata?> _fetchGitHubRepo(
+      String owner, String repo, Uri fallbackUri) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('https://api.github.com/repos/$owner/$repo'),
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'MindFeed-Mobile',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return _domainFallback(fallbackUri);
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final fullName = data['full_name'] as String? ?? '$owner/$repo';
+      final desc = data['description'] as String? ?? '';
+      final stars = data['stargazers_count'] as int? ?? 0;
+      final forks = data['forks_count'] as int? ?? 0;
+      final lang = data['language'] as String?;
+      final topics = (data['topics'] as List?)
+              ?.map((t) => t.toString())
+              .toList() ??
+          [];
+
+      final details = [
+        if (lang != null) lang,
+        '⭐ $stars',
+        if (forks > 0) '🍴 $forks',
+      ].join(' · ');
+
+      return UrlMetadata(
+        title: fullName,
+        description: [details, if (desc.isNotEmpty) desc].join('\n'),
+        image: 'https://opengraph.githubassets.com/1/${Uri.encodeComponent(owner)}/${Uri.encodeComponent(repo)}',
+        domain: 'github.com',
+        genres: topics,
+        mediaType: 'GITHUB',
+      );
+    } catch (_) {
+      return _domainFallback(fallbackUri);
+    }
+  }
+
+  static Future<UrlMetadata?> _fetchGitHubIssue(
+      String owner, String repo, int number, Uri fallbackUri) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('https://api.github.com/repos/$owner/$repo/issues/$number'),
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'MindFeed-Mobile',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return _domainFallback(fallbackUri);
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final title = data['title'] as String? ?? 'Issue #$number';
+      final state = data['state'] as String? ?? '';
+      final body = (data['body'] as String? ?? '').trim();
+      final labels = (data['labels'] as List?)
+              ?.map((l) => (l as Map)['name'] as String? ?? '')
+              .where((n) => n.isNotEmpty)
+              .toList() ??
+          [];
+
+      return UrlMetadata(
+        title: '$title [#$number]',
+        description: [
+          '${state.toUpperCase()} · $owner/$repo',
+          if (body.isNotEmpty)
+            body.length > 400 ? '${body.substring(0, 400)}…' : body,
+        ].join('\n'),
+        domain: 'github.com',
+        genres: labels,
+        mediaType: 'GITHUB',
+      );
+    } catch (_) {
+      return _domainFallback(fallbackUri);
+    }
+  }
+
+  static Future<UrlMetadata?> _fetchGitHubPr(
+      String owner, String repo, int number, Uri fallbackUri) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('https://api.github.com/repos/$owner/$repo/pulls/$number'),
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'MindFeed-Mobile',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return _domainFallback(fallbackUri);
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final title = data['title'] as String? ?? 'PR #$number';
+      final state = data['state'] as String? ?? '';
+      final merged = data['merged'] as bool? ?? false;
+      final body = (data['body'] as String? ?? '').trim();
+      final labels = (data['labels'] as List?)
+              ?.map((l) => (l as Map)['name'] as String? ?? '')
+              .where((n) => n.isNotEmpty)
+              .toList() ??
+          [];
+
+      final stateLabel = merged ? 'MERGED' : state.toUpperCase();
+
+      return UrlMetadata(
+        title: '$title [PR #$number]',
+        description: [
+          '$stateLabel · $owner/$repo',
+          if (body.isNotEmpty)
+            body.length > 400 ? '${body.substring(0, 400)}…' : body,
+        ].join('\n'),
+        domain: 'github.com',
+        genres: labels,
+        mediaType: 'GITHUB',
+      );
+    } catch (_) {
+      return _domainFallback(fallbackUri);
     }
   }
 

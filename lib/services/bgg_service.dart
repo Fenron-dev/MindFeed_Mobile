@@ -1,106 +1,143 @@
+import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// BoardGameGeek XML API2 — öffentlich, kein Auth nötig (von Mobilgeräten)
+/// GeekDo / BGG / VGG / RPGG — öffentliche JSON-API (kein Auth nötig)
+/// Endpunkt: https://api.geekdo.com/api/geekitems?objectid=X&objecttype=thing
 class BggService {
-  static const _base = 'https://boardgamegeek.com/xmlapi2';
+  static const _apiBase = 'https://api.geekdo.com/api';
 
-  // ─── Suche ────────────────────────────────────────────────────────────────
+  // ─── ID aus URL extrahieren ───────────────────────────────────────────────
+  // Unterstützt BGG, VGG und RPGGeek URLs:
+  //   boardgamegeek.com/boardgame/<id>/slug
+  //   videogamegeek.com/videogame/<id>/slug
+  //   rpggeek.com/rpgitem/<id>/slug   oder  rpggeek.com/rpg/<id>/slug
 
-  static Future<List<BggSearchResult>> search(String query) async {
-    if (query.trim().isEmpty) return [];
-    final uri = Uri.parse(
-        '$_base/search?query=${Uri.encodeComponent(query)}&type=boardgame,rpgitem');
-    try {
-      final res = await http.get(uri, headers: _headers).timeout(
-          const Duration(seconds: 10));
-      if (res.statusCode != 200) return [];
-      return _parseSearch(res.body);
-    } catch (_) {
-      return [];
-    }
+  static String? extractBggId(String url) {
+    final match = RegExp(
+      r'(?:boardgame|videogame|rpg)geek\.com/(?:boardgame|videogame|rpgitem|rpg)/(\d+)',
+    ).firstMatch(url);
+    return match?.group(1);
   }
 
-  // ─── Details zu einer BGG-ID ─────────────────────────────────────────────
+  // ─── Details zu einer Geekdo-ID ──────────────────────────────────────────
 
   static Future<BggGame?> fetchById(String id) async {
-    final uri = Uri.parse('$_base/thing?id=$id&stats=1');
+    final uri = Uri.parse('$_apiBase/geekitems?objectid=$id&objecttype=thing');
     try {
       final res = await http.get(uri, headers: _headers).timeout(
           const Duration(seconds: 10));
       if (res.statusCode != 200) return null;
-      return _parseThing(res.body);
+      return _parseItem(jsonDecode(res.body) as Map<String, dynamic>);
     } catch (_) {
       return null;
     }
   }
 
-  // ─── URL-Erkennung (boardgamegeek.com/boardgame/<id>/...) ────────────────
+  // ─── Suche (für Settings-Screen) ─────────────────────────────────────────
 
-  static String? extractBggId(String url) {
-    final match =
-        RegExp(r'boardgamegeek\.com/(?:boardgame|rpgitem)/(\d+)')
-            .firstMatch(url);
-    return match?.group(1);
-  }
-
-  // ─── XML-Parser (Regex-basiert, kein Zusatzpaket) ────────────────────────
-
-  static List<BggSearchResult> _parseSearch(String xml) {
-    final results = <BggSearchResult>[];
-    final itemPattern = RegExp(
-        r'<item\s+type="([^"]+)"\s+id="(\d+)"[^>]*>(.*?)</item>',
-        dotAll: true);
-    for (final m in itemPattern.allMatches(xml)) {
-      final type = m.group(1) ?? '';
-      final id = m.group(2) ?? '';
-      final inner = m.group(3) ?? '';
-      final name = _attrVal(inner, 'name', typeFilter: 'primary') ??
-          _attrVal(inner, 'name') ?? '';
-      final year = _attrVal(inner, 'yearpublished') ?? '';
-      results.add(BggSearchResult(id: id, name: name, year: year, type: type));
+  static Future<List<BggSearchResult>> search(String query) async {
+    if (query.trim().isEmpty) return [];
+    // GeekDo-Suche
+    final uri = Uri.parse(
+        '$_apiBase/search?q=${Uri.encodeComponent(query)}&objecttype=thing&nosession=1');
+    try {
+      final res = await http.get(uri, headers: _headers).timeout(
+          const Duration(seconds: 10));
+      if (res.statusCode != 200) return [];
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = (data['items'] as List?) ?? [];
+      return items.map((i) {
+        final m = i as Map<String, dynamic>;
+        return BggSearchResult(
+          id: m['objectid']?.toString() ?? '',
+          name: m['name'] as String? ?? '',
+          year: m['yearpublished']?.toString() ?? '',
+          type: m['subtype'] as String? ?? 'boardgame',
+        );
+      }).where((r) => r.id.isNotEmpty).toList();
+    } catch (_) {
+      return [];
     }
-    return results;
   }
 
-  static BggGame? _parseThing(String xml) {
-    final itemMatch =
-        RegExp(r'<item\s+type="([^"]+)"\s+id="(\d+)"[^>]*>(.*?)</item>',
-                dotAll: true)
-            .firstMatch(xml);
-    if (itemMatch == null) return null;
+  // ─── Item aus JSON-Antwort parsen ─────────────────────────────────────────
 
-    final type = itemMatch.group(1) ?? 'boardgame';
-    final id = itemMatch.group(2) ?? '';
-    final inner = itemMatch.group(3) ?? '';
+  static BggGame? _parseItem(Map<String, dynamic> data) {
+    final item = data['item'] as Map<String, dynamic>?;
+    if (item == null) return null;
 
-    final thumbnail = _tagContent(inner, 'thumbnail');
-    final image = _tagContent(inner, 'image');
-    final name = _attrVal(inner, 'name', typeFilter: 'primary') ??
-        _attrVal(inner, 'name') ?? '';
-    final desc = _tagContent(inner, 'description') ?? '';
-    final year = _attrVal(inner, 'yearpublished') ?? '';
-    final minP = _attrVal(inner, 'minplayers') ?? '';
-    final maxP = _attrVal(inner, 'maxplayers') ?? '';
-    final avgStr = _nestedAttr(inner, 'average') ?? '';
-    final avg = double.tryParse(avgStr);
+    final id = item['objectid']?.toString() ?? '';
+    final subtype = item['subtype'] as String? ?? 'boardgame';
+    final name = item['name'] as String? ?? '';
 
-    // Kategorien + Mechaniken
-    final categories = _linkValues(inner, 'boardgamecategory');
-    final mechanics = _linkValues(inner, 'boardgamemechanic');
-    final designers = _linkValues(inner, 'boardgamedesigner');
-    final publishers = _linkValues(inner, 'boardgamepublisher');
+    // Beschreibung: HTML bereinigen
+    final rawDesc = item['description'] as String? ?? '';
+    final desc = _cleanHtml(rawDesc);
+    final shortDesc = item['short_description'] as String? ?? '';
+    final finalDesc = desc.isNotEmpty ? desc : shortDesc;
+
+    final year = item['yearpublished']?.toString() ?? '';
+    final minP = item['minplayers']?.toString() ?? '';
+    final maxP = item['maxplayers']?.toString() ?? '';
+    final minTime = item['minplaytime']?.toString() ?? '';
+    final maxTime = item['maxplaytime']?.toString() ?? '';
+
+    // Bilder: imageurl (246×300 fit) oder images.original (full)
+    final images = item['images'] as Map<String, dynamic>? ?? {};
+    final imageurl = item['imageurl'] as String?;
+    final originalUrl = images['original'] is String
+        ? images['original'] as String
+        : imageurl;
+
+    // Links (Kategorien, Mechaniken, Designer, Publisher)
+    final links = item['links'] as Map<String, dynamic>? ?? {};
+    List<String> _names(String key) =>
+        ((links[key] as List?) ?? [])
+            .map((l) => (l as Map)['name'] as String? ?? '')
+            .where((n) => n.isNotEmpty)
+            .toList();
+
+    final categories = [
+      ..._names('boardgamecategory'),
+      ..._names('videogamecategory'),
+      ..._names('videogamegenre'),
+      ..._names('rpgcategory'),
+    ];
+    final mechanics = [
+      ..._names('boardgamemechanic'),
+      ..._names('videogamemechanic'),
+    ];
+    final designers = [
+      ..._names('boardgamedesigner'),
+      ..._names('videogamedesigner'),
+    ];
+    final publishers = [
+      ..._names('boardgamepublisher'),
+      ..._names('videogamepublisher'),
+    ];
+
+    // MediaType aus subtype ableiten
+    final mediaType = switch (subtype) {
+      'boardgame' || 'boardgameexpansion' => 'BOARDGAME',
+      'videogame' => 'VIDEOGAME',
+      'rpgitem' => 'TTRPG',
+      _ => 'BOARDGAME',
+    };
 
     return BggGame(
       id: id,
-      type: type,
+      type: subtype,
+      mediaType: mediaType,
       name: name,
-      description: _decodeHtml(desc),
+      description: finalDesc,
       year: year,
-      thumbnail: thumbnail,
-      image: image,
+      thumbnail: imageurl,
+      image: originalUrl,
       minPlayers: minP,
       maxPlayers: maxP,
-      avgRating: avg,
+      minPlaytime: minTime,
+      maxPlaytime: maxTime,
+      avgRating: null, // Erfordert Auth → nicht verfügbar
       categories: categories,
       mechanics: mechanics,
       designers: designers,
@@ -108,50 +145,30 @@ class BggService {
     );
   }
 
-  // ─── Regex-Helfer ─────────────────────────────────────────────────────────
+  // ─── HTML-Bereinigung ─────────────────────────────────────────────────────
 
-  /// Liest value="..." von einem Tag, optional gefiltert nach type="primary"
-  static String? _attrVal(String xml, String tag, {String? typeFilter}) {
-    final pattern = typeFilter != null
-        ? RegExp('<$tag\\s[^>]*?type="$typeFilter"[^>]*?value="([^"]*)"')
-        : RegExp('<$tag\\s[^>]*?value="([^"]*)"');
-    return pattern.firstMatch(xml)?.group(1);
-  }
-
-  /// Liest <tag>content</tag>
-  static String? _tagContent(String xml, String tag) {
-    final m = RegExp('<$tag>([\\s\\S]*?)</$tag>').firstMatch(xml);
-    return m?.group(1)?.trim();
-  }
-
-  /// Liest verschachteltes value="..." (z.B. <average value="7.1">)
-  static String? _nestedAttr(String xml, String tag) {
-    final m = RegExp('<$tag\\s+[^>]*?value="([^"]*)"').firstMatch(xml);
-    return m?.group(1);
-  }
-
-  /// Alle value="..." von <link type="linkType" ...>
-  static List<String> _linkValues(String xml, String linkType) {
-    final pattern =
-        RegExp('<link\\s+type="$linkType"[^>]*?value="([^"]*)"');
-    return pattern.allMatches(xml).map((m) => m.group(1) ?? '').toList();
-  }
-
-  /// Minimales HTML-Entity-Decoding
-  static String _decodeHtml(String s) => s
+  static String _cleanHtml(String html) => html
+      .replaceAll(RegExp(r'<[^>]*>'), '')
       .replaceAll('&amp;', '&')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
       .replaceAll('&#039;', "'")
-      .replaceAll('<br/>', '\n')
-      .replaceAll('<br>', '\n');
+      .replaceAll('&mdash;', '—')
+      .replaceAll('&ndash;', '–')
+      .replaceAll('&rsquo;', "'")
+      .replaceAll('&lsquo;', "'")
+      .replaceAll('&rdquo;', '"')
+      .replaceAll('&ldquo;', '"')
+      .replaceAll('&hellip;', '…')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 
   static const _headers = {
     'User-Agent':
         'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
-    'Accept': 'application/xml,text/xml,*/*',
+    'Accept': 'application/json,*/*',
   };
 }
 
@@ -161,7 +178,7 @@ class BggSearchResult {
   final String id;
   final String name;
   final String year;
-  final String type; // 'boardgame' | 'rpgitem'
+  final String type; // 'boardgame' | 'videogame' | 'rpgitem'
 
   const BggSearchResult({
     required this.id,
@@ -174,6 +191,7 @@ class BggSearchResult {
 class BggGame {
   final String id;
   final String type;
+  final String mediaType; // 'BOARDGAME' | 'VIDEOGAME' | 'TTRPG'
   final String name;
   final String description;
   final String year;
@@ -181,6 +199,8 @@ class BggGame {
   final String? image;
   final String minPlayers;
   final String maxPlayers;
+  final String minPlaytime;
+  final String maxPlaytime;
   final double? avgRating;
   final List<String> categories;
   final List<String> mechanics;
@@ -190,6 +210,7 @@ class BggGame {
   const BggGame({
     required this.id,
     required this.type,
+    this.mediaType = 'BOARDGAME',
     required this.name,
     required this.description,
     required this.year,
@@ -197,6 +218,8 @@ class BggGame {
     this.image,
     required this.minPlayers,
     required this.maxPlayers,
+    this.minPlaytime = '',
+    this.maxPlaytime = '',
     this.avgRating,
     required this.categories,
     required this.mechanics,
@@ -204,12 +227,26 @@ class BggGame {
     required this.publishers,
   });
 
-  String get bggUrl =>
-      'https://boardgamegeek.com/${type == 'rpgitem' ? 'rpgitem' : 'boardgame'}/$id';
+  String get bggUrl {
+    final path = switch (type) {
+      'rpgitem' => 'rpgitem',
+      'videogame' => 'videogame',
+      _ => 'boardgame',
+    };
+    return 'https://boardgamegeek.com/$path/$id';
+  }
 
   String get playersLabel {
     if (minPlayers.isEmpty && maxPlayers.isEmpty) return '';
     if (minPlayers == maxPlayers) return '$minPlayers Spieler';
     return '$minPlayers–$maxPlayers Spieler';
+  }
+
+  String get playtimeLabel {
+    if (minPlaytime.isEmpty && maxPlaytime.isEmpty) return '';
+    if (minPlaytime == maxPlaytime) return '$minPlaytime Min';
+    if (minPlaytime.isEmpty) return '$maxPlaytime Min';
+    if (maxPlaytime.isEmpty) return '$minPlaytime Min';
+    return '$minPlaytime–$maxPlaytime Min';
   }
 }

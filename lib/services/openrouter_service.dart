@@ -19,9 +19,9 @@ class OpenRouterService {
   static const _endpoint =
       'https://openrouter.ai/api/v1/chat/completions';
 
-  // Standard Free-Tier Modell (kein API-Key nötig für Rate-Limited Free)
+  // Standard Free-Tier Modell
   static const defaultModel =
-      'meta-llama/llama-3.1-8b-instruct:free';
+      'meta-llama/llama-3.2-3b-instruct:free';
 
   final String apiKey;
   final String model;
@@ -108,6 +108,8 @@ Wichtige Regeln:
       String errMsg;
       if (res.statusCode == 429) {
         errMsg = 'Rate-Limit des Free-Modells erreicht. Warte kurz oder wähle ein anderes Modell in den Einstellungen.';
+      } else if (res.statusCode == 404) {
+        errMsg = 'Modell "$model" nicht gefunden. Bitte in den Einstellungen ein verfügbares Modell auswählen.';
       } else {
         try {
           final errJson = jsonDecode(res.body) as Map<String, dynamic>;

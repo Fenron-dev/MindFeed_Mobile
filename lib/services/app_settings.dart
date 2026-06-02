@@ -122,7 +122,7 @@ class PropTemplate {
       ],
     ),
     PropTemplate(
-      id: 'tpl-ttrpg', name: 'TTRPG', emoji: '🐉',
+      id: 'tpl-ttrpg', name: 'TTRPG / RPG', emoji: '🐉',
       fields: [
         PropTemplateField(key: 'System', type: PropType.text.value),
         PropTemplateField(key: 'Verlag', type: PropType.text.value),
@@ -130,6 +130,30 @@ class PropTemplate {
         PropTemplateField(key: 'Bewertung', type: PropType.rating.value),
         PropTemplateField(key: 'Besitzen', type: PropType.boolean.value, defaultValue: 'false'),
         PropTemplateField(key: 'Quelle', type: PropType.url.value),
+      ],
+    ),
+    PropTemplate(
+      id: 'tpl-videogame', name: 'Videospiel', emoji: '🎮',
+      fields: [
+        PropTemplateField(key: 'Entwickler', type: PropType.text.value),
+        PropTemplateField(key: 'Publisher', type: PropType.text.value),
+        PropTemplateField(key: 'Jahr', type: PropType.text.value),
+        PropTemplateField(key: 'Genre', type: PropType.tags.value),
+        PropTemplateField(key: 'Plattform', type: PropType.text.value),
+        PropTemplateField(key: 'Bewertung', type: PropType.rating.value),
+        PropTemplateField(key: 'Durchgespielt', type: PropType.boolean.value, defaultValue: 'false'),
+        PropTemplateField(key: 'Spielzeit', type: PropType.text.value),
+      ],
+    ),
+    PropTemplate(
+      id: 'tpl-github', name: 'GitHub Repo', emoji: '💻',
+      fields: [
+        PropTemplateField(key: 'Sprache', type: PropType.text.value),
+        PropTemplateField(key: 'Stars', type: PropType.number.value),
+        PropTemplateField(key: 'Themen', type: PropType.tags.value),
+        PropTemplateField(key: 'Lizenz', type: PropType.text.value),
+        PropTemplateField(key: 'Status', type: PropType.select.value),
+        PropTemplateField(key: 'Notizen', type: PropType.text.value),
       ],
     ),
   ];
@@ -348,5 +372,43 @@ class AppSettings {
       'prop_templates',
       templates.map((t) => jsonEncode(t.toJson())).toList(),
     );
+  }
+
+  // ── Settings-Export für Backup ─────────────────────────────────────────────
+
+  static Map<String, dynamic> exportSettings() {
+    final p = _prefs;
+    if (p == null) return {};
+    final result = <String, dynamic>{};
+    for (final key in [
+      'tag_bg', 'tag_text', 'tag_border',
+      'api_field_settings',
+    ]) {
+      final v = p.get(key);
+      if (v != null) result[key] = v;
+    }
+    final radius = p.getDouble('tag_radius');
+    if (radius != null) result['tag_radius'] = radius;
+    final hash = p.getBool('tag_hash');
+    if (hash != null) result['tag_hash'] = hash;
+    final templates = p.getStringList('prop_templates');
+    if (templates != null) result['prop_templates'] = templates;
+    final vault = p.getString('vault_path');
+    if (vault != null) result['vault_path'] = vault;
+    return result;
+  }
+
+  static Future<void> importSettings(Map<String, dynamic> settings) async {
+    final p = _prefs;
+    if (p == null) return;
+    for (final entry in settings.entries) {
+      final k = entry.key;
+      final v = entry.value;
+      if (v is int) await p.setInt(k, v);
+      else if (v is double) await p.setDouble(k, v);
+      else if (v is bool) await p.setBool(k, v);
+      else if (v is String) await p.setString(k, v);
+      else if (v is List) await p.setStringList(k, v.cast<String>());
+    }
   }
 }

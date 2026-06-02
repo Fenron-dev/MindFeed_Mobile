@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../data/db/app_database.dart';
+import 'app_settings.dart';
 
 // ─── Backup / Restore ────────────────────────────────────────────────────────
 //
@@ -93,6 +94,7 @@ class BackupService {
     return {
       'version': _kBackupVersion,
       'exportedAt': DateTime.now().toIso8601String(),
+      'settings': AppSettings.exportSettings(),
       'entries': entries.map(_serEntry).toList(),
       'tags': tags
           .map((t) => {
@@ -401,6 +403,13 @@ class BackupService {
       });
 
       final count = (backup['entries'] as List?)?.length ?? 0;
+
+      // Einstellungen wiederherstellen (Templates, Tag-Stil, API-Felder, …)
+      final settings = backup['settings'] as Map<String, dynamic>?;
+      if (settings != null) {
+        await AppSettings.importSettings(settings);
+      }
+
       return ImportResult.success(count);
     } catch (e) {
       return ImportResult.error('Import-Fehler: $e');

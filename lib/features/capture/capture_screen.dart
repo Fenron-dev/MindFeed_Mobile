@@ -269,26 +269,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   /// Wendet automatisch das passende Template an und befüllt bekannte Felder.
   Future<void> _autoApplyTemplate(String entryId, String mediaType) async {
     final templates = AppSettings.loadTemplates();
+    PropTemplate? _find(String id, String fallback) =>
+        templates.where((t) => t.id == id).firstOrNull ??
+        templates.where((t) => t.name.toLowerCase().contains(fallback)).firstOrNull;
+
     PropTemplate? tpl;
     switch (mediaType) {
-      case 'ANIME':
-        tpl = templates.firstWhere((t) => t.id == 'tpl-anime',
-            orElse: () => templates.firstWhere(
-                (t) => t.name.toLowerCase().contains('anime'),
-                orElse: () => templates.first));
-      case 'MANGA':
-        tpl = templates.firstWhere((t) => t.id == 'tpl-book',
-            orElse: () => templates.firstWhere(
-                (t) => t.name.toLowerCase().contains('buch'),
-                orElse: () => templates.first));
-      case 'YOUTUBE':
-        tpl = templates.firstWhere((t) => t.id == 'tpl-youtube',
-            orElse: () => templates.firstWhere(
-                (t) => t.name.toLowerCase().contains('youtube'),
-                orElse: () => templates.first));
-      default:
-        return; // kein passendes Template
+      case 'ANIME':    tpl = _find('tpl-anime',      'anime');      break;
+      case 'MANGA':    tpl = _find('tpl-book',        'buch');       break;
+      case 'YOUTUBE':  tpl = _find('tpl-youtube',     'youtube');    break;
+      case 'BOARDGAME':tpl = _find('tpl-boardgame',   'brettspiel'); break;
+      case 'VIDEOGAME':tpl = _find('tpl-videogame',   'videospiel'); break;
+      case 'TTRPG':    tpl = _find('tpl-ttrpg',       'rpg');        break;
+      case 'GITHUB':   tpl = _find('tpl-github',      'github');     break;
+      default:         return; // kein passendes Template
     }
+    if (tpl == null) return;
 
     final dao = ref.read(propertyDaoProvider);
     final existing = await dao.watchByEntry(entryId).first;
