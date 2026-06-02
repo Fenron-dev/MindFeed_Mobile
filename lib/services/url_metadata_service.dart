@@ -22,6 +22,13 @@ class UrlMetadata {
   final int? anilistTotalSeasons;
   // YouTube-Felder
   final String? authorName; // Kanal-Name
+  // GitHub-Felder
+  final int? githubStars;
+  final int? githubForks;
+  final String? githubLicense;
+  final String? githubWebsite;
+  final String? githubLanguage;
+  final String? githubDefaultBranch;
 
   const UrlMetadata({
     required this.title,
@@ -40,6 +47,12 @@ class UrlMetadata {
     this.anilistSeason,
     this.anilistTotalSeasons,
     this.authorName,
+    this.githubStars,
+    this.githubForks,
+    this.githubLicense,
+    this.githubWebsite,
+    this.githubLanguage,
+    this.githubDefaultBranch,
   });
 }
 
@@ -484,6 +497,9 @@ class UrlMetadataService {
       final stars = data['stargazers_count'] as int? ?? 0;
       final forks = data['forks_count'] as int? ?? 0;
       final lang = data['language'] as String?;
+      final website = (data['homepage'] as String?)?.trim();
+      final licenseKey = (data['license'] as Map?)?['spdx_id'] as String?;
+      final defaultBranch = data['default_branch'] as String?;
       final topics = (data['topics'] as List?)
               ?.map((t) => t.toString())
               .toList() ??
@@ -493,6 +509,7 @@ class UrlMetadataService {
         if (lang != null) lang,
         '⭐ $stars',
         if (forks > 0) '🍴 $forks',
+        if (licenseKey != null && licenseKey != 'NOASSERTION') licenseKey,
       ].join(' · ');
 
       return UrlMetadata(
@@ -502,6 +519,15 @@ class UrlMetadataService {
         domain: 'github.com',
         genres: topics,
         mediaType: 'GITHUB',
+        githubStars: stars,
+        githubForks: forks,
+        githubLicense: (licenseKey != null && licenseKey != 'NOASSERTION')
+            ? licenseKey
+            : null,
+        githubWebsite:
+            (website != null && website.isNotEmpty) ? website : null,
+        githubLanguage: lang,
+        githubDefaultBranch: defaultBranch,
       );
     } catch (_) {
       return _domainFallback(fallbackUri);

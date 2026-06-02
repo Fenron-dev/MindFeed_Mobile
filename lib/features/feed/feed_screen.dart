@@ -30,7 +30,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   // bevor die DB-Aktualisierung den Stream neu aufbaut.
   final _dismissedIds = <String>{};
 
-  static const _filterStatuses = ['all', 'inbox', 'pinned'];
+  static const _filterStatuses = ['all', 'inbox', 'pinned', 'done', 'archived'];
 
   @override
   void dispose() {
@@ -59,9 +59,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     var result = entries.where((e) {
       // Status-Filter
       final statusOk = switch (status) {
-        'inbox'  => e.entry.status == 'inbox',
-        'pinned' => e.entry.pinned,
-        _        => true,
+        'inbox'    => e.entry.status == 'inbox',
+        'pinned'   => e.entry.pinned,
+        'done'     => e.entry.status == 'done',
+        'archived' => e.entry.status == 'archived',
+        _          => true,
       };
       if (!statusOk) return false;
 
@@ -684,7 +686,7 @@ class _QuickFilterBar extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const _filters = ['Alle', 'Inbox', 'Angeheftet'];
+  static const _filters = ['Alle', 'Inbox', 'Angeheftet', 'Erledigt', 'Archiviert'];
 
   @override
   Widget build(BuildContext context) {

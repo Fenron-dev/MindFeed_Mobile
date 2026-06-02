@@ -304,6 +304,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     if (mediaType == 'YOUTUBE') {
       if (_urlPreview?.authorName != null) prefill['kanal'] = _urlPreview!.authorName!;
     }
+    if (mediaType == 'GITHUB') {
+      if (_urlPreview?.githubLanguage != null) prefill['sprache'] = _urlPreview!.githubLanguage!;
+      if (_urlPreview?.githubStars != null) prefill['stars'] = _urlPreview!.githubStars.toString();
+      if (_urlPreview?.githubLicense != null) prefill['lizenz'] = _urlPreview!.githubLicense!;
+      if (_urlPreview?.genres.isNotEmpty == true) prefill['themen'] = _urlPreview!.genres.join(', ');
+    }
 
     final toAdd = tpl.fields
         .where((f) => !existingKeys.contains(f.key.toLowerCase()))
@@ -477,6 +483,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             anilistTotalSeasons:
                 isAniList ? _urlPreview?.anilistTotalSeasons : null,
             urlAuthor: _urlPreview?.authorName,
+            githubStars: _urlPreview?.githubStars,
+            githubForks: _urlPreview?.githubForks,
+            githubLicense: _urlPreview?.githubLicense,
+            githubWebsite: _urlPreview?.githubWebsite,
+            githubLanguage: _urlPreview?.githubLanguage,
+            githubDefaultBranch: _urlPreview?.githubDefaultBranch,
           );
       await _saveAttachments(createdEntry.entry.id);
 

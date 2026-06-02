@@ -95,6 +95,13 @@ class EntryRepository {
     int? anilistTotalSeasons,
     // YouTube-spezifisch
     String? urlAuthor,
+    // GitHub-spezifisch
+    int? githubStars,
+    int? githubForks,
+    String? githubLicense,
+    String? githubWebsite,
+    String? githubLanguage,
+    String? githubDefaultBranch,
     List<String> containerIds = const [],
   }) async {
     final id = 'e-${_uuid.v4()}';
@@ -159,6 +166,13 @@ class EntryRepository {
       if (anilistTotalSeasons != null) addProp('anilist_total_seasons', anilistTotalSeasons.toString(), 'number');
       // YouTube
       addProp('url_author', urlAuthor, 'string');
+      // GitHub
+      if (githubStars != null) addProp('github_stars', githubStars.toString(), 'number');
+      if (githubForks != null) addProp('github_forks', githubForks.toString(), 'number');
+      addProp('github_license', githubLicense, 'string');
+      addProp('github_website', githubWebsite, 'url');
+      addProp('github_language', githubLanguage, 'string');
+      addProp('github_default_branch', githubDefaultBranch, 'string');
       if (props.isNotEmpty) {
         await propertyDao.setProperties(id, props);
       }
