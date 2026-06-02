@@ -124,13 +124,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final svc = OpenRouterService(
         apiKey: key,
         model: _selectedModel.isNotEmpty ? _selectedModel : OpenRouterService.defaultModel,
-        temperature: 0.1,
-        maxTokens: 20,
       );
-      await svc.enrichEntry('Test');
+      await svc.testConnection();
       if (mounted) setState(() => _testState = 'ok');
     } catch (e) {
-      if (mounted) setState(() { _testState = 'error'; _testError = e.toString(); });
+      if (mounted) {
+        final msg = e.toString().replaceFirst('Exception: ', '');
+        setState(() {
+          _testState = 'error';
+          _testError = msg.length > 150 ? '${msg.substring(0, 150)}…' : msg;
+        });
+      }
     }
   }
 

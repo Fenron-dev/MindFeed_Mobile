@@ -152,6 +152,47 @@ Wichtige Regeln:
     );
   }
 
+  /// Testet die Verbindung mit einem einfachen Ping (kein JSON-Parsing).
+  /// Wirft eine Exception mit lesbarer Fehlermeldung wenn es nicht klappt.
+  Future<void> testConnection() async {
+    final res = await http
+        .post(
+          Uri.parse(_endpoint),
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://mindfeed.app',
+            'X-Title': 'MindFeed Mobile',
+          },
+          body: jsonEncode({
+            'model': model,
+            'messages': [
+              {'role': 'user', 'content': 'Antworte nur mit: OK'},
+            ],
+            'max_tokens': 10,
+            'temperature': 0.0,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode != 200) {
+      String errMsg;
+      try {
+        final errJson = jsonDecode(res.body) as Map<String, dynamic>;
+        errMsg = (errJson['error']?['message'] as String?) ??
+            res.body.substring(0, res.body.length.clamp(0, 200));
+      } catch (_) {
+        errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+      }
+      throw Exception('OpenRouter ${res.statusCode}: $errMsg');
+    }
+    // Nur prüfen ob choices vorhanden — kein JSON-Parsing der Antwort nötig
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if ((data['choices'] as List?)?.isEmpty != false) {
+      throw Exception('Keine Antwort vom Modell erhalten');
+    }
+  }
+
   /// Holt verfügbare Modelle von OpenRouter
   static Future<List<Map<String, dynamic>>> getModels(String apiKey) async {
     final res = await http
