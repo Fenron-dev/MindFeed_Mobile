@@ -204,12 +204,16 @@ class BackupService {
 
     final file = picked.files.single;
     final path = file.path;
-    final isZip = (path ?? '').endsWith('.zip') ||
-        (file.name).endsWith('.zip');
+    final isZip = file.name.endsWith('.zip') || (path ?? '').endsWith('.zip');
 
     if (isZip) {
-      if (path == null) return ImportResult.error('ZIP-Pfad nicht verfügbar');
-      return restoreFromZip(path, db);
+      // iOS liefert bytes statt path für Cloud-Dateien
+      if (file.bytes != null) {
+        return _restoreFromZipBytes(file.bytes!, db);
+      } else if (path != null) {
+        return restoreFromZip(path, db);
+      }
+      return ImportResult.error('ZIP-Pfad nicht verfügbar');
     }
 
     // JSON
@@ -233,18 +237,25 @@ class BackupService {
   static Future<ImportResult> restoreFromZip(
       String zipPath, AppDatabase db) async {
     try {
-      final bytes = await File(zipPath).readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
+      return _restoreFromZipBytes(
+          await File(zipPath).readAsBytes(), db);
+    } catch (e) {
+      return ImportResult.error('ZIP-Lesefehler: $e');
+    }
+  }
 
-      // Neues Format: data.json + attachments/*
+  static Future<ImportResult> _restoreFromZipBytes(
+      List<int> zipBytes, AppDatabase db) async {
+    try {
+      final archive = ZipDecoder().decodeBytes(zipBytes);
+
+      // ── Neues Format: data.json + attachments/* ──────────────────────────
       final jsonEntry = archive.findFile('data.json');
       if (jsonEntry != null) {
         final root = await _vaultRoot();
         final raw = utf8.decode(jsonEntry.content as List<int>);
         final result = await _importJsonString(db, raw);
         if (!result.isSuccess) return result;
-
-        // Anhänge an richtigen Ort kopieren
         for (final f in archive) {
           if (!f.isFile || f.name == 'data.json') continue;
           final target = File(p.join(root, f.name));
@@ -254,12 +265,60 @@ class BackupService {
         return result;
       }
 
-      // Altes Format (mindfeed.db) → nicht mehr unterstützt
-      return ImportResult.error(
-          'Altes Backup-Format erkannt. Bitte erstelle zuerst ein neues '
-          'Backup und stelle dieses wieder her.');
+      // ── Altes Format: mindfeed.db → Temp-DB öffnen, Daten lesen ─────────
+      final dbEntry = archive.findFile('mindfeed.db');
+      if (dbEntry != null) {
+        return await _restoreFromLegacyDb(archive, db);
+      }
+
+      return ImportResult.error('Unbekanntes Backup-Format (kein data.json / mindfeed.db)');
     } catch (e) {
-      return ImportResult.error('ZIP-Lesefehler: $e');
+      return ImportResult.error('ZIP-Fehler: $e');
+    }
+  }
+
+  /// Liest Daten aus einem alten Backup (ZIP mit mindfeed.db) und importiert
+  /// sie in die laufende DB. Schließt die laufende DB NICHT.
+  static Future<ImportResult> _restoreFromLegacyDb(
+      Archive archive, AppDatabase db) async {
+    final root = await _vaultRoot();
+    final tempPath = p.join(root, '_restore_legacy.db');
+    AppDatabase? tempDb;
+    try {
+      // SQLite-Datei aus ZIP in temporären Pfad schreiben
+      final dbEntry = archive.findFile('mindfeed.db')!;
+      await File(tempPath).writeAsBytes(dbEntry.content as List<int>);
+
+      // WAL-Checkpoint erzwingen damit alle Daten in der .db-Datei sind
+      tempDb = AppDatabase(tempPath);
+      await tempDb.customStatement('PRAGMA wal_checkpoint(FULL)');
+
+      // Alle Tabellen aus der Temp-DB lesen
+      final map = await _buildMap(tempDb);
+      await tempDb.close();
+      tempDb = null;
+
+      // In die laufende DB importieren
+      final result = await _importJsonString(
+          db, const JsonEncoder().convert(map));
+
+      // Anhänge aus ZIP in Vault kopieren
+      if (result.isSuccess) {
+        for (final f in archive) {
+          if (!f.isFile || f.name.startsWith('mindfeed.db')) continue;
+          final target = File(p.join(root, f.name));
+          await target.parent.create(recursive: true);
+          await target.writeAsBytes(f.content as List<int>);
+        }
+      }
+      return result;
+    } catch (e) {
+      return ImportResult.error('Legacy-Import fehlgeschlagen: $e');
+    } finally {
+      try { await tempDb?.close(); } catch (_) {}
+      for (final ext in ['', '-wal', '-shm']) {
+        try { await File('$tempPath$ext').delete(); } catch (_) {}
+      }
     }
   }
 
@@ -295,12 +354,13 @@ class BackupService {
         await db.delete(db.tags).go();
         await db.delete(db.containers).go();
 
-        // Eltern zuerst einfügen
+        // Eltern zuerst einfügen (insertOrReplace: idempotent)
         for (final e in (backup['entries'] as List? ?? [])) {
-          await db.into(db.entries).insert(_deserEntry(e));
+          await db.into(db.entries)
+              .insertOnConflictUpdate(_deserEntry(e));
         }
         for (final t in (backup['tags'] as List? ?? [])) {
-          await db.into(db.tags).insert(TagsCompanion(
+          await db.into(db.tags).insertOnConflictUpdate(TagsCompanion(
             id: Value(t['id'] as String),
             name: Value(t['name'] as String),
             parentId: Value(t['parentId'] as String?),
@@ -309,30 +369,33 @@ class BackupService {
           ));
         }
         for (final c in (backup['containers'] as List? ?? [])) {
-          await db.into(db.containers).insert(_deserContainer(c));
+          await db.into(db.containers)
+              .insertOnConflictUpdate(_deserContainer(c));
         }
 
         // Kinder einfügen
         for (final et in (backup['entryTags'] as List? ?? [])) {
-          await db.into(db.entryTags).insert(EntryTagsCompanion(
+          await db.into(db.entryTags).insertOnConflictUpdate(EntryTagsCompanion(
             entryId: Value(et['entryId'] as String),
             tagId: Value(et['tagId'] as String),
           ));
         }
         for (final ec in (backup['entryContainers'] as List? ?? [])) {
-          await db.into(db.entryContainers).insert(EntryContainersCompanion(
+          await db.into(db.entryContainers)
+              .insertOnConflictUpdate(EntryContainersCompanion(
             entryId: Value(ec['entryId'] as String),
             containerId: Value(ec['containerId'] as String),
           ));
         }
         for (final l in (backup['links'] as List? ?? [])) {
-          await db.into(db.entryLinks).insert(EntryLinksCompanion(
+          await db.into(db.entryLinks).insertOnConflictUpdate(EntryLinksCompanion(
             fromId: Value(l['fromId'] as String),
             toId: Value(l['toId'] as String),
           ));
         }
         for (final pr in (backup['properties'] as List? ?? [])) {
-          await db.into(db.entryProperties).insert(EntryPropertiesCompanion(
+          await db.into(db.entryProperties)
+              .insertOnConflictUpdate(EntryPropertiesCompanion(
             id: Value(pr['id'] as String),
             entryId: Value(pr['entryId'] as String),
             key: Value(pr['key'] as String),
@@ -341,7 +404,8 @@ class BackupService {
           ));
         }
         for (final a in (backup['attachments'] as List? ?? [])) {
-          await db.into(db.attachments).insert(_deserAttachment(a));
+          await db.into(db.attachments)
+              .insertOnConflictUpdate(_deserAttachment(a));
         }
       });
 

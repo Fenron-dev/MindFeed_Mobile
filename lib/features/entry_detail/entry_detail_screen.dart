@@ -216,8 +216,30 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
       return;
     }
+
+    // ── Feld-Auswahl-Dialog ───────────────────────────────────────────────
+    if (!mounted) return;
+    final opts = await showDialog<_EnrichOptions>(
+      context: context,
+      builder: (_) => const _EnrichOptionsDialog(),
+    );
+    if (opts == null || !mounted) return; // Abgebrochen
+
     setState(() => _enriching = true);
     try {
+      // Zusatzkontext aus gespeicherten Properties (z.B. AniList-Genres)
+      final props = await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
+      final genresProp = props.where((p) => p.key.toLowerCase() == 'genres' ||
+          p.key.toLowerCase() == 'genre').firstOrNull;
+      final genresText = genresProp?.value;
+
+      // AniList-Beschreibung als Kontext
+      final descProp = props.where((p) => p.key.toLowerCase() == 'og_description').firstOrNull;
+      final extraParts = <String>[
+        if (genresText?.isNotEmpty == true) 'Genres: $genresText',
+        if (descProp?.value?.isNotEmpty == true) descProp!.value!,
+      ];
+
       final model = await _storage.read(key: _keyAiModel) ?? '';
       final tempStr = await _storage.read(key: 'openrouter_temperature');
       final tokStr = await _storage.read(key: 'openrouter_max_tokens');
@@ -227,24 +249,64 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         temperature: double.tryParse(tempStr ?? '') ?? 0.3,
         maxTokens: int.tryParse(tokStr ?? '') ?? 400,
       );
-      final result = await svc.enrichEntry(body,
-          existingTitle: title, extraContext: null);
 
-      // Titel updaten falls KI einen besseren vorschlägt
-      if (result.title != null) {
+      final result = await svc.enrichEntry(
+        opts.enrichBody ? body : '',
+        existingTitle: title,
+        extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+      );
+
+      int changes = 0;
+
+      // Titel verbessern
+      if (opts.enrichTitle && result.title != null) {
         await ref.read(entryRepositoryProvider).updateEntry(entryId, title: result.title);
+        changes++;
       }
 
-      // Tags in Body einfügen (werden auto-geparst)
-      if (result.tags.isNotEmpty) {
-        final current = (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? body;
-        final tagLine = result.tags.map((t) => '#$t').join(' ');
-        await ref.read(entryRepositoryProvider).updateEntry(entryId, body: '$current\n$tagLine');
+      // Tags hinzufügen
+      if (opts.enrichTags && result.tags.isNotEmpty) {
+        // Wenn Genres vorhanden: Genres als Tags verwenden statt KI-Tags
+        final tagsToAdd = (genresText?.isNotEmpty == true && body.trim().isEmpty)
+            ? genresText!.split(',').map((g) => g.trim().toLowerCase().replaceAll(' ', '-')).where((g) => g.isNotEmpty).toList()
+            : result.tags;
+        if (tagsToAdd.isNotEmpty) {
+          final current = (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? body;
+          final tagLine = tagsToAdd.map((t) => '#$t').join(' ');
+          // Bestehende Tag-Zeile nicht doppeln
+          if (!current.contains(tagLine)) {
+            await ref.read(entryRepositoryProvider).updateEntry(entryId, body: '$current\n$tagLine');
+            changes++;
+          }
+        }
+      }
+
+      // Zusammenfassung als Property speichern
+      if (opts.enrichSummary && result.summary?.isNotEmpty == true) {
+        final existing = await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
+        final existingKeys = existing.map((p) => p.key.toLowerCase()).toSet();
+        if (!existingKeys.contains('zusammenfassung') && !existingKeys.contains('summary')) {
+          await ref.read(propertyDaoProvider).setProperties(entryId, [
+            ...existing.map((p) => EntryPropertiesCompanion(
+              id: drift.Value(p.id), entryId: drift.Value(p.entryId),
+              key: drift.Value(p.key), value: drift.Value(p.value), type: drift.Value(p.type),
+            )),
+            EntryPropertiesCompanion(
+              id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-summary'),
+              entryId: drift.Value(entryId),
+              key: const drift.Value('Zusammenfassung'),
+              value: drift.Value(result.summary),
+              type: const drift.Value('text'),
+            ),
+          ]);
+          await ref.read(entryRepositoryProvider).updateEntry(entryId);
+          changes++;
+        }
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('KI fertig: ${result.tags.length} Tags${result.title != null ? ", Titel verbessert" : ""}'),
+          content: Text(changes > 0 ? 'KI fertig: $changes Felder aktualisiert' : 'Keine Änderungen nötig'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: MFColors.teal,
         ));
@@ -253,9 +315,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       if (mounted) {
         final msg = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-            msg.length > 150 ? '${msg.substring(0, 150)}…' : msg,
-          ),
+          content: Text(msg.length > 150 ? '${msg.substring(0, 150)}…' : msg),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.red.shade900,
         ));
@@ -2225,4 +2285,107 @@ class _BacklinksSection extends ConsumerWidget {
       },
     );
   }
+}
+
+// ─── Enrichment-Optionen ──────────────────────────────────────────────────────
+
+class _EnrichOptions {
+  final bool enrichTitle;
+  final bool enrichTags;
+  final bool enrichSummary;
+  final bool enrichBody;
+
+  const _EnrichOptions({
+    required this.enrichTitle,
+    required this.enrichTags,
+    required this.enrichSummary,
+    required this.enrichBody,
+  });
+}
+
+class _EnrichOptionsDialog extends StatefulWidget {
+  const _EnrichOptionsDialog();
+
+  @override
+  State<_EnrichOptionsDialog> createState() => _EnrichOptionsDialogState();
+}
+
+class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
+  bool _title = false;
+  bool _tags = true;
+  bool _summary = false;
+  bool _body = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: MFColors.surface,
+      title: const Text('KI-Anreicherung',
+          style: TextStyle(color: MFColors.textPrimary, fontSize: 15)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Welche Felder soll die KI bearbeiten?',
+            style: TextStyle(fontSize: 12, color: MFColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          _CheckTile('Tags generieren', _tags, (v) => setState(() => _tags = v!)),
+          _CheckTile('Titel verbessern', _title, (v) => setState(() => _title = v!)),
+          _CheckTile('Zusammenfassung als Property', _summary, (v) => setState(() => _summary = v!)),
+          _CheckTile('Text des Eintrags einbeziehen', _body, (v) => setState(() => _body = v!)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen', style: TextStyle(color: MFColors.textMuted)),
+        ),
+        FilledButton(
+          onPressed: (_tags || _title || _summary)
+              ? () => Navigator.pop(
+                    context,
+                    _EnrichOptions(
+                      enrichTitle: _title,
+                      enrichTags: _tags,
+                      enrichSummary: _summary,
+                      enrichBody: _body,
+                    ),
+                  )
+              : null,
+          style: FilledButton.styleFrom(
+              backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+          child: const Text('Anreichern'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CheckTile extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool?> onChanged;
+
+  const _CheckTile(this.label, this.value, this.onChanged);
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () => onChanged(!value),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Checkbox(
+              value: value,
+              onChanged: onChanged,
+              activeColor: MFColors.teal,
+              visualDensity: VisualDensity.compact,
+            ),
+            const SizedBox(width: 6),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 13, color: MFColors.textPrimary)),
+          ]),
+        ),
+      );
 }

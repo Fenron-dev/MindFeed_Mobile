@@ -242,6 +242,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (result.isSuccess) {
         _showSnack('✓ ${result.entryCount} Einträge wiederhergestellt',
             success: true);
+        // ProviderScope neu aufbauen → Feed zeigt wiederhergestellte Daten
+        await onRestartApp?.call();
       } else if (!result.cancelled) {
         _showSnack('Fehler: ${result.error}', success: false);
       }
@@ -292,6 +294,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (result.isSuccess) {
         _showSnack('✓ ${result.entryCount} Einträge wiederhergestellt',
             success: true);
+        await onRestartApp?.call();
       } else if (!result.cancelled) {
         _showSnack('Fehler: ${result.error}', success: false);
       }
