@@ -36,24 +36,46 @@ class OpenRouterService {
   });
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
-  Future<AiEnrichment> enrichEntry(String body, {String? existingTitle}) async {
-    final prompt = '''Analysiere diesen Text und antworte NUR mit einem JSON-Objekt (kein Markdown, kein Code-Block):
+  /// [extraContext] kann zusätzliche Metadaten enthalten (z.B. URL-Beschreibung, Genres).
+  Future<AiEnrichment> enrichEntry(String body,
+      {String? existingTitle, String? extraContext}) async {
+    // Gesamtinhalt aus allen verfügbaren Quellen zusammensetzen
+    final parts = <String>[];
+    if (existingTitle?.isNotEmpty == true) parts.add('Titel: $existingTitle');
+    if (body.trim().isNotEmpty) {
+      parts.add(body.length > 1500 ? body.substring(0, 1500) : body);
+    }
+    if (extraContext?.trim().isNotEmpty == true) {
+      final ctx = extraContext!.trim();
+      parts.add(ctx.length > 500 ? ctx.substring(0, 500) : ctx);
+    }
 
-Text:
-${body.length > 2000 ? body.substring(0, 2000) : body}
+    if (parts.isEmpty) throw Exception('Kein Inhalt für KI-Anreicherung vorhanden');
 
-JSON-Format:
+    final content = parts.join('\n\n');
+
+    final prompt = '''Du bist ein persönlicher Wissensassistent. Analysiere den folgenden Inhalt und antworte NUR mit einem JSON-Objekt (kein Markdown, kein Code-Block).
+
+Inhalt:
+$content
+
+Antworte AUSSCHLIESSLICH mit diesem JSON-Format:
 {
   "tags": ["tag1", "tag2", "tag3"],
-  "title": "Kurzer aussagekräftiger Titel (max 60 Zeichen)",
+  "title": "Kurzer aussagekräftiger Titel (max 60 Zeichen) oder null",
   "summary": "1-2 Satz Zusammenfassung",
   "lang": "de"
 }
 
-Regeln:
-- tags: 2-5 Tags, lowercase, keine Sonderzeichen außer Bindestrich
-- title: nur wenn kein Titel vorgegeben oder Titel verbessert werden kann, sonst null
-- lang: 2-Buchstaben-Sprachcode (de, en, ja, etc.)''';
+Wichtige Regeln:
+- tags: 2-5 sinnvolle thematische Tags, lowercase, nur Buchstaben, Zahlen und Bindestriche
+- tags NIEMALS: "leer", "fehler", "kein", "kein-inhalt", "keine-tags", "unknown", "n-a" o.ä.
+- Falls wenig Inhalt: leite Tags aus Titel und Kontext ab
+- title: null wenn Titel bereits gut ist, sonst verbesserten Titel
+- lang: 2-Buchstaben ISO-Code der Hauptsprache''';
+
+    final prompt_tokens = prompt.length ~/ 3; // Grobe Schätzung
+    final needed_tokens = (maxTokens < 200) ? 200 : maxTokens;
 
     final res = await http
         .post(
@@ -69,7 +91,7 @@ Regeln:
             'messages': [
               {'role': 'user', 'content': prompt},
             ],
-            'max_tokens': maxTokens,
+            'max_tokens': needed_tokens,
             'temperature': temperature,
           }),
         )
@@ -90,23 +112,28 @@ Regeln:
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    final content =
+    final responseText =
         data['choices']?[0]?['message']?['content'] as String? ?? '';
 
     // JSON aus der Antwort extrahieren (auch wenn Modell trotzdem Markdown schreibt)
     final jsonMatch =
-        RegExp(r'\{[\s\S]*\}', multiLine: true).firstMatch(content);
+        RegExp(r'\{[\s\S]*\}', multiLine: true).firstMatch(responseText);
     if (jsonMatch == null) {
       throw Exception('Ungültige KI-Antwort: kein JSON gefunden');
     }
 
     final parsed = jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>;
 
+    const _blockedTags = {
+      'leer', 'fehler', 'kein', 'keine', 'kein-inhalt', 'keine-tags',
+      'unknown', 'n-a', 'na', 'null', 'undefined', 'error', 'empty',
+      'no-content', 'no-tags', 'tag1', 'tag2', 'tag3',
+    };
     final tags = (parsed['tags'] as List<dynamic>?)
             ?.map((t) => t.toString()
                 .toLowerCase()
-                .replaceAll(RegExp(r'[^a-z0-9\-]'), ''))
-            .where((t) => t.isNotEmpty)
+                .replaceAll(RegExp(r'[^a-z0-9\-äöüß]'), ''))
+            .where((t) => t.length > 1 && !_blockedTags.contains(t))
             .toList() ??
         [];
 

@@ -8,10 +8,18 @@ class UrlMetadata {
   final String description;
   final String? image;
   final String domain;
-  // Zusätzliche Felder für AniList
+  // AniList-Felder
   final List<String> genres;
   final int? score;
-  final String? mediaType; // 'ANIME' | 'MANGA'
+  final String? mediaType;  // 'ANIME' | 'MANGA' | 'TTRPG' | 'BOARDGAME'
+  final String? anilistFormat; // TV, MOVIE, OVA, ONA, MANGA, NOVEL …
+  final int? anilistEpisodes;
+  final int? anilistChapters;
+  final String? anilistStudio;
+  final int? anilistYear;
+  final String? anilistStatus; // FINISHED, RELEASING, NOT_YET_RELEASED …
+  // YouTube-Felder
+  final String? authorName; // Kanal-Name
 
   const UrlMetadata({
     required this.title,
@@ -21,6 +29,13 @@ class UrlMetadata {
     this.genres = const [],
     this.score,
     this.mediaType,
+    this.anilistFormat,
+    this.anilistEpisodes,
+    this.anilistChapters,
+    this.anilistStudio,
+    this.anilistYear,
+    this.anilistStatus,
+    this.authorName,
   });
 }
 
@@ -117,6 +132,7 @@ class UrlMetadataService {
             episodes
             chapters
             startDate { year }
+            studios(isMain: true) { nodes { name } }
           }
         }
       ''';
@@ -170,29 +186,43 @@ class UrlMetadataService {
       final score = media['averageScore'] as int?;
       final mediaType = media['type'] as String?;
       final format = media['format'] as String?;
+      final status = media['status'] as String?;
 
-      // Beschreibungs-Prefix
-      final year = (media['startDate'] as Map?)?['year'];
-      final episodes = media['episodes'];
-      final chapters = media['chapters'];
+      final year = (media['startDate'] as Map?)?['year'] as int?;
+      final episodes = media['episodes'] as int?;
+      final chapters = media['chapters'] as int?;
+
+      final studioNodes = (media['studios']?['nodes'] as List<dynamic>?);
+      final studioName = studioNodes?.isNotEmpty == true
+          ? (studioNodes!.first as Map<String, dynamic>)['name'] as String?
+          : null;
+
+      // Beschreibungs-Prefix für die Preview
       final details = [
         if (year != null) '$year',
-        ?format,
+        if (format != null) format,
         if (episodes != null) '$episodes Folgen',
         if (chapters != null) '$chapters Kapitel',
-        if (score != null) '⭐ ${score / 10}',
+        if (studioName != null) studioName,
+        if (score != null) '⭐ ${(score / 10).toStringAsFixed(1)}',
       ].join(' · ');
 
       return UrlMetadata(
         title: title,
         description: details.isNotEmpty
-            ? '$details\n\n${desc.length > 300 ? '${desc.substring(0, 300)}…' : desc}'
-            : (desc.length > 300 ? '${desc.substring(0, 300)}…' : desc),
+            ? '$details\n\n${desc.length > 400 ? '${desc.substring(0, 400)}…' : desc}'
+            : (desc.length > 400 ? '${desc.substring(0, 400)}…' : desc),
         image: image,
         domain: 'anilist.co',
         genres: genres,
         score: score,
         mediaType: mediaType,
+        anilistFormat: format,
+        anilistEpisodes: episodes,
+        anilistChapters: chapters,
+        anilistStudio: studioName,
+        anilistYear: year,
+        anilistStatus: status,
       );
     } catch (_) {
       return _domainFallback(uri);
@@ -270,6 +300,8 @@ class UrlMetadataService {
         description: 'YouTube-Video von $author',
         image: thumb,
         domain: 'youtube.com',
+        authorName: author,
+        mediaType: 'YOUTUBE',
       );
     } catch (_) {
       return null;

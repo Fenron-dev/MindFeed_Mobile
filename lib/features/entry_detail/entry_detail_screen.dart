@@ -227,7 +227,8 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         temperature: double.tryParse(tempStr ?? '') ?? 0.3,
         maxTokens: int.tryParse(tokStr ?? '') ?? 400,
       );
-      final result = await svc.enrichEntry(body, existingTitle: title);
+      final result = await svc.enrichEntry(body,
+          existingTitle: title, extraContext: null);
 
       // Titel updaten falls KI einen besseren vorschlägt
       if (result.title != null) {
@@ -1409,6 +1410,8 @@ class _TemplateApplyButton extends ConsumerWidget {
       ];
     }
     await dao.setProperties(entryId, newProps);
+    // watchById hört nur auf entries-Tabelle → Entry berühren um Stream zu triggern
+    await ref.read(entryRepositoryProvider).updateEntry(entryId);
   }
 }
 

@@ -84,6 +84,15 @@ class EntryRepository {
     List<String> urlGenres = const [],
     int? urlScore,
     String? urlMediaType,
+    // AniList-spezifisch
+    String? anilistFormat,
+    int? anilistEpisodes,
+    int? anilistChapters,
+    String? anilistStudio,
+    int? anilistYear,
+    String? anilistStatus,
+    // YouTube-spezifisch
+    String? urlAuthor,
     List<String> containerIds = const [],
   }) async {
     final id = 'e-${_uuid.v4()}';
@@ -137,6 +146,15 @@ class EntryRepository {
       if (urlGenres.isNotEmpty) addProp('genres', urlGenres.join(', '), 'string');
       if (urlScore != null) addProp('score', urlScore.toString(), 'number');
       if (urlMediaType != null) addProp('media_type', urlMediaType, 'string');
+      // AniList-Metadaten als strukturierte Properties
+      addProp('anilist_studio', anilistStudio, 'string');
+      addProp('anilist_format', anilistFormat, 'string');
+      if (anilistEpisodes != null) addProp('anilist_episodes', anilistEpisodes.toString(), 'number');
+      if (anilistChapters != null) addProp('anilist_chapters', anilistChapters.toString(), 'number');
+      if (anilistYear != null) addProp('anilist_year', anilistYear.toString(), 'string');
+      addProp('anilist_status', anilistStatus, 'string');
+      // YouTube
+      addProp('url_author', urlAuthor, 'string');
       if (props.isNotEmpty) {
         await propertyDao.setProperties(id, props);
       }

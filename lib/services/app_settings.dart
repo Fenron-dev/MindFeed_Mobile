@@ -100,11 +100,25 @@ class PropTemplate {
       id: 'tpl-anime', name: 'Anime / Serie', emoji: '🎬',
       fields: [
         PropTemplateField(key: 'Studio', type: PropType.text.value),
-        PropTemplateField(key: 'Staffeln', type: PropType.number.value),
-        PropTemplateField(key: 'Folgen', type: PropType.number.value),
+        PropTemplateField(key: 'Format', type: PropType.text.value),
+        PropTemplateField(key: 'Jahr', type: PropType.text.value),
+        PropTemplateField(key: 'Folgen gesamt', type: PropType.number.value),
+        PropTemplateField(key: 'Aktuelle Folge', type: PropType.number.value),
         PropTemplateField(key: 'Bewertung', type: PropType.rating.value),
         PropTemplateField(key: 'Genre', type: PropType.tags.value),
+        PropTemplateField(key: 'Status', type: PropType.select.value),
         PropTemplateField(key: 'Abgeschlossen', type: PropType.boolean.value, defaultValue: 'false'),
+      ],
+    ),
+    PropTemplate(
+      id: 'tpl-youtube', name: 'YouTube Video', emoji: '▶️',
+      fields: [
+        PropTemplateField(key: 'Kanal', type: PropType.text.value),
+        PropTemplateField(key: 'Laufzeit', type: PropType.text.value),
+        PropTemplateField(key: 'Hochgeladen', type: PropType.date.value),
+        PropTemplateField(key: 'Geschaut', type: PropType.boolean.value, defaultValue: 'false'),
+        PropTemplateField(key: 'Bewertung', type: PropType.rating.value),
+        PropTemplateField(key: 'Notizen', type: PropType.text.value),
       ],
     ),
     PropTemplate(

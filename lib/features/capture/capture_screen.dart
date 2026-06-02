@@ -13,6 +13,7 @@ import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/tag_parser.dart';
+import '../../services/app_settings.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
 
@@ -265,6 +266,79 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     return '$m:$s';
   }
 
+  /// Wendet automatisch das passende Template an und befüllt bekannte Felder.
+  Future<void> _autoApplyTemplate(String entryId, String mediaType) async {
+    final templates = AppSettings.loadTemplates();
+    PropTemplate? tpl;
+    switch (mediaType) {
+      case 'ANIME':
+        tpl = templates.firstWhere((t) => t.id == 'tpl-anime',
+            orElse: () => templates.firstWhere(
+                (t) => t.name.toLowerCase().contains('anime'),
+                orElse: () => templates.first));
+      case 'MANGA':
+        tpl = templates.firstWhere((t) => t.id == 'tpl-book',
+            orElse: () => templates.firstWhere(
+                (t) => t.name.toLowerCase().contains('buch'),
+                orElse: () => templates.first));
+      case 'YOUTUBE':
+        tpl = templates.firstWhere((t) => t.id == 'tpl-youtube',
+            orElse: () => templates.firstWhere(
+                (t) => t.name.toLowerCase().contains('youtube'),
+                orElse: () => templates.first));
+      default:
+        return; // kein passendes Template
+    }
+
+    final dao = ref.read(propertyDaoProvider);
+    final existing = await dao.watchByEntry(entryId).first;
+    final existingKeys = existing.map((p) => p.key.toLowerCase()).toSet();
+
+    // Pre-fill-Werte aus Metadaten
+    final prefill = <String, String>{};
+    if (mediaType == 'ANIME' || mediaType == 'MANGA') {
+      if (_urlPreview?.anilistStudio != null) prefill['studio'] = _urlPreview!.anilistStudio!;
+      if (_urlPreview?.anilistFormat != null) prefill['format'] = _urlPreview!.anilistFormat!;
+      if (_urlPreview?.anilistYear != null) prefill['jahr'] = _urlPreview!.anilistYear.toString();
+      if (_urlPreview?.anilistEpisodes != null) prefill['folgen gesamt'] = _urlPreview!.anilistEpisodes.toString();
+      if (_urlPreview?.anilistChapters != null) prefill['kapitel'] = _urlPreview!.anilistChapters.toString();
+      if (_urlPreview?.genres.isNotEmpty == true) prefill['genre'] = _urlPreview!.genres.join(', ');
+      if (_urlPreview?.score != null) prefill['bewertung'] = (_urlPreview!.score! / 10).toStringAsFixed(1);
+    }
+    if (mediaType == 'YOUTUBE') {
+      if (_urlPreview?.authorName != null) prefill['kanal'] = _urlPreview!.authorName!;
+    }
+
+    final toAdd = tpl.fields
+        .where((f) => !existingKeys.contains(f.key.toLowerCase()))
+        .map((f) {
+          final pre = prefill[f.key.toLowerCase()];
+          final val = pre ?? (f.defaultValue.isNotEmpty ? f.defaultValue : null);
+          return EntryPropertiesCompanion(
+            id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${f.key}'),
+            entryId: drift.Value(entryId),
+            key: drift.Value(f.key),
+            value: drift.Value(val),
+            type: drift.Value(f.type),
+          );
+        })
+        .toList();
+
+    if (toAdd.isNotEmpty) {
+      final all = [
+        ...existing.map((p) => EntryPropertiesCompanion(
+              id: drift.Value(p.id),
+              entryId: drift.Value(p.entryId),
+              key: drift.Value(p.key),
+              value: drift.Value(p.value),
+              type: drift.Value(p.type),
+            )),
+        ...toAdd,
+      ];
+      await dao.setProperties(entryId, all);
+    }
+  }
+
   Future<void> _saveAttachments(String entryId) async {
     // Audio-Anhang speichern
     if (_recordedAudioPath != null && File(_recordedAudioPath!).existsSync()) {
@@ -367,6 +441,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             urlGenres: _urlPreview?.genres ?? [],
             urlScore: _urlPreview?.score,
             urlMediaType: _urlPreview?.mediaType,
+            anilistFormat: _urlPreview?.anilistFormat,
+            anilistEpisodes: _urlPreview?.anilistEpisodes,
+            anilistChapters: _urlPreview?.anilistChapters,
+            anilistStudio: _urlPreview?.anilistStudio,
+            anilistYear: _urlPreview?.anilistYear,
+            anilistStatus: _urlPreview?.anilistStatus,
+            urlAuthor: _urlPreview?.authorName,
           );
       await _saveAttachments(createdEntry.entry.id);
 
@@ -374,6 +455,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       // (Stream hört nur auf entries-Tabelle, nicht auf attachments)
       if (_pendingImages.isNotEmpty || _recordedAudioPath != null) {
         await ref.read(entryRepositoryProvider).updateEntry(createdEntry.entry.id);
+      }
+
+      // ── Auto-Template für AniList & YouTube ─────────────────────────────
+      final mediaType = _urlPreview?.mediaType;
+      if (mediaType != null) {
+        await _autoApplyTemplate(createdEntry.entry.id, mediaType);
       }
 
       // Auto-KI Anreicherung wenn Toggle aktiv
@@ -390,9 +477,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               temperature: double.tryParse(tempStr ?? '') ?? 0.3,
               maxTokens: int.tryParse(tokStr ?? '') ?? 400,
             );
+            // Zusätzlichen Kontext aus URL-Metadaten aufbauen
+            final extraParts = <String>[];
+            if (_urlPreview?.description?.isNotEmpty == true) {
+              extraParts.add(_urlPreview!.description!);
+            }
+            if ((_urlPreview?.genres ?? []).isNotEmpty) {
+              extraParts.add('Genres: ${_urlPreview!.genres!.join(', ')}');
+            }
             final result = await svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
+              extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
             );
             if (result.tags.isNotEmpty || result.title != null) {
               final tagLine = result.tags.map((t) => '#$t').join(' ');
