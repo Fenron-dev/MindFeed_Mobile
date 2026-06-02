@@ -9,36 +9,85 @@ import '../features/containers/container_provider.dart';
 /// GlobalKey damit FeedScreen (verschachtelter Scaffold) den Drawer öffnen kann.
 final appScaffoldKey = GlobalKey<ScaffoldState>();
 
-class AppShell extends StatelessWidget {
+class AppShell extends StatefulWidget {
   final StatefulNavigationShell shell;
   const AppShell({super.key, required this.shell});
 
   @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  bool _showNavBar = true;
+
+  void _onDestinationSelected(int index) {
+    // Tab-Wechsel → Nav immer wieder einblenden
+    if (index != widget.shell.currentIndex) {
+      setState(() => _showNavBar = true);
+    }
+    widget.shell.goBranch(index);
+  }
+
+  bool _handleScroll(ScrollNotification notification) {
+    if (notification is ScrollUpdateNotification) {
+      final delta = notification.scrollDelta ?? 0;
+      if (delta > 3.0 && _showNavBar) {
+        setState(() => _showNavBar = false);
+      } else if (delta < -3.0 && !_showNavBar) {
+        setState(() => _showNavBar = true);
+      }
+    } else if (notification is ScrollEndNotification) {
+      // Am oberen Rand → Nav immer zeigen
+      if (notification.metrics.pixels <= 0) {
+        setState(() => _showNavBar = true);
+      }
+    }
+    return false; // Notification nicht konsumieren
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).viewPadding.bottom;
+    const navContentHeight = 80.0;
+
     return Scaffold(
       key: appScaffoldKey,
-      body: shell,
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _handleScroll,
+        child: widget.shell,
+      ),
       drawer: const MindFeedDrawer(),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: shell.currentIndex,
-        onDestinationSelected: shell.goBranch,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dynamic_feed_outlined),
-            selectedIcon: Icon(Icons.dynamic_feed),
-            label: 'Feed',
+      bottomNavigationBar: ClipRect(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeInOut,
+          height: _showNavBar ? navContentHeight + bottomPad : 0.0,
+          child: OverflowBox(
+            alignment: Alignment.topCenter,
+            maxHeight: navContentHeight + bottomPad,
+            child: NavigationBar(
+              selectedIndex: widget.shell.currentIndex,
+              onDestinationSelected: _onDestinationSelected,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.dynamic_feed_outlined),
+                  selectedIcon: Icon(Icons.dynamic_feed),
+                  label: 'Feed',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search_outlined),
+                  selectedIcon: Icon(Icons.search),
+                  label: 'Suche',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Einstellungen',
+                ),
+              ],
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
-            label: 'Suche',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Einstellungen',
-          ),
-        ],
+        ),
       ),
     );
   }

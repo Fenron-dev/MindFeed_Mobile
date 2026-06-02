@@ -523,6 +523,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Cover-Bild / Medien-Header
+                _MediaHeader(
+                    properties: item.properties,
+                    attachments: item.attachments),
+
                 // Meta-Zeile
                 Row(children: [
                   _TypeChip(entry.type),
@@ -932,13 +937,14 @@ class _LinkPreview extends StatelessWidget {
                           color: MFColors.textPrimary),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis),
-                  if (desc != null) ...[
-                    const SizedBox(height: 2),
+                  if (desc != null && desc.isNotEmpty) ...[
+                    const SizedBox(height: 4),
                     Text(desc,
                         style: const TextStyle(
-                            fontSize: 11,
-                            color: MFColors.textSecondary),
-                        maxLines: 2,
+                            fontSize: 12,
+                            color: MFColors.textSecondary,
+                            height: 1.4),
+                        maxLines: 5,
                         overflow: TextOverflow.ellipsis),
                   ],
                   const SizedBox(height: 4),
@@ -964,8 +970,12 @@ class _PropertiesTable extends ConsumerWidget {
   final String entryId;
 
   // Nur technische interne Properties verstecken;
-  // og_title / og_description werden im Link-Preview angezeigt
-  static const _hidden = {'og_image', 'og_title', 'og_description'};
+  // og_title / og_description werden im Link-Preview angezeigt,
+  // anilist_season/total_seasons im Cover-Badge
+  static const _hidden = {
+    'og_image', 'og_title', 'og_description',
+    'anilist_season', 'anilist_total_seasons',
+  };
 
   const _PropertiesTable(
       {required this.properties, required this.entryId});
@@ -1922,17 +1932,24 @@ class _ImageTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.file(
-            File(att.localPath),
-            width: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              height: 60,
-              color: MFColors.surface,
-              child: const Icon(Icons.broken_image_outlined,
-                  color: MFColors.textMuted),
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            fullscreenDialog: true,
+            builder: (_) => _FullscreenImageViewer(
+                path: att.localPath, isLocal: true),
+          )),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.file(
+              File(att.localPath),
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                height: 60,
+                color: MFColors.surface,
+                child: const Icon(Icons.broken_image_outlined,
+                    color: MFColors.textMuted),
+              ),
             ),
           ),
         ),
@@ -2386,6 +2403,187 @@ class _CheckTile extends StatelessWidget {
                 style: const TextStyle(
                     fontSize: 13, color: MFColors.textPrimary)),
           ]),
+        ),
+      );
+}
+
+// ─── Medien-Header (Cover/Bild oben) ─────────────────────────────────────────
+
+class _MediaHeader extends StatelessWidget {
+  final List<EntryProperty> properties;
+  final List<Attachment> attachments;
+
+  const _MediaHeader({required this.properties, required this.attachments});
+
+  String? get _coverUrl => properties
+      .where((p) => const {
+            'og_image',
+            'cover_image',
+            'cover',
+            'bild',
+          }.contains(p.key.toLowerCase()))
+      .firstOrNull
+      ?.value;
+
+  String? get _season => properties
+      .where((p) => p.key.toLowerCase() == 'anilist_season')
+      .firstOrNull
+      ?.value;
+
+  String? get _totalSeasons => properties
+      .where((p) => p.key.toLowerCase() == 'anilist_total_seasons')
+      .firstOrNull
+      ?.value;
+
+  List<Attachment> get _imageAttachments =>
+      attachments.where((a) => a.type == 'image').toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final coverUrl = _coverUrl;
+    final images = _imageAttachments;
+    final season = _season;
+    final total = _totalSeasons;
+
+    if (coverUrl == null && images.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (coverUrl != null)
+          GestureDetector(
+            onTap: () => _openFullscreen(context, coverUrl),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    coverUrl,
+                    width: double.infinity,
+                    height: 150,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+                // Staffel-Badge
+                if (season != null)
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        total != null
+                            ? 'Staffel $season/$total'
+                            : 'Staffel $season',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                // Vollbild-Hinweis
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.open_in_full_rounded,
+                        size: 14, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (images.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 80,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: images.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (_, i) => GestureDetector(
+                onTap: () =>
+                    _openFullscreen(context, images[i].localPath, isLocal: true),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    File(images[i].localPath),
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 80,
+                      height: 80,
+                      color: MFColors.surfaceAlt,
+                      child: const Icon(Icons.broken_image_outlined,
+                          color: MFColors.textMuted),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  void _openFullscreen(BuildContext context, String path,
+      {bool isLocal = false}) {
+    Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => _FullscreenImageViewer(path: path, isLocal: isLocal),
+    ));
+  }
+}
+
+// ─── Fullscreen-Bild-Viewer ───────────────────────────────────────────────────
+
+class _FullscreenImageViewer extends StatelessWidget {
+  final String path;
+  final bool isLocal;
+  const _FullscreenImageViewer({required this.path, required this.isLocal});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.white),
+          elevation: 0,
+        ),
+        body: InteractiveViewer(
+          maxScale: 5.0,
+          child: Center(
+            child: isLocal
+                ? Image.file(File(path))
+                : Image.network(
+                    path,
+                    loadingBuilder: (_, child, progress) => progress == null
+                        ? child
+                        : const Center(
+                            child: CircularProgressIndicator(
+                                color: Colors.white)),
+                    errorBuilder: (_, __, ___) => const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white54,
+                        size: 48),
+                  ),
+          ),
         ),
       );
 }

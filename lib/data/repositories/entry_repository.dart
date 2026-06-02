@@ -91,6 +91,8 @@ class EntryRepository {
     String? anilistStudio,
     int? anilistYear,
     String? anilistStatus,
+    int? anilistSeason,
+    int? anilistTotalSeasons,
     // YouTube-spezifisch
     String? urlAuthor,
     List<String> containerIds = const [],
@@ -153,6 +155,8 @@ class EntryRepository {
       if (anilistChapters != null) addProp('anilist_chapters', anilistChapters.toString(), 'number');
       if (anilistYear != null) addProp('anilist_year', anilistYear.toString(), 'string');
       addProp('anilist_status', anilistStatus, 'string');
+      if (anilistSeason != null) addProp('anilist_season', anilistSeason.toString(), 'number');
+      if (anilistTotalSeasons != null) addProp('anilist_total_seasons', anilistTotalSeasons.toString(), 'number');
       // YouTube
       addProp('url_author', urlAuthor, 'string');
       if (props.isNotEmpty) {

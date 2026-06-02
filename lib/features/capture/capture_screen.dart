@@ -477,6 +477,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             anilistStatus: (isAniList && apiFields.aniStatus)
                 ? _urlPreview?.anilistStatus
                 : null,
+            anilistSeason: isAniList ? _urlPreview?.anilistSeason : null,
+            anilistTotalSeasons:
+                isAniList ? _urlPreview?.anilistTotalSeasons : null,
             urlAuthor: _urlPreview?.authorName,
           );
       await _saveAttachments(createdEntry.entry.id);

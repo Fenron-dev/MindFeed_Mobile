@@ -18,6 +18,8 @@ class UrlMetadata {
   final String? anilistStudio;
   final int? anilistYear;
   final String? anilistStatus; // FINISHED, RELEASING, NOT_YET_RELEASED …
+  final int? anilistSeason;
+  final int? anilistTotalSeasons;
   // YouTube-Felder
   final String? authorName; // Kanal-Name
 
@@ -35,6 +37,8 @@ class UrlMetadata {
     this.anilistStudio,
     this.anilistYear,
     this.anilistStatus,
+    this.anilistSeason,
+    this.anilistTotalSeasons,
     this.authorName,
   });
 }
@@ -133,6 +137,10 @@ class UrlMetadataService {
             chapters
             startDate { year }
             studios(isMain: true) { nodes { name } }
+            relations {
+              edges { relationType }
+              nodes { id }
+            }
           }
         }
       ''';
@@ -197,21 +205,35 @@ class UrlMetadataService {
           ? (studioNodes!.first as Map<String, dynamic>)['name'] as String?
           : null;
 
-      // Beschreibungs-Prefix für die Preview
-      final details = [
-        if (year != null) '$year',
-        if (format != null) format,
-        if (episodes != null) '$episodes Folgen',
-        if (chapters != null) '$chapters Kapitel',
-        if (studioName != null) studioName,
-        if (score != null) '⭐ ${(score / 10).toStringAsFixed(1)}',
-      ].join(' · ');
+      // Staffel-Info aus Relations ermitteln
+      final relEdges = (media['relations']?['edges'] as List?) ?? [];
+      final relNodes = (media['relations']?['nodes'] as List?) ?? [];
+      int? prequelId;
+      int? sequelId;
+      for (int i = 0; i < relEdges.length && i < relNodes.length; i++) {
+        final relType = (relEdges[i] as Map)['relationType'] as String?;
+        final nodeId = (relNodes[i] as Map)['id'] as int?;
+        if (nodeId == null) continue;
+        if (relType == 'PREQUEL' && prequelId == null) prequelId = nodeId;
+        if (relType == 'SEQUEL' && sequelId == null) sequelId = nodeId;
+      }
+
+      int? season;
+      int? totalSeasons;
+      if (prequelId != null || sequelId != null) {
+        try {
+          final chain = await _computeSeasonChain(id, prequelId, sequelId);
+          season = chain.$1;
+          totalSeasons = chain.$2;
+        } catch (_) {
+          // Staffel-Info ist optional
+        }
+      }
 
       return UrlMetadata(
         title: title,
-        description: details.isNotEmpty
-            ? '$details\n\n${desc.length > 400 ? '${desc.substring(0, 400)}…' : desc}'
-            : (desc.length > 400 ? '${desc.substring(0, 400)}…' : desc),
+        // Nur der reine Beschreibungstext — Metadaten stehen in separaten Properties
+        description: desc.length > 600 ? '${desc.substring(0, 600)}…' : desc,
         image: image,
         domain: 'anilist.co',
         genres: genres,
@@ -223,10 +245,81 @@ class UrlMetadataService {
         anilistStudio: studioName,
         anilistYear: year,
         anilistStatus: status,
+        anilistSeason: season,
+        anilistTotalSeasons: totalSeasons,
       );
     } catch (_) {
       return _domainFallback(uri);
     }
+  }
+
+  // ─── Staffel-Kette traversieren ────────────────────────────────────────────
+
+  static Future<int?> _fetchDirectRelationId(
+      int mediaId, String relationType) async {
+    const q = r'''
+      query ($id: Int) {
+        Media(id: $id) {
+          relations {
+            edges { relationType }
+            nodes { id }
+          }
+        }
+      }
+    ''';
+    try {
+      final res = await http
+          .post(
+            Uri.parse('https://graphql.anilist.co'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({'query': q, 'variables': {'id': mediaId}}),
+          )
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body);
+      final edges =
+          (data['data']?['Media']?['relations']?['edges'] as List?) ?? [];
+      final nodes =
+          (data['data']?['Media']?['relations']?['nodes'] as List?) ?? [];
+      for (int i = 0; i < edges.length && i < nodes.length; i++) {
+        if ((edges[i] as Map)['relationType'] == relationType) {
+          return (nodes[i] as Map)['id'] as int?;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // Gibt (aktuelle Staffel, Gesamtstaffeln) zurück
+  static Future<(int, int)> _computeSeasonChain(
+      int currentId, int? prequelId, int? sequelId) async {
+    const maxHops = 5;
+    final visited = <int>{currentId};
+
+    // Rückwärts zählen (wie viele Vorgänger = aktuelle Staffel - 1)
+    int season = 1;
+    int? nextId = prequelId;
+    while (nextId != null && season < maxHops + 1) {
+      if (visited.contains(nextId)) break;
+      visited.add(nextId);
+      season++;
+      nextId = await _fetchDirectRelationId(nextId, 'PREQUEL');
+    }
+
+    // Vorwärts zählen (wie viele Nachfolger)
+    int sequelCount = 0;
+    nextId = sequelId;
+    while (nextId != null && sequelCount < maxHops) {
+      if (visited.contains(nextId)) break;
+      visited.add(nextId);
+      sequelCount++;
+      nextId = await _fetchDirectRelationId(nextId, 'SEQUEL');
+    }
+
+    return (season, season + sequelCount);
   }
 
   // ─── BoardGameGeek XML API ────────────────────────────────────────────────

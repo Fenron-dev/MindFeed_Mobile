@@ -77,36 +77,46 @@ Wichtige Regeln:
     final prompt_tokens = prompt.length ~/ 3; // Grobe Schätzung
     final needed_tokens = (maxTokens < 200) ? 200 : maxTokens;
 
-    final res = await http
-        .post(
-          Uri.parse(_endpoint),
-          headers: {
-            'Authorization': 'Bearer $apiKey',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://mindfeed.app',
-            'X-Title': 'MindFeed Mobile',
-          },
-          body: jsonEncode({
-            'model': model,
-            'messages': [
-              {'role': 'user', 'content': prompt},
-            ],
-            'max_tokens': needed_tokens,
-            'temperature': temperature,
-          }),
-        )
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {'role': 'user', 'content': prompt},
+      ],
+      'max_tokens': needed_tokens,
+      'temperature': temperature,
+    });
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+
+    var res = await http
+        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 30));
 
+    // Bei Rate-Limit (429) einmal nach kurzer Pause wiederholen
+    if (res.statusCode == 429) {
+      await Future.delayed(const Duration(seconds: 6));
+      res = await http
+          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .timeout(const Duration(seconds: 30));
+    }
+
     if (res.statusCode != 200) {
-      // Kurze, lesbare Fehlermeldung aus dem OpenRouter-JSON extrahieren
       String errMsg;
-      try {
-        final errJson = jsonDecode(res.body) as Map<String, dynamic>;
-        errMsg = (errJson['error']?['message'] as String?) ??
-            errJson['error']?.toString() ??
-            res.body.substring(0, res.body.length.clamp(0, 200));
-      } catch (_) {
-        errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+      if (res.statusCode == 429) {
+        errMsg = 'Rate-Limit des Free-Modells erreicht. Warte kurz oder wähle ein anderes Modell in den Einstellungen.';
+      } else {
+        try {
+          final errJson = jsonDecode(res.body) as Map<String, dynamic>;
+          errMsg = (errJson['error']?['message'] as String?) ??
+              errJson['error']?.toString() ??
+              res.body.substring(0, res.body.length.clamp(0, 200));
+        } catch (_) {
+          errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+        }
       }
       throw Exception('OpenRouter ${res.statusCode}: $errMsg');
     }
