@@ -47,7 +47,11 @@ class _AppRootState extends State<_AppRoot> {
     await NotificationService.init();
     await AppSettings.init();
     try {
-      final db = await VaultManager.openDefaultVault();
+      // Custom-Vault-Pfad hat Vorrang (wie OracleVault-Ansatz)
+      final saved = VaultManager.getSavedVaultPath();
+      final db = (saved != null && VaultManager.isVault(saved))
+          ? await VaultManager.openVaultFromPath(saved)
+          : await VaultManager.openDefaultVault();
       if (mounted) setState(() { _db = db; _loading = false; });
     } catch (e, stack) {
       debugPrint('[Boot] $e\n$stack');
@@ -59,11 +63,14 @@ class _AppRootState extends State<_AppRoot> {
 
   Future<void> _restart() async {
     try {
-      final newDb = await VaultManager.openDefaultVault();
+      final saved = VaultManager.getSavedVaultPath();
+      final newDb = (saved != null && VaultManager.isVault(saved))
+          ? await VaultManager.openVaultFromPath(saved)
+          : await VaultManager.openDefaultVault();
       if (mounted) {
         setState(() {
           _db = newDb;
-          _scopeKey = UniqueKey(); // reißt ProviderScope + MindFeedApp ab und baut neu
+          _scopeKey = UniqueKey();
         });
       }
     } catch (e, stack) {

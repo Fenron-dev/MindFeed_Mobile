@@ -1,11 +1,14 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../core/vault_manager.dart';
 import '../../domain/prop_type.dart';
+import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
@@ -28,6 +31,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _importLoading = false;
   List<BackupResult> _localBackups = [];
   bool _backupsLoaded = false;
+  String? _activeVaultPath; // null = Default-Vault
 
   // AI Settings
   final _apiKeyCtrl = TextEditingController();
@@ -52,6 +56,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.initState();
     _loadBackups();
     _loadAiSettings();
+    _activeVaultPath = VaultManager.getSavedVaultPath();
   }
 
   @override
@@ -293,6 +298,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  // ─── Vault-Ordner wählen (OracleVault-Ansatz) ─────────────────────────────
+
+  Future<void> _pickVaultFolder() async {
+    final path = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'MindFeed-Vault-Ordner wählen',
+    );
+    if (path == null || !mounted) return;
+
+    if (!VaultManager.isVault(path)) {
+      _showSnack(
+        'Kein gültiger MindFeed-Vault (mindfeed.db nicht gefunden).',
+        success: false,
+      );
+      return;
+    }
+
+    await VaultManager.saveVaultPath(path);
+    setState(() => _activeVaultPath = path);
+
+    // App mit dem neuen Vault neu starten
+    await onRestartApp?.call();
+    if (mounted) {
+      _showSnack('Vault geöffnet: $path', success: true);
+    }
+  }
+
+  Future<void> _resetToDefaultVault() async {
+    await VaultManager.saveVaultPath(null);
+    setState(() => _activeVaultPath = null);
+    await onRestartApp?.call();
+    if (mounted) _showSnack('Standard-Vault wiederhergestellt', success: true);
+  }
+
   void _showSnack(String msg, {required bool success}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -319,6 +357,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
+          // ─── Vault ────────────────────────────────────────────────────
+          _SectionHeader('VAULT'),
+          const SizedBox(height: 8),
+
+          // Aktiver Vault-Pfad
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.folder_outlined, size: 16, color: MFColors.teal),
+                  const SizedBox(width: 8),
+                  const Text('Aktiver Vault',
+                      style: TextStyle(fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: MFColors.textPrimary)),
+                ]),
+                const SizedBox(height: 6),
+                Text(
+                  _activeVaultPath ?? 'Standard (App-Dokumente)',
+                  style: const TextStyle(
+                      fontSize: 11,
+                      color: MFColors.textMuted,
+                      fontFamily: 'monospace'),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          _SettingsTile(
+            icon: Icons.folder_open_outlined,
+            iconColor: MFColors.teal,
+            title: 'Vault-Ordner öffnen',
+            subtitle: 'Kopierten MindFeed-Vault-Ordner wählen (z.B. von iCloud Drive)',
+            onTap: _pickVaultFolder,
+          ),
+
+          if (_activeVaultPath != null) ...[
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.home_outlined,
+              iconColor: MFColors.textMuted,
+              title: 'Standard-Vault verwenden',
+              subtitle: 'Zurück zum App-eigenen Vault-Ordner',
+              onTap: _resetToDefaultVault,
+            ),
+          ],
+
+          const SizedBox(height: 24),
           // ─── Datensicherung ────────────────────────────────────────────
           _SectionHeader('DATENSICHERUNG'),
           const SizedBox(height: 8),

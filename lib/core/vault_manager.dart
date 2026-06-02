@@ -3,23 +3,54 @@ import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import '../data/db/app_database.dart';
+import '../services/app_settings.dart';
 
 class VaultManager {
+  // ─── Standard-Vault ────────────────────────────────────────────────────────
+
   /// Öffnet den Standard-Vault (oder legt ihn an).
-  /// Erstellt die nötigen Unterordner und Seed-Daten beim ersten Start.
   static Future<AppDatabase> openDefaultVault() async {
     final dir = await getApplicationDocumentsDirectory();
     final vaultDir = Directory(p.join(dir.path, 'MindFeed', 'default'));
-    await vaultDir.create(recursive: true);
-    await Directory(p.join(vaultDir.path, 'attachments')).create(recursive: true);
-    await Directory(p.join(vaultDir.path, 'backups')).create(recursive: true);
+    return _openAt(vaultDir.path, seedIfEmpty: true);
+  }
 
-    final dbPath = p.join(vaultDir.path, 'mindfeed.db');
+  // ─── Custom-Vault (OracleVault-Ansatz) ────────────────────────────────────
+
+  /// Öffnet einen Vault an einem beliebigen Pfad.
+  /// Erstellt die nötigen Unterordner, legt aber KEINE Seed-Daten an
+  /// (da der Vault bereits Daten enthält).
+  static Future<AppDatabase> openVaultFromPath(String vaultPath) async {
+    return _openAt(vaultPath, seedIfEmpty: false);
+  }
+
+  /// Gibt true zurück, wenn [path] ein gültiger MindFeed-Vault ist
+  /// (enthält mindfeed.db).
+  static bool isVault(String path) =>
+      File(p.join(path, 'mindfeed.db')).existsSync();
+
+  /// Liefert den gespeicherten Custom-Vault-Pfad (oder null).
+  static String? getSavedVaultPath() => AppSettings.getVaultPath();
+
+  /// Speichert [path] als Custom-Vault-Pfad.
+  /// null löscht den Eintrag (→ Default-Vault wird wieder verwendet).
+  static Future<void> saveVaultPath(String? path) =>
+      AppSettings.saveVaultPath(path);
+
+  // ─── Intern ────────────────────────────────────────────────────────────────
+
+  static Future<AppDatabase> _openAt(
+    String vaultPath, {
+    required bool seedIfEmpty,
+  }) async {
+    await Directory(vaultPath).create(recursive: true);
+    await Directory(p.join(vaultPath, 'attachments')).create(recursive: true);
+    await Directory(p.join(vaultPath, 'backups')).create(recursive: true);
+
+    final dbPath = p.join(vaultPath, 'mindfeed.db');
     final db = AppDatabase(dbPath);
 
-    // Beim ersten Start Standard-Container anlegen
-    await _seedIfEmpty(db);
-
+    if (seedIfEmpty) await _seedIfEmpty(db);
     return db;
   }
 
@@ -65,7 +96,12 @@ class VaultManager {
     }
   }
 
+  /// Gibt den Anhang-Pfad für den aktiven Vault zurück.
   static Future<String> getAttachmentsPath() async {
+    final saved = getSavedVaultPath();
+    if (saved != null && isVault(saved)) {
+      return p.join(saved, 'attachments');
+    }
     final dir = await getApplicationDocumentsDirectory();
     return p.join(dir.path, 'MindFeed', 'default', 'attachments');
   }

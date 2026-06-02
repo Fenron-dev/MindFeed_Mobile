@@ -188,6 +188,18 @@ class AppSettings {
     await p.setBool('tag_hash',    s.showHash);
   }
 
+  // ── Vault-Pfad ────────────────────────────────────────────────────────────
+
+  static String? getVaultPath() => _prefs?.getString('vault_path');
+
+  static Future<void> saveVaultPath(String? path) async {
+    if (path == null) {
+      await _prefs?.remove('vault_path');
+    } else {
+      await _prefs?.setString('vault_path', path);
+    }
+  }
+
   // ── Templates ─────────────────────────────────────────────────────────────
 
   static List<PropTemplate> loadTemplates() {
