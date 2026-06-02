@@ -429,24 +429,54 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ? explicitTitle
         : (_urlPreview?.title.isNotEmpty == true ? _urlPreview!.title : null);
 
+    // API-Feld-Einstellungen laden und anwenden
+    final apiFields = AppSettings.loadApiFieldSettings();
+    final isAniList = _urlPreview?.domain == 'anilist.co';
+    final isBgg = _urlPreview?.domain == 'boardgamegeek.com';
+
     try {
       final createdEntry = await ref.read(entryRepositoryProvider).createEntry(
             body: finalBody,
             title: resolvedTitle,
             sourceUrl: detectedUrl,
             urlTitle: _urlPreview?.title,
-            urlDescription: _urlPreview?.description,
-            urlImage: _urlPreview?.image,
+            // Beschreibung je nach API-Settings
+            urlDescription: (isAniList && !apiFields.aniDescription) ||
+                    (isBgg && !apiFields.bggDescription)
+                ? null
+                : _urlPreview?.description,
+            urlImage: (isAniList && !apiFields.aniImage) ||
+                    (isBgg && !apiFields.bggImage)
+                ? null
+                : _urlPreview?.image,
             urlDomain: _urlPreview?.domain,
-            urlGenres: _urlPreview?.genres ?? [],
-            urlScore: _urlPreview?.score,
+            urlGenres: (isAniList && !apiFields.aniGenres) ||
+                    (isBgg && !apiFields.bggCategories)
+                ? []
+                : _urlPreview?.genres ?? [],
+            urlScore: (isAniList && !apiFields.aniScore) ||
+                    (isBgg && !apiFields.bggScore)
+                ? null
+                : _urlPreview?.score,
             urlMediaType: _urlPreview?.mediaType,
-            anilistFormat: _urlPreview?.anilistFormat,
-            anilistEpisodes: _urlPreview?.anilistEpisodes,
-            anilistChapters: _urlPreview?.anilistChapters,
-            anilistStudio: _urlPreview?.anilistStudio,
-            anilistYear: _urlPreview?.anilistYear,
-            anilistStatus: _urlPreview?.anilistStatus,
+            anilistFormat: (isAniList && apiFields.aniFormat)
+                ? _urlPreview?.anilistFormat
+                : null,
+            anilistEpisodes: (isAniList && apiFields.aniEpisodes)
+                ? _urlPreview?.anilistEpisodes
+                : null,
+            anilistChapters: (isAniList && apiFields.aniEpisodes)
+                ? _urlPreview?.anilistChapters
+                : null,
+            anilistStudio: (isAniList && apiFields.aniStudio)
+                ? _urlPreview?.anilistStudio
+                : null,
+            anilistYear: (isAniList && apiFields.aniYear)
+                ? _urlPreview?.anilistYear
+                : null,
+            anilistStatus: (isAniList && apiFields.aniStatus)
+                ? _urlPreview?.anilistStatus
+                : null,
             urlAuthor: _urlPreview?.authorName,
           );
       await _saveAttachments(createdEntry.entry.id);

@@ -195,41 +195,32 @@ class BackupService {
   // ─── JSON aus Datei importieren ───────────────────────────────────────────
 
   static Future<ImportResult> importFromPicker(AppDatabase db) async {
+    // withData: false vermeidet iOS-Freeze bei Cloud-Dateien.
+    // Wir lesen die Datei danach selbst über den Pfad.
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json', 'zip'],
-      withData: true,
+      withData: false,
     );
     if (picked == null || picked.files.isEmpty) return ImportResult.cancelled();
 
     final file = picked.files.single;
     final path = file.path;
-    final isZip = file.name.endsWith('.zip') || (path ?? '').endsWith('.zip');
+    if (path == null) return ImportResult.error('Datei-Pfad nicht verfügbar');
+
+    final isZip = file.name.toLowerCase().endsWith('.zip');
 
     if (isZip) {
-      // iOS liefert bytes statt path für Cloud-Dateien
-      if (file.bytes != null) {
-        return _restoreFromZipBytes(file.bytes!, db);
-      } else if (path != null) {
-        return restoreFromZip(path, db);
-      }
-      return ImportResult.error('ZIP-Pfad nicht verfügbar');
+      return restoreFromZip(path, db);
     }
 
     // JSON
-    final String raw;
     try {
-      if (file.bytes != null) {
-        raw = utf8.decode(file.bytes!);
-      } else if (path != null) {
-        raw = await File(path).readAsString();
-      } else {
-        return ImportResult.error('Datei konnte nicht gelesen werden');
-      }
+      final raw = await File(path).readAsString();
+      return _importJsonString(db, raw);
     } catch (_) {
       return ImportResult.error('Datei konnte nicht gelesen werden');
     }
-    return _importJsonString(db, raw);
   }
 
   // ─── ZIP wiederherstellen (kein DB-Neustart!) ─────────────────────────────

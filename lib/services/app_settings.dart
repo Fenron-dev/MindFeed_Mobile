@@ -156,6 +156,118 @@ class PropTemplateField {
   );
 }
 
+// ─── API-Feld-Einstellungen ───────────────────────────────────────────────────
+
+class ApiFieldSettings {
+  // AniList: welche Felder als Entry-Properties gespeichert werden
+  final bool aniDescription;
+  final bool aniImage;
+  final bool aniGenres;
+  final bool aniScore;
+  final bool aniFormat;
+  final bool aniStatus;
+  final bool aniEpisodes;
+  final bool aniStudio;
+  final bool aniYear;
+
+  // BGG: welche Felder als Entry-Properties gespeichert werden
+  final bool bggDescription;
+  final bool bggImage;
+  final bool bggCategories;
+  final bool bggScore;
+  final bool bggPlayers;
+  final bool bggPlayTime;
+  final bool bggYear;
+  final bool bggDesigners;
+  final bool bggPublishers;
+  final bool bggMechanics;
+
+  const ApiFieldSettings({
+    this.aniDescription = true,
+    this.aniImage = true,
+    this.aniGenres = true,
+    this.aniScore = true,
+    this.aniFormat = true,
+    this.aniStatus = false,
+    this.aniEpisodes = true,
+    this.aniStudio = true,
+    this.aniYear = true,
+    this.bggDescription = true,
+    this.bggImage = true,
+    this.bggCategories = true,
+    this.bggScore = true,
+    this.bggPlayers = true,
+    this.bggPlayTime = false,
+    this.bggYear = true,
+    this.bggDesigners = false,
+    this.bggPublishers = false,
+    this.bggMechanics = false,
+  });
+
+  ApiFieldSettings copyWith({
+    bool? aniDescription, bool? aniImage, bool? aniGenres, bool? aniScore,
+    bool? aniFormat, bool? aniStatus, bool? aniEpisodes, bool? aniStudio,
+    bool? aniYear,
+    bool? bggDescription, bool? bggImage, bool? bggCategories, bool? bggScore,
+    bool? bggPlayers, bool? bggPlayTime, bool? bggYear,
+    bool? bggDesigners, bool? bggPublishers, bool? bggMechanics,
+  }) => ApiFieldSettings(
+    aniDescription: aniDescription ?? this.aniDescription,
+    aniImage: aniImage ?? this.aniImage,
+    aniGenres: aniGenres ?? this.aniGenres,
+    aniScore: aniScore ?? this.aniScore,
+    aniFormat: aniFormat ?? this.aniFormat,
+    aniStatus: aniStatus ?? this.aniStatus,
+    aniEpisodes: aniEpisodes ?? this.aniEpisodes,
+    aniStudio: aniStudio ?? this.aniStudio,
+    aniYear: aniYear ?? this.aniYear,
+    bggDescription: bggDescription ?? this.bggDescription,
+    bggImage: bggImage ?? this.bggImage,
+    bggCategories: bggCategories ?? this.bggCategories,
+    bggScore: bggScore ?? this.bggScore,
+    bggPlayers: bggPlayers ?? this.bggPlayers,
+    bggPlayTime: bggPlayTime ?? this.bggPlayTime,
+    bggYear: bggYear ?? this.bggYear,
+    bggDesigners: bggDesigners ?? this.bggDesigners,
+    bggPublishers: bggPublishers ?? this.bggPublishers,
+    bggMechanics: bggMechanics ?? this.bggMechanics,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'aniDescription': aniDescription, 'aniImage': aniImage,
+    'aniGenres': aniGenres, 'aniScore': aniScore, 'aniFormat': aniFormat,
+    'aniStatus': aniStatus, 'aniEpisodes': aniEpisodes,
+    'aniStudio': aniStudio, 'aniYear': aniYear,
+    'bggDescription': bggDescription, 'bggImage': bggImage,
+    'bggCategories': bggCategories, 'bggScore': bggScore,
+    'bggPlayers': bggPlayers, 'bggPlayTime': bggPlayTime,
+    'bggYear': bggYear, 'bggDesigners': bggDesigners,
+    'bggPublishers': bggPublishers, 'bggMechanics': bggMechanics,
+  };
+
+  factory ApiFieldSettings.fromJson(Map<String, dynamic> j) => ApiFieldSettings(
+    aniDescription: j['aniDescription'] as bool? ?? true,
+    aniImage: j['aniImage'] as bool? ?? true,
+    aniGenres: j['aniGenres'] as bool? ?? true,
+    aniScore: j['aniScore'] as bool? ?? true,
+    aniFormat: j['aniFormat'] as bool? ?? true,
+    aniStatus: j['aniStatus'] as bool? ?? false,
+    aniEpisodes: j['aniEpisodes'] as bool? ?? true,
+    aniStudio: j['aniStudio'] as bool? ?? true,
+    aniYear: j['aniYear'] as bool? ?? true,
+    bggDescription: j['bggDescription'] as bool? ?? true,
+    bggImage: j['bggImage'] as bool? ?? true,
+    bggCategories: j['bggCategories'] as bool? ?? true,
+    bggScore: j['bggScore'] as bool? ?? true,
+    bggPlayers: j['bggPlayers'] as bool? ?? true,
+    bggPlayTime: j['bggPlayTime'] as bool? ?? false,
+    bggYear: j['bggYear'] as bool? ?? true,
+    bggDesigners: j['bggDesigners'] as bool? ?? false,
+    bggPublishers: j['bggPublishers'] as bool? ?? false,
+    bggMechanics: j['bggMechanics'] as bool? ?? false,
+  );
+}
+
 // ─── AppSettings Singleton ────────────────────────────────────────────────────
 
 class AppSettings {
@@ -198,6 +310,23 @@ class AppSettings {
     } else {
       await _prefs?.setString('vault_path', path);
     }
+  }
+
+  // ── API-Feld-Einstellungen ─────────────────────────────────────────────────
+
+  static ApiFieldSettings loadApiFieldSettings() {
+    final raw = _prefs?.getString('api_field_settings');
+    if (raw == null) return const ApiFieldSettings();
+    try {
+      return ApiFieldSettings.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return const ApiFieldSettings();
+    }
+  }
+
+  static Future<void> saveApiFieldSettings(ApiFieldSettings s) async {
+    await _prefs?.setString('api_field_settings', jsonEncode(s.toJson()));
   }
 
   // ── Templates ─────────────────────────────────────────────────────────────

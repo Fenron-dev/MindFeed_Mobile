@@ -47,6 +47,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _freeOnly = true;
   String _modelSearch = '';
 
+  // API-Feld-Einstellungen
+  ApiFieldSettings _apiFields = const ApiFieldSettings();
+
   // Verbindungstest
   String _testState = 'idle'; // idle | loading | ok | error
   String _testError = '';
@@ -57,6 +60,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadBackups();
     _loadAiSettings();
     _activeVaultPath = VaultManager.getSavedVaultPath();
+    _apiFields = AppSettings.loadApiFieldSettings();
   }
 
   @override
@@ -210,40 +214,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ─── Import (JSON oder ZIP) — kein Neustart! ──────────────────────────────
 
   Future<void> _importFromFile() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: MFColors.surface,
-        title: const Text('Backup importieren?',
-            style: TextStyle(color: MFColors.textPrimary)),
-        content: const Text(
-            'Alle aktuellen Einträge werden durch das Backup ersetzt.\n'
-            'Die App muss NICHT neu gestartet werden.',
-            style: TextStyle(color: MFColors.textSecondary, fontSize: 13)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Abbrechen',
-                  style: TextStyle(color: MFColors.textMuted))),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Importieren',
-                  style: TextStyle(color: Colors.orange))),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-
+    // Kein Pre-Dialog: FilePicker direkt öffnen.
+    // Ein Dialog VOR dem Picker kann auf iOS einen schwarzen Bildschirm
+    // verursachen (UIViewController-Konflikt beim Dismiss→Present).
     setState(() => _importLoading = true);
     try {
       final result =
           await BackupService.importFromPicker(ref.read(databaseProvider));
       if (!mounted) return;
+
       if (result.isSuccess) {
-        _showSnack('✓ ${result.entryCount} Einträge wiederhergestellt',
-            success: true);
-        // ProviderScope neu aufbauen → Feed zeigt wiederhergestellte Daten
-        await onRestartApp?.call();
+        // Bestätigungsdialog NACH erfolgreichem Import zeigen
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: MFColors.surface,
+            title: const Text('Import erfolgreich',
+                style: TextStyle(color: MFColors.textPrimary)),
+            content: Text(
+                '${result.entryCount} Einträge wurden wiederhergestellt.\n'
+                'App wird jetzt neu geladen.',
+                style: const TextStyle(
+                    color: MFColors.textSecondary, fontSize: 13)),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: FilledButton.styleFrom(
+                    backgroundColor: MFColors.teal,
+                    foregroundColor: MFColors.bg),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true) await onRestartApp?.call();
       } else if (!result.cancelled) {
         _showSnack('Fehler: ${result.error}', success: false);
       }
@@ -926,6 +930,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 8),
           _TemplatesSection(),
 
+          // ─── Info-APIs ────────────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('INFO-APIS'),
+          const SizedBox(height: 8),
+          _ApiFieldSection(
+            settings: _apiFields,
+            onChanged: (s) async {
+              setState(() => _apiFields = s);
+              await AppSettings.saveApiFieldSettings(s);
+            },
+          ),
+
           // ─── Info ──────────────────────────────────────────────────────────
           const SizedBox(height: 28),
           _SectionHeader('APP'),
@@ -1527,6 +1543,166 @@ class _FieldDialogState extends State<_FieldDialog> {
                 style: TextStyle(color: MFColors.teal)),
           ),
         ],
+      );
+}
+
+// ─── API-Feld-Einstellungen Widget ────────────────────────────────────────────
+
+class _ApiFieldSection extends StatelessWidget {
+  final ApiFieldSettings settings;
+  final ValueChanged<ApiFieldSettings> onChanged;
+
+  const _ApiFieldSection(
+      {required this.settings, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      // ── AniList ──────────────────────────────────────────────────────────
+      _ApiGroup(
+        title: 'AniList (Anime & Manga)',
+        icon: Icons.animation_outlined,
+        color: const Color(0xFF02A9FF),
+        children: [
+          _ApiToggle('Beschreibung', settings.aniDescription,
+              (v) => onChanged(settings.copyWith(aniDescription: v))),
+          _ApiToggle('Cover-Bild', settings.aniImage,
+              (v) => onChanged(settings.copyWith(aniImage: v))),
+          _ApiToggle('Genres', settings.aniGenres,
+              (v) => onChanged(settings.copyWith(aniGenres: v))),
+          _ApiToggle('Bewertung (Score)', settings.aniScore,
+              (v) => onChanged(settings.copyWith(aniScore: v))),
+          _ApiToggle('Format (TV/Movie/OVA…)', settings.aniFormat,
+              (v) => onChanged(settings.copyWith(aniFormat: v))),
+          _ApiToggle('Status (Fertig/Laufend…)', settings.aniStatus,
+              (v) => onChanged(settings.copyWith(aniStatus: v))),
+          _ApiToggle('Episoden / Kapitel', settings.aniEpisodes,
+              (v) => onChanged(settings.copyWith(aniEpisodes: v))),
+          _ApiToggle('Studio', settings.aniStudio,
+              (v) => onChanged(settings.copyWith(aniStudio: v))),
+          _ApiToggle('Erscheinungsjahr', settings.aniYear,
+              (v) => onChanged(settings.copyWith(aniYear: v))),
+        ],
+      ),
+      const SizedBox(height: 10),
+      // ── BoardGameGeek ────────────────────────────────────────────────────
+      _ApiGroup(
+        title: 'BoardGameGeek (Brettspiele)',
+        icon: Icons.casino_outlined,
+        color: const Color(0xFFFF5100),
+        children: [
+          _ApiToggle('Beschreibung', settings.bggDescription,
+              (v) => onChanged(settings.copyWith(bggDescription: v))),
+          _ApiToggle('Cover-Bild', settings.bggImage,
+              (v) => onChanged(settings.copyWith(bggImage: v))),
+          _ApiToggle('Kategorien', settings.bggCategories,
+              (v) => onChanged(settings.copyWith(bggCategories: v))),
+          _ApiToggle('Bewertung', settings.bggScore,
+              (v) => onChanged(settings.copyWith(bggScore: v))),
+          _ApiToggle('Spieleranzahl', settings.bggPlayers,
+              (v) => onChanged(settings.copyWith(bggPlayers: v))),
+          _ApiToggle('Spielzeit', settings.bggPlayTime,
+              (v) => onChanged(settings.copyWith(bggPlayTime: v))),
+          _ApiToggle('Erscheinungsjahr', settings.bggYear,
+              (v) => onChanged(settings.copyWith(bggYear: v))),
+          _ApiToggle('Designer', settings.bggDesigners,
+              (v) => onChanged(settings.copyWith(bggDesigners: v))),
+          _ApiToggle('Verleger', settings.bggPublishers,
+              (v) => onChanged(settings.copyWith(bggPublishers: v))),
+          _ApiToggle('Mechaniken', settings.bggMechanics,
+              (v) => onChanged(settings.copyWith(bggMechanics: v))),
+        ],
+      ),
+    ]);
+  }
+}
+
+class _ApiGroup extends StatefulWidget {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final List<Widget> children;
+
+  const _ApiGroup({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.children,
+  });
+
+  @override
+  State<_ApiGroup> createState() => _ApiGroupState();
+}
+
+class _ApiGroupState extends State<_ApiGroup> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Column(children: [
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: [
+              Icon(widget.icon, size: 16, color: widget.color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(widget.title,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: MFColors.textPrimary)),
+              ),
+              Icon(
+                _expanded ? Icons.expand_less : Icons.expand_more,
+                size: 18, color: MFColors.textMuted,
+              ),
+            ]),
+          ),
+        ),
+        if (_expanded) ...[
+          const Divider(height: 1, color: MFColors.border),
+          ...widget.children,
+        ],
+      ]),
+    );
+  }
+}
+
+class _ApiToggle extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _ApiToggle(this.label, this.value, this.onChanged);
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () => onChanged(!value),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(children: [
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 12, color: MFColors.textSecondary)),
+            ),
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              activeColor: MFColors.teal,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ]),
+        ),
       );
 }
 
