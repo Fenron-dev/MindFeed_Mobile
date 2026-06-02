@@ -1,4 +1,4 @@
-import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../domain/prop_type.dart';
-import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
@@ -26,7 +25,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _backupLoading = false;
-  bool _restoreLoading = false;
+  bool _importLoading = false;
   List<BackupResult> _localBackups = [];
   bool _backupsLoaded = false;
 
@@ -169,37 +168,84 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  // ─── Backup erstellen ──────────────────────────────────────────────────────
+  // ─── ZIP-Backup erstellen & teilen ────────────────────────────────────────
 
-  Future<void> _createBackup() async {
+  Future<void> _createZipBackup() async {
     setState(() => _backupLoading = true);
     try {
-      final result = await BackupService.createBackup(ref.read(databaseProvider));
+      final result =
+          await BackupService.createZipBackup(ref.read(databaseProvider));
       await BackupService.shareBackup(result);
       await _loadBackups();
-      if (mounted) {
-        _showSnack('Backup erstellt: ${result.filename}', success: true);
-      }
+      if (mounted) _showSnack('Backup erstellt: ${result.filename}', success: true);
     } catch (e) {
-      if (mounted) _showSnack('Fehler beim Backup: $e', success: false);
+      if (mounted) _showSnack('Backup-Fehler: $e', success: false);
     } finally {
       if (mounted) setState(() => _backupLoading = false);
     }
   }
 
-  // ─── Backup wiederherstellen ──────────────────────────────────────────────
+  // ─── JSON exportieren & teilen ────────────────────────────────────────────
 
-  Future<void> _restoreFromFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['zip'],
-      dialogTitle: 'MindFeed Backup wählen',
-    );
-    if (result == null || result.files.single.path == null) return;
-    await _doRestore(result.files.single.path!);
+  Future<void> _shareJson() async {
+    setState(() => _backupLoading = true);
+    try {
+      await BackupService.shareJson(ref.read(databaseProvider));
+    } catch (e) {
+      if (mounted) _showSnack('Export-Fehler: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _backupLoading = false);
+    }
   }
 
-  Future<void> _doRestore(String zipPath) async {
+  // ─── Import (JSON oder ZIP) — kein Neustart! ──────────────────────────────
+
+  Future<void> _importFromFile() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Backup importieren?',
+            style: TextStyle(color: MFColors.textPrimary)),
+        content: const Text(
+            'Alle aktuellen Einträge werden durch das Backup ersetzt.\n'
+            'Die App muss NICHT neu gestartet werden.',
+            style: TextStyle(color: MFColors.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: MFColors.textMuted))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Importieren',
+                  style: TextStyle(color: Colors.orange))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _importLoading = true);
+    try {
+      final result =
+          await BackupService.importFromPicker(ref.read(databaseProvider));
+      if (!mounted) return;
+      if (result.isSuccess) {
+        _showSnack('✓ ${result.entryCount} Einträge wiederhergestellt',
+            success: true);
+      } else if (!result.cancelled) {
+        _showSnack('Fehler: ${result.error}', success: false);
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Fehler: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _importLoading = false);
+    }
+  }
+
+  // ─── Lokales Backup wiederherstellen ──────────────────────────────────────
+
+  Future<void> _doRestore(String path) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -207,8 +253,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: const Text('Backup wiederherstellen?',
             style: TextStyle(color: MFColors.textPrimary)),
         content: const Text(
-            'Alle aktuellen Daten werden durch das Backup ersetzt. '
-            'Die App startet danach automatisch neu.',
+            'Alle aktuellen Daten werden durch dieses Backup ersetzt.',
             style: TextStyle(color: MFColors.textSecondary, fontSize: 13)),
         actions: [
           TextButton(
@@ -222,22 +267,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true || !mounted) return;
 
-    setState(() => _restoreLoading = true);
+    setState(() => _importLoading = true);
     try {
       final db = ref.read(databaseProvider);
-      // restore() schreibt Temp, schließt DB, benennt atomar um
-      await BackupService.restore(zipPath, db);
-      // Sofortiger Neustart — kein Delay nötig, da _AppRoot via setState
-      // einen neuen ProviderScope aufbaut statt runApp() erneut aufzurufen.
-      await onRestartApp?.call();
-      if (mounted) setState(() => _restoreLoading = false);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _restoreLoading = false);
-        _showSnack('Fehler: $e', success: false);
+      final ImportResult result;
+      if (path.endsWith('.zip')) {
+        result = await BackupService.restoreFromZip(path, db);
+      } else {
+        final raw = await File(path).readAsString();
+        result = await BackupService.importFromJsonString(db, raw);
       }
+      if (!mounted) return;
+      if (result.isSuccess) {
+        _showSnack('✓ ${result.entryCount} Einträge wiederhergestellt',
+            success: true);
+      } else if (!result.cancelled) {
+        _showSnack('Fehler: ${result.error}', success: false);
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Fehler: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _importLoading = false);
     }
   }
 
@@ -274,9 +326,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SettingsTile(
             icon: Icons.cloud_upload_outlined,
             iconColor: MFColors.teal,
-            title: 'Backup erstellen',
-            subtitle:
-                'ZIP-Datei mit allen Einträgen und Anhängen exportieren',
+            title: 'ZIP-Backup erstellen',
+            subtitle: 'Alle Einträge + Anhänge als ZIP exportieren',
             trailing: _backupLoading
                 ? const SizedBox(
                     width: 20,
@@ -285,7 +336,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         strokeWidth: 2, color: MFColors.teal))
                 : const Icon(Icons.chevron_right,
                     color: MFColors.textMuted, size: 18),
-            onTap: _backupLoading ? null : _createBackup,
+            onTap: _backupLoading ? null : _createZipBackup,
+          ),
+
+          const SizedBox(height: 8),
+
+          _SettingsTile(
+            icon: Icons.data_object_outlined,
+            iconColor: const Color(0xFF6366F1),
+            title: 'JSON exportieren',
+            subtitle: 'Nur Textdaten — schnell, universell, klein',
+            trailing: _backupLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Color(0xFF6366F1)))
+                : const Icon(Icons.chevron_right,
+                    color: MFColors.textMuted, size: 18),
+            onTap: _backupLoading ? null : _shareJson,
           ),
 
           const SizedBox(height: 8),
@@ -293,18 +362,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SettingsTile(
             icon: Icons.cloud_download_outlined,
             iconColor: const Color(0xFFF59E0B),
-            title: 'Backup wiederherstellen',
-            subtitle: 'ZIP-Backup-Datei auswählen und importieren',
-            trailing: _restoreLoading
+            title: 'Backup importieren',
+            subtitle: 'JSON oder ZIP — kein App-Neustart nötig',
+            trailing: _importLoading
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFFF59E0B)))
+                        strokeWidth: 2, color: Color(0xFFF59E0B)))
                 : const Icon(Icons.chevron_right,
                     color: MFColors.textMuted, size: 18),
-            onTap: _restoreLoading ? null : _restoreFromFile,
+            onTap: _importLoading ? null : _importFromFile,
           ),
 
           // Lokale Backups
