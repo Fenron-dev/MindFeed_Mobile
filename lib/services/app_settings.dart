@@ -115,7 +115,7 @@ class PropTemplate {
       fields: [
         PropTemplateField(key: 'Kanal', type: PropType.text.value),
         PropTemplateField(key: 'Laufzeit', type: PropType.text.value),
-        PropTemplateField(key: 'Hochgeladen', type: PropType.date.value),
+        PropTemplateField(key: 'Hochgeladen', type: PropType.text.value),
         PropTemplateField(key: 'Geschaut', type: PropType.boolean.value, defaultValue: 'false'),
         PropTemplateField(key: 'Bewertung', type: PropType.rating.value),
         PropTemplateField(key: 'Notizen', type: PropType.text.value),

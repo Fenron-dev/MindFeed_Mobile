@@ -977,6 +977,7 @@ class _PropertiesTable extends ConsumerWidget {
     'anilist_season', 'anilist_total_seasons',
     'genres', // wird im Template als 'Genre' angezeigt
     'media_type', 'domain', // interne System-Properties
+    'url_author', // ersetzt durch youtube_channel
   };
 
   const _PropertiesTable(
@@ -1000,68 +1001,74 @@ class _PropertiesTable extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: MFColors.border),
               ),
-              child: Column(
-                children: visible.asMap().entries.map((e) {
-                  final last = e.key == visible.length - 1;
-                  final p = e.value;
-                  return Container(
-                    decoration: BoxDecoration(
-                      border: last
-                          ? null
-                          : const Border(
-                              bottom: BorderSide(color: MFColors.border)),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 9),
-                    child: Row(children: [
-                      SizedBox(
-                        width: 110,
-                        child: Row(children: [
-                          Icon(PropType.fromString(p.type).icon,
-                              size: 11,
-                              color: PropType.fromString(p.type).color),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(p.key,
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: MFColors.textMuted,
-                                    fontFamily: 'monospace'),
-                                overflow: TextOverflow.ellipsis),
+              // Vertikales Layout: Label oben, Wert darunter — 2-spaltig per Wrap
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Wrap(
+                  children: visible.map((p) {
+                    final propType = PropType.fromString(p.type);
+                    return Stack(
+                      children: [
+                        Container(
+                          width: (MediaQuery.sizeOf(context).width - 72) / 2,
+                          padding: const EdgeInsets.fromLTRB(10, 8, 28, 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Label mit Icon
+                              Row(children: [
+                                Icon(propType.icon, size: 10, color: propType.color),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    p.key.toUpperCase(),
+                                    style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: MFColors.textMuted,
+                                        letterSpacing: 0.8),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ]),
+                              const SizedBox(height: 3),
+                              // Wert
+                              _EditablePropValue(prop: p, entryId: entryId),
+                            ],
                           ),
-                        ]),
-                      ),
-                      Expanded(
-                        child: _EditablePropValue(
-                            prop: p, entryId: entryId),
-                      ),
-                      // Löschen-Button
-                      GestureDetector(
-                        onTap: () async {
-                          final allProps = await ref
-                              .read(propertyDaoProvider)
-                              .watchByEntry(entryId)
-                              .first;
-                          final remaining = allProps
-                              .where((x) => x.id != p.id)
-                              .map((x) => EntryPropertiesCompanion(
-                                    id: drift.Value(x.id),
-                                    entryId: drift.Value(x.entryId),
-                                    key: drift.Value(x.key),
-                                    value: drift.Value(x.value),
-                                    type: drift.Value(x.type),
-                                  ))
-                              .toList();
-                          await ref
-                              .read(propertyDaoProvider)
-                              .setProperties(entryId, remaining);
-                        },
-                        child: const Icon(Icons.close,
-                            size: 14, color: MFColors.textMuted),
-                      ),
-                    ]),
-                  );
-                }).toList(),
+                        ),
+                        // Löschen-Button (oben rechts)
+                        Positioned(
+                          top: 4, right: 4,
+                          child: GestureDetector(
+                            onTap: () async {
+                              final allProps = await ref
+                                  .read(propertyDaoProvider)
+                                  .watchByEntry(entryId)
+                                  .first;
+                              final remaining = allProps
+                                  .where((x) => x.id != p.id)
+                                  .map((x) => EntryPropertiesCompanion(
+                                        id: drift.Value(x.id),
+                                        entryId: drift.Value(x.entryId),
+                                        key: drift.Value(x.key),
+                                        value: drift.Value(x.value),
+                                        type: drift.Value(x.type),
+                                      ))
+                                  .toList();
+                              await ref
+                                  .read(propertyDaoProvider)
+                                  .setProperties(entryId, remaining);
+                            },
+                            child: const Icon(Icons.close,
+                                size: 12, color: MFColors.textMuted),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ),
             ),
           const SizedBox(height: 6),

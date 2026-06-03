@@ -165,8 +165,10 @@ class EntryRepository {
       addProp('anilist_status', anilistStatus, 'string');
       if (anilistSeason != null) addProp('anilist_season', anilistSeason.toString(), 'number');
       if (anilistTotalSeasons != null) addProp('anilist_total_seasons', anilistTotalSeasons.toString(), 'number');
-      // YouTube
-      addProp('url_author', urlAuthor, 'string');
+      // YouTube (url_author als Legacy-Fallback, falls extraProps leer)
+      if (extraProps.isEmpty && urlAuthor != null) {
+        addProp('youtube_channel', urlAuthor, 'string');
+      }
       // Generische Zusatz-Properties (BGG/VGG/RPGG)
       for (final e in extraProps.entries) {
         if (e.value.isNotEmpty) addProp(e.key, e.value, 'string');

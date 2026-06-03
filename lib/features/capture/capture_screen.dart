@@ -377,6 +377,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
     if (mediaType == 'YOUTUBE') {
       if (_urlPreview?.authorName != null) prefill['kanal'] = _urlPreview!.authorName!;
+      if (extra['youtube_laufzeit']?.isNotEmpty == true) prefill['laufzeit'] = extra['youtube_laufzeit']!;
+      if (extra['youtube_hochgeladen']?.isNotEmpty == true) prefill['hochgeladen'] = extra['youtube_hochgeladen']!;
     }
     if (mediaType == 'GITHUB') {
       if (_urlPreview?.githubLanguage != null) prefill['sprache'] = _urlPreview!.githubLanguage!;

@@ -426,25 +426,47 @@ class UrlMetadataService {
         thumb = _jsonStr(oRes.body, 'thumbnail_url') ?? thumb;
       }
 
-      // Beschreibung aus der Seite extrahieren
+      // Beschreibung, Laufzeit und Datum aus der Seite extrahieren
       String description = '';
+      final extra = <String, String>{'youtube_channel': author};
+
       if (dRes.statusCode == 200) {
+        final body = dRes.body;
+
+        // Beschreibung
         final descMatch = RegExp(
           r'<meta\s+name="description"\s+content="([^"]{10,})"',
           caseSensitive: false,
-        ).firstMatch(dRes.body);
+        ).firstMatch(body);
         if (descMatch != null) {
           description = descMatch.group(1) ?? '';
-          // HTML-Entities dekodieren
           description = description
               .replaceAll('&amp;', '&')
               .replaceAll('&lt;', '<')
               .replaceAll('&gt;', '>')
               .replaceAll('&quot;', '"')
               .replaceAll('&#39;', "'");
-          if (description.length > 500) {
-            description = '${description.substring(0, 500)}…';
+          if (description.length > 500) description = '${description.substring(0, 500)}…';
+        }
+
+        // Laufzeit in Sekunden → mm:ss
+        final secMatch = RegExp(r'"lengthSeconds":"(\d+)"').firstMatch(body);
+        if (secMatch != null) {
+          final secs = int.tryParse(secMatch.group(1) ?? '') ?? 0;
+          if (secs > 0) {
+            final m = (secs ~/ 60).toString().padLeft(2, '0');
+            final s = (secs % 60).toString().padLeft(2, '0');
+            extra['youtube_laufzeit'] = '$m:$s';
           }
+        }
+
+        // Veröffentlichungsdatum
+        final dateMatch =
+            RegExp(r'"publishDate":"(\d{4}-\d{2}-\d{2})').firstMatch(body);
+        if (dateMatch != null) {
+          final parts = dateMatch.group(1)!.split('-');
+          extra['youtube_hochgeladen'] =
+              '${parts[2]}.${parts[1]}.${parts[0]}';
         }
       }
 
@@ -455,6 +477,7 @@ class UrlMetadataService {
         domain: 'youtube.com',
         authorName: author,
         mediaType: 'YOUTUBE',
+        extraProps: extra,
       );
     } catch (_) {
       return null;

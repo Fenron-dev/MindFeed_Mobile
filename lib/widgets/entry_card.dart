@@ -290,9 +290,14 @@ class _PropertiesRow extends StatelessWidget {
   final List properties;
   const _PropertiesRow(this.properties);
 
+  // System-Properties die in der Karte nicht sinnvoll sind
   static const _excludedKeys = {
     'og_image', 'cover_image', 'cover', 'bild',
     'og_description', 'og_title',
+    'genres', 'media_type', 'domain',
+    'url_author', 'youtube_channel',
+    'anilist_season', 'anilist_total_seasons',
+    'score',
   };
 
   @override
@@ -320,23 +325,29 @@ class _PropChip extends StatelessWidget {
     final type = PropType.fromString(prop.type as String? ?? 'text');
     final val = prop.value as String? ?? '';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: MFColors.bg,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: MFColors.border),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(type.icon, size: 9, color: type.color),
-        const SizedBox(width: 3),
-        Text(
-          '${prop.key}: ',
-          style: const TextStyle(
-              fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 160),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: MFColors.bg,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: MFColors.border),
         ),
-        _renderValue(type, val),
-      ]),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(type.icon, size: 9, color: type.color),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              '${prop.key}: ',
+              style: const TextStyle(
+                  fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          _renderValue(type, val),
+        ]),
+      ),
     );
   }
 

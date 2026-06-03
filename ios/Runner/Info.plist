@@ -30,6 +30,43 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+
+	<!-- URL-Schema damit andere Apps MindFeed als Ziel erkennen -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>ShareMedia-mindfeed</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ShareMedia-mindfeed</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Datei-Typen die MindFeed empfangen kann (erscheint in "Teilen mit...") -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>All Files</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.item</string>
+				<string>public.content</string>
+				<string>public.data</string>
+				<string>public.image</string>
+				<string>public.audio</string>
+				<string>public.movie</string>
+				<string>public.plain-text</string>
+				<string>public.url</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
