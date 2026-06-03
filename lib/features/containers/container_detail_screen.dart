@@ -5,6 +5,7 @@ import '../../core/constants.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
+import '../../data/repositories/container_repository.dart';
 import '../../features/feed/feed_provider.dart';
 import '../../widgets/entry_card.dart';
 import 'container_provider.dart';
@@ -20,8 +21,8 @@ class ContainerDetailScreen extends ConsumerStatefulWidget {
 
 class _ContainerDetailScreenState
     extends ConsumerState<ContainerDetailScreen> {
-  // 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc'
   String _sortBy = 'date_desc';
+  bool _subFoldersCollapsed = false;
 
   String get _sortLabel => switch (_sortBy) {
         'date_asc'  => 'Datum ↑',
@@ -238,6 +239,17 @@ class _ContainerDetailScreenState
                   ),
                 ),
 
+              // ── Unterordner ────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: _SubFoldersSection(
+                  containerId: widget.containerId,
+                  container: container,
+                  collapsed: _subFoldersCollapsed,
+                  onToggle: () =>
+                      setState(() => _subFoldersCollapsed = !_subFoldersCollapsed),
+                ),
+              ),
+
               // ── Einträge ──────────────────────────────────────────────
               if (entries.isNotEmpty)
                 SliverPadding(
@@ -280,6 +292,137 @@ class _ContainerDetailScreenState
             const Icon(Icons.check_rounded, size: 16, color: MFColors.teal),
         ]),
       );
+}
+
+// ─── Unterordner-Sektion ─────────────────────────────────────────────────────
+
+class _SubFoldersSection extends ConsumerWidget {
+  final String containerId;
+  final dynamic container;
+  final bool collapsed;
+  final VoidCallback onToggle;
+
+  const _SubFoldersSection({
+    required this.containerId,
+    required this.container,
+    required this.collapsed,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final allAsync = ref.watch(allContainersProvider);
+    return allAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (all) {
+        final children = all.where((c) => c.parentId == containerId).toList();
+        if (children.isEmpty && container == null) {
+          return const SizedBox.shrink();
+        }
+
+        final kind = (container?.kind as String?) ?? 'project';
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header-Zeile
+              Row(children: [
+                if (children.isNotEmpty)
+                  GestureDetector(
+                    onTap: onToggle,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Text('UNTERORDNER',
+                          style: TextStyle(
+                              fontSize: 9, fontWeight: FontWeight.bold,
+                              color: MFColors.textMuted, letterSpacing: 1.2)),
+                      const SizedBox(width: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                            color: MFColors.border,
+                            borderRadius: BorderRadius.circular(99)),
+                        child: Text('${children.length}',
+                            style: const TextStyle(
+                                fontSize: 9, color: MFColors.textMuted)),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(collapsed ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+                          size: 14, color: MFColors.textMuted),
+                    ]),
+                  )
+                else
+                  const SizedBox.shrink(),
+                const Spacer(),
+                // Unterordner erstellen
+                GestureDetector(
+                  onTap: () => context.push(
+                      '${AppRoutes.containerNew}?kind=$kind&parentId=$containerId'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: MFColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: MFColors.border),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.create_new_folder_outlined,
+                          size: 13, color: MFColors.teal),
+                      SizedBox(width: 5),
+                      Text('Unterordner',
+                          style: TextStyle(fontSize: 11, color: MFColors.teal,
+                              fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                ),
+              ]),
+
+              // Unterordner-Liste
+              if (!collapsed && children.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                ...children.map((child) {
+                  Color color;
+                  try {
+                    color = Color(int.parse(
+                        'FF${child.color.replaceFirst('#', '')}', radix: 16));
+                  } catch (_) {
+                    color = MFColors.teal;
+                  }
+                  return ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    leading: Icon(_iconFor(child.icon), size: 16, color: color),
+                    title: Text(child.name,
+                        style: const TextStyle(
+                            fontSize: 13, color: MFColors.textPrimary)),
+                    trailing: const Icon(Icons.chevron_right,
+                        size: 16, color: MFColors.textMuted),
+                    onTap: () =>
+                        context.push(AppRoutes.containerDetailPath(child.id)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  );
+                }),
+              ],
+              const SizedBox(height: 4),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  static IconData _iconFor(String name) => switch (name.toLowerCase()) {
+    'folder' || 'project' => Icons.folder_outlined,
+    'compass' || 'area' => Icons.explore_outlined,
+    'link' => Icons.link_rounded,
+    'inbox' => Icons.inbox_outlined,
+    'book' => Icons.menu_book_outlined,
+    'layers' => Icons.layers_outlined,
+    _ => Icons.folder_outlined,
+  };
 }
 
 // ─── Beschreibungs-Karte ─────────────────────────────────────────────────────

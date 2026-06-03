@@ -47,7 +47,32 @@ class EntryRepository {
   /// Bulk-Load-Pattern aus Pomtechflow: eine Query pro Tabelle,
   /// dann in-memory joinen → kein N+1-Problem.
   Stream<List<EntryWithDetails>> watchAll({String sortOrder = 'desc'}) {
-    return entryDao.watchAll(sortOrder: sortOrder).asyncMap(_bulkEnrich);
+    // sub_note-Einträge erscheinen nur in ihrem Kontext, nicht im Feed
+    return entryDao.watchAll(sortOrder: sortOrder)
+        .map((list) => list.where((e) => e.status != 'sub_note').toList())
+        .asyncMap(_bulkEnrich);
+  }
+
+  /// Sub-Notizen eines Eintrags (verknüpft via 'parent_entry_id'-Property)
+  Stream<List<EntryWithDetails>> watchSubNotes(String parentEntryId) {
+    return db.customSelect(
+      '''
+      SELECT DISTINCT e.*
+      FROM entries e
+      INNER JOIN entry_properties ep ON ep.entry_id = e.id
+      WHERE ep.key = 'parent_entry_id' AND ep.value = ?
+      ORDER BY e.created_at DESC
+      ''',
+      variables: [Variable.withString(parentEntryId)],
+      readsFrom: {db.entries, db.entryProperties},
+    ).watch().asyncMap((rows) async {
+      final list = await Future.wait(rows.map((r) async {
+        final id = r.read<String>('id');
+        final e = await entryDao.getById(id);
+        return e;
+      }));
+      return _bulkEnrich(list.whereType<Entry>().toList());
+    });
   }
 
   Stream<List<EntryWithDetails>> watchByContainer(String containerId) {

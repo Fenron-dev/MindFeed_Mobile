@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import '../../core/di.dart';
@@ -26,11 +27,13 @@ class CaptureScreen extends ConsumerStatefulWidget {
   final String? initialText;
   final List<String>? sharedFilePaths;
   final String? initialContainerId;
+  final String? parentEntryId; // für Sub-Notizen
   const CaptureScreen({
     super.key,
     this.initialText,
     this.sharedFilePaths,
     this.initialContainerId,
+    this.parentEntryId,
   });
 
   @override
@@ -557,11 +560,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         : rawBody;
     final finalBody = cleanBody;
 
-    // Titel: explizit > URL-Vorschau-Titel > aus Body
+    // Titel: explizit > URL-Vorschau-Titel > Sprachnotiz-Auto-Titel > null
     final explicitTitle = _titleCtrl.text.trim();
-    final resolvedTitle = explicitTitle.isNotEmpty
+    String? resolvedTitle = explicitTitle.isNotEmpty
         ? explicitTitle
         : (_urlPreview?.title.isNotEmpty == true ? _urlPreview!.title : null);
+    // Auto-Titel für reine Sprachaufnahmen ohne Text
+    if (resolvedTitle == null &&
+        _recordedAudioPath != null &&
+        rawBody.isEmpty &&
+        _pendingImages.isEmpty) {
+      resolvedTitle =
+          'Sprachnotiz – ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}';
+    }
 
     // API-Feld-Einstellungen laden und anwenden
     final apiFields = AppSettings.loadApiFieldSettings();
@@ -572,6 +583,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       final createdEntry = await ref.read(entryRepositoryProvider).createEntry(
             body: finalBody,
             title: resolvedTitle,
+            status: widget.parentEntryId != null ? 'sub_note' : 'inbox',
             containerIds: widget.initialContainerId != null
                 ? [widget.initialContainerId!]
                 : [],
@@ -626,6 +638,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             githubDefaultBranch: _urlPreview?.githubDefaultBranch,
             extraProps: _urlPreview?.extraProps ?? {},
           );
+      // Parent-Entry-Verknüpfung als Property speichern
+      if (widget.parentEntryId != null) {
+        final dao = ref.read(propertyDaoProvider);
+        final existing = await dao.watchByEntry(createdEntry.entry.id).first;
+        await dao.setProperties(createdEntry.entry.id, [
+          ...existing.map((p) => EntryPropertiesCompanion(
+                id: drift.Value(p.id), entryId: drift.Value(p.entryId),
+                key: drift.Value(p.key), value: drift.Value(p.value),
+                type: drift.Value(p.type),
+              )),
+          EntryPropertiesCompanion(
+            id: drift.Value('prop-parent-${DateTime.now().microsecondsSinceEpoch}'),
+            entryId: drift.Value(createdEntry.entry.id),
+            key: const drift.Value('parent_entry_id'),
+            value: drift.Value(widget.parentEntryId),
+            type: const drift.Value('string'),
+          ),
+        ]);
+      }
+
       await _saveAttachments(createdEntry.entry.id);
 
       // Anhänge gespeichert → Entry touchen damit der Feed-Stream neu emittiert

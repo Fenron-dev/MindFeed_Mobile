@@ -778,6 +778,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   ),
                 ],
 
+                // Sub-Notizen zu diesem Eintrag
+                _SubNotesSection(parentEntryId: entry.id),
+
                 // Backlinks
                 _BacklinksSection(entryId: entry.id),
               ],
@@ -2539,6 +2542,96 @@ class _CheckTile extends StatelessWidget {
         ),
       );
 }
+
+// ─── Sub-Notizen zu einem Eintrag ────────────────────────────────────────────
+
+class _SubNotesSection extends ConsumerWidget {
+  final String parentEntryId;
+  const _SubNotesSection({required this.parentEntryId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subNotesAsync = ref.watch(_subNotesProvider(parentEntryId));
+    return subNotesAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (notes) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 20),
+          // Header
+          Row(children: [
+            const Icon(Icons.sticky_note_2_outlined,
+                size: 13, color: MFColors.textMuted),
+            const SizedBox(width: 6),
+            const Text('NOTIZEN',
+                style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.bold,
+                    color: MFColors.textMuted, letterSpacing: 1.2)),
+            if (notes.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text('${notes.length}',
+                    style: const TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.bold,
+                        color: MFColors.teal)),
+              ),
+            ],
+            const Spacer(),
+            GestureDetector(
+              onTap: () => context.push(
+                  '${AppRoutes.capture}?parentEntryId=$parentEntryId'),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF0F766E)),
+                ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add_rounded, size: 13, color: MFColors.teal),
+                  SizedBox(width: 4),
+                  Text('Notiz',
+                      style: TextStyle(
+                          fontSize: 11, color: MFColors.teal,
+                          fontWeight: FontWeight.w500)),
+                ]),
+              ),
+            ),
+          ]),
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ...notes.map((note) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: EntryCard(
+                    item: note,
+                    compact: true,
+                    onTap: () => context.push(
+                        AppRoutes.entryDetailPath(note.entry.id)),
+                  ),
+                )),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// Provider für Sub-Notizen
+final _subNotesProvider =
+    StreamProvider.autoDispose.family<List<EntryWithDetails>, String>(
+  (ref, parentEntryId) {
+    ref.keepAlive();
+    return ref.watch(entryRepositoryProvider).watchSubNotes(parentEntryId);
+  },
+);
 
 // ─── Medien-Header (Cover/Bild oben) ─────────────────────────────────────────
 

@@ -30,7 +30,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   // bevor die DB-Aktualisierung den Stream neu aufbaut.
   final _dismissedIds = <String>{};
 
-  static const _filterStatuses = ['all', 'inbox', 'pinned', 'done', 'archived'];
+  static const _filterStatuses = ['all', 'inbox', 'pinned', 'done', 'archived', 'sub_note'];
+
 
   @override
   void dispose() {
@@ -63,7 +64,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         'pinned'   => e.entry.pinned,
         'done'     => e.entry.status == 'done',
         'archived' => e.entry.status == 'archived',
-        _          => true,
+        'sub_note' => e.entry.status == 'sub_note',
+        // 'all' zeigt alles AUSSER Sub-Notizen
+        _          => e.entry.status != 'sub_note',
       };
       if (!statusOk) return false;
 
@@ -686,44 +689,53 @@ class _QuickFilterBar extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const _filters = ['Alle', 'Inbox', 'Angeheftet', 'Erledigt', 'Archiviert'];
+  // (label | null=icon-only, icon, tooltip)
+  static const _filterDefs = [
+    (label: 'Alle',  icon: Icons.dynamic_feed_outlined, tip: 'Alle'),
+    (label: null,    icon: Icons.inbox_outlined,         tip: 'Inbox'),
+    (label: null,    icon: Icons.push_pin_outlined,      tip: 'Angeheftet'),
+    (label: null,    icon: Icons.check_circle_outline,   tip: 'Erledigt'),
+    (label: null,    icon: Icons.archive_outlined,       tip: 'Archiviert'),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    // SingleChildScrollView + Row: Row misst Chips sofort korrekt (kein Clip).
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Row(
-        children: _filters.asMap().entries.map((entry) {
+        children: _filterDefs.asMap().entries.map((entry) {
           final i = entry.key;
-          final label = entry.value;
+          final def = entry.value;
           final active = i == selectedIndex;
+          final isText = def.label != null;
           return Padding(
-            padding: EdgeInsets.only(right: i < _filters.length - 1 ? 6 : 0),
-            child: GestureDetector(
-              onTap: () => onChanged(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: active ? MFColors.tealBg : MFColors.surface,
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(
-                    color: active ? MFColors.tealDark : MFColors.border,
+            padding: EdgeInsets.only(
+                right: i < _filterDefs.length - 1 ? 6 : 0),
+            child: Tooltip(
+              message: def.tip,
+              child: GestureDetector(
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: isText
+                      ? const EdgeInsets.symmetric(horizontal: 14, vertical: 6)
+                      : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active ? MFColors.tealBg : MFColors.surface,
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(
+                      color: active ? MFColors.tealDark : MFColors.border,
+                    ),
                   ),
-                ),
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: active
-                        ? MFColors.teal
-                        : MFColors.textSecondary,
-                    fontWeight:
-                        active ? FontWeight.bold : FontWeight.w500,
-                  ),
+                  child: isText
+                      ? Text(def.label!,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: active ? MFColors.teal : MFColors.textSecondary,
+                              fontWeight: active ? FontWeight.bold : FontWeight.w500))
+                      : Icon(def.icon, size: 17,
+                          color: active ? MFColors.teal : MFColors.textSecondary),
                 ),
               ),
             ),

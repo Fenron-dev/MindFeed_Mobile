@@ -34,6 +34,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     .toList()
                 : null,
             initialContainerId: state.uri.queryParameters['containerId'],
+            parentEntryId: state.uri.queryParameters['parentEntryId'],
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             // Slide von rechts rein (Gmail-Compose Style)
@@ -66,7 +67,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.containerNew,
         builder: (context, state) {
           final kind = state.uri.queryParameters['kind'] ?? 'project';
-          return ContainerFormScreen(initialKind: kind);
+          final parentId = state.uri.queryParameters['parentId'];
+          return ContainerFormScreen(
+              initialKind: kind, initialParentId: parentId);
         },
       ),
       GoRoute(

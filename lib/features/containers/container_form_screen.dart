@@ -56,11 +56,13 @@ class ContainerFormScreen extends ConsumerStatefulWidget {
   /// null = neu anlegen
   final String? editId;
   final String initialKind;
+  final String? initialParentId;
 
   const ContainerFormScreen({
     super.key,
     this.editId,
     this.initialKind = 'project',
+    this.initialParentId,
   });
 
   bool get isEdit => editId != null;
@@ -158,6 +160,7 @@ class _ContainerFormScreenState
               : _filterTagCtrl.text.trim(),
           filterStatus: _filterStatus.isEmpty ? null : _filterStatus,
           filterType: _filterType.isEmpty ? null : _filterType,
+          parentId: widget.initialParentId,
         );
       }
       if (mounted) context.pop();
