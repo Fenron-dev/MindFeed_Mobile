@@ -541,9 +541,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Icon(Icons.folder_open_outlined,
                     size: 18, color: MFColors.textMuted),
                 SizedBox(width: 10),
-                Text('Noch keine lokalen Backups vorhanden.',
-                    style: TextStyle(
-                        fontSize: 13, color: MFColors.textMuted)),
+                Expanded(
+                  child: Text('Noch keine lokalen Backups vorhanden.',
+                      style: TextStyle(
+                          fontSize: 13, color: MFColors.textMuted)),
+                ),
               ]),
             ),
           ],
@@ -1294,6 +1296,7 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
   late final TextEditingController _nameCtrl;
   late String _emoji;
   late List<PropTemplateField> _fields;
+  late Set<String> _cardFields; // Felder die in der Feed-Karte erscheinen
 
   @override
   void initState() {
@@ -1302,6 +1305,7 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
     _nameCtrl = TextEditingController(text: t?.name ?? '');
     _emoji = t?.emoji ?? '📋';
     _fields = List.from(t?.fields ?? []);
+    _cardFields = Set.from(t?.cardFields ?? []);
   }
 
   @override
@@ -1322,7 +1326,10 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) return;
     final id = widget.existing?.id ?? 'tpl-${DateTime.now().millisecondsSinceEpoch}';
-    widget.onSave(PropTemplate(id: id, name: name, emoji: _emoji, fields: _fields));
+    widget.onSave(PropTemplate(
+      id: id, name: name, emoji: _emoji, fields: _fields,
+      cardFields: _cardFields.toList(),
+    ));
     Navigator.pop(context);
   }
 
@@ -1431,6 +1438,46 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
                 ]),
               );
             }),
+
+          // Feed-Karten-Felder
+          if (_fields.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Karten-Vorschau im Feed',
+                style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+            const SizedBox(height: 4),
+            const Text('Welche Felder sollen in der Feed-Karte angezeigt werden?',
+                style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6, runSpacing: 6,
+              children: _fields.map((f) {
+                final active = _cardFields.contains(f.key);
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    if (active) _cardFields.remove(f.key);
+                    else _cardFields.add(f.key);
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: active ? MFColors.tealBg : MFColors.bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: active ? MFColors.teal : MFColors.border,
+                        width: active ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Text(f.key,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: active ? MFColors.teal : MFColors.textSecondary,
+                            fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
 
           const SizedBox(height: 20),
           SizedBox(

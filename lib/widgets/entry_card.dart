@@ -6,6 +6,7 @@ import '../core/di.dart';
 import '../core/theme.dart';
 import '../data/repositories/entry_repository.dart';
 import '../domain/prop_type.dart';
+import '../services/app_settings.dart';
 
 class EntryCard extends StatelessWidget {
   final EntryWithDetails item;
@@ -296,7 +297,7 @@ class _PropertiesRow extends StatelessWidget {
   ];
   static const _excludedExact = {
     'cover_image', 'cover', 'bild', 'genres', 'media_type', 'domain',
-    'url_author', 'score',
+    'url_author', 'score', '_template', 'parent_entry_id',
   };
 
   static bool _isExcluded(String key) {
@@ -310,10 +311,32 @@ class _PropertiesRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = properties
-        .where((p) => !_isExcluded(p.key))
-        .take(4)
-        .toList();
+    // Wenn ein _template-Property gesetzt ist, Template-Karten-Felder nutzen
+    final tplId = properties
+        .where((p) => p.key == '_template')
+        .firstOrNull
+        ?.value;
+    final List<String> cardFields;
+    if (tplId != null) {
+      final tpl = AppSettings.loadTemplates()
+          .where((t) => t.id == tplId)
+          .firstOrNull;
+      cardFields = tpl?.cardFields ?? [];
+    } else {
+      cardFields = [];
+    }
+
+    final visible = cardFields.isNotEmpty
+        ? properties
+            .where((p) => cardFields
+                .any((cf) => cf.toLowerCase() == p.key.toLowerCase()))
+            .take(5)
+            .toList()
+        : properties
+            .where((p) => !_isExcluded(p.key))
+            .take(4)
+            .toList();
+
     if (visible.isEmpty) return const SizedBox.shrink();
 
     return Wrap(

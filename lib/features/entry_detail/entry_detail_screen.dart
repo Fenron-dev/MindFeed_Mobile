@@ -985,7 +985,7 @@ class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
   static const _hidden = {
     'og_image', 'og_title', 'og_description',
     'anilist_season', 'anilist_total_seasons',
-    'genres', 'media_type', 'domain', 'url_author',
+    'genres', 'media_type', 'domain', 'url_author', '_template', 'parent_entry_id',
   };
   static const _hiddenPrefixes = [
     'bgg_', 'github_', 'youtube_',

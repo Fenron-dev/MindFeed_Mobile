@@ -47,10 +47,23 @@ class EntryRepository {
   /// Bulk-Load-Pattern aus Pomtechflow: eine Query pro Tabelle,
   /// dann in-memory joinen → kein N+1-Problem.
   Stream<List<EntryWithDetails>> watchAll({String sortOrder = 'desc'}) {
-    // sub_note-Einträge erscheinen nur in ihrem Kontext, nicht im Feed
-    return entryDao.watchAll(sortOrder: sortOrder)
-        .map((list) => list.where((e) => e.status != 'sub_note').toList())
-        .asyncMap(_bulkEnrich);
+    // customSelect mit readsFrom auf ALLE relevanten Tabellen:
+    // → Stream re-emittet auch wenn Properties, Tags oder Anhänge geändert werden
+    final sql = sortOrder == 'asc'
+        ? 'SELECT * FROM entries ORDER BY pinned DESC, created_at ASC'
+        : 'SELECT * FROM entries ORDER BY pinned DESC, created_at DESC';
+    return db.customSelect(sql, readsFrom: {
+      db.entries, db.entryProperties, db.tags,
+      db.entryTags, db.attachments, db.entryContainers,
+    }).watch().asyncMap((rows) async {
+      final ids = rows.map((r) => r.read<String>('id')).toList();
+      final entryList = await Future.wait(ids.map(entryDao.getById));
+      final filtered = entryList
+          .whereType<Entry>()
+          .where((e) => e.status != 'sub_note')
+          .toList();
+      return _bulkEnrich(filtered);
+    });
   }
 
   /// Sub-Notizen eines Eintrags (verknüpft via 'parent_entry_id'-Property)
@@ -85,9 +98,18 @@ class EntryRepository {
     return _enrichSingle(entry);
   }
 
-  /// Reaktiver Stream: aktualisiert sich automatisch nach Edits
+  /// Reaktiver Stream: re-emittet bei JEDER Änderung (Properties, Tags, Anhänge)
   Stream<EntryWithDetails?> watchById(String id) {
-    return entryDao.watchById(id).asyncMap((entry) async {
+    return db.customSelect(
+      'SELECT * FROM entries WHERE id = ?',
+      variables: [Variable.withString(id)],
+      readsFrom: {
+        db.entries, db.entryProperties, db.tags,
+        db.entryTags, db.attachments, db.entryContainers,
+      },
+    ).watch().asyncMap((rows) async {
+      if (rows.isEmpty) return null;
+      final entry = await entryDao.getById(id);
       if (entry == null) return null;
       return _enrichSingle(entry);
     });

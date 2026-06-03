@@ -411,17 +411,29 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         })
         .toList();
 
-    if (toAdd.isNotEmpty) {
-      final all = [
-        ...existing.map((p) => EntryPropertiesCompanion(
-              id: drift.Value(p.id),
-              entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key),
-              value: drift.Value(p.value),
-              type: drift.Value(p.type),
-            )),
-        ...toAdd,
-      ];
+    // Template-ID als _template-Property speichern (für Feed-Karte)
+    final templateProp = EntryPropertiesCompanion(
+      id: drift.Value('prop-tpl-${DateTime.now().microsecondsSinceEpoch}'),
+      entryId: drift.Value(entryId),
+      key: const drift.Value('_template'),
+      value: drift.Value(tpl.id),
+      type: const drift.Value('string'),
+    );
+
+    final baseProps = existing.map((p) => EntryPropertiesCompanion(
+          id: drift.Value(p.id),
+          entryId: drift.Value(p.entryId),
+          key: drift.Value(p.key),
+          value: drift.Value(p.value),
+          type: drift.Value(p.type),
+        ));
+
+    final all = [
+      ...baseProps,
+      if (!existingKeys.contains('_template')) templateProp,
+      ...toAdd,
+    ];
+    if (all.length > baseProps.length) {
       await dao.setProperties(entryId, all);
     }
   }

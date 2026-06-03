@@ -48,12 +48,16 @@ class PropTemplate {
   final String name;
   final String emoji;
   final List<PropTemplateField> fields;
+  /// Welche Felder (Keys) in der Feed-Karte angezeigt werden.
+  /// Leer = die ersten 4 Nicht-System-Properties (bisheriges Verhalten).
+  final List<String> cardFields;
 
   const PropTemplate({
     required this.id,
     required this.name,
     this.emoji = '📋',
     required this.fields,
+    this.cardFields = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -61,6 +65,7 @@ class PropTemplate {
     'name': name,
     'emoji': emoji,
     'fields': fields.map((f) => f.toJson()).toList(),
+    'cardFields': cardFields,
   };
 
   factory PropTemplate.fromJson(Map<String, dynamic> j) => PropTemplate(
@@ -70,6 +75,7 @@ class PropTemplate {
     fields: ((j['fields'] as List?) ?? [])
         .map((f) => PropTemplateField.fromJson(f as Map<String, dynamic>))
         .toList(),
+    cardFields: ((j['cardFields'] as List?) ?? []).cast<String>(),
   );
 
   // Vordefinierte Starter-Templates
