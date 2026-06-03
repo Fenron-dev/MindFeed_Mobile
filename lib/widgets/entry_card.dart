@@ -326,12 +326,17 @@ class _PropertiesRow extends StatelessWidget {
       cardFields = [];
     }
 
-    final visible = cardFields.isNotEmpty
-        ? properties
-            .where((p) => cardFields
-                .any((cf) => cf.toLowerCase() == p.key.toLowerCase()))
-            .take(5)
-            .toList()
+    // tplId gesetzt + cardFields leer → bewusst keine Felder anzeigen
+    // tplId gesetzt + cardFields gefüllt → nur diese Felder anzeigen
+    // tplId nicht gesetzt → Standard (alle nicht-System-Props)
+    final visible = tplId != null
+        ? (cardFields.isNotEmpty
+            ? properties
+                .where((p) => cardFields
+                    .any((cf) => cf.toLowerCase() == p.key.toLowerCase()))
+                .take(5)
+                .toList()
+            : <dynamic>[])
         : properties
             .where((p) => !_isExcluded(p.key))
             .take(4)

@@ -1337,28 +1337,41 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.92;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(20, 16, 20,
-          24 + MediaQuery.of(context).viewInsets.bottom),
       decoration: const BoxDecoration(
         color: MFColors.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      constraints: BoxConstraints(maxHeight: maxH),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(child: Container(
-            width: 36, height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(color: MFColors.border,
-                borderRadius: BorderRadius.circular(99)),
-          )),
+          // Griff + Titel (nicht scrollbar)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: MFColors.border,
+                      borderRadius: BorderRadius.circular(99)),
+                )),
           Text(widget.existing != null ? 'Template bearbeiten' : 'Neues Template',
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold,
                   color: MFColors.textPrimary)),
-          const SizedBox(height: 16),
-
+              ],
+            ),
+          ),
+          // Scrollbarer Inhalt
+          Flexible(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + bottom),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
           // Emoji-Auswahl
           const Text('Emoji', style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
           const SizedBox(height: 6),
@@ -1489,9 +1502,13 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
                   style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
             ),
           ),
-        ],
-      ),
-    );
+                ],  // Column-children Ende (scrollbar)
+              ),   // Column Ende
+            ),     // SingleChildScrollView Ende
+          ),       // Flexible Ende
+        ],         // äußere Column-children Ende
+      ),           // äußere Column Ende
+    );             // Container Ende
   }
 }
 

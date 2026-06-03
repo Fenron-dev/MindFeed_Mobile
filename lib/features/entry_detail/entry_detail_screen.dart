@@ -37,10 +37,12 @@ class EntryDetailScreen extends ConsumerStatefulWidget {
 
 class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _isEditing = false;
-  bool _showPreview = false; // Markdown-Preview im Edit-Modus
+  bool _showPreview = false;
   bool _enriching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
+  // ScrollController bleibt über Stream-Re-Emits hinweg erhalten → Position springt nicht
+  final _scrollCtrl = ScrollController();
 
   // Wikilink-Autocomplete
   List<EntryWithDetails> _wikilinkSuggestions = [];
@@ -60,6 +62,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     _bodyCtrl.removeListener(_checkWikilinkContext);
     _titleCtrl.dispose();
     _bodyCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -370,37 +373,45 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   Widget build(BuildContext context) {
     final async = ref.watch(entryDetailProvider(widget.entryId));
 
-    return async.when(
-      loading: () => const Scaffold(
-        backgroundColor: MFColors.bg,
-        body: Center(child: CircularProgressIndicator(color: MFColors.teal)),
-      ),
-      error: (e, _) => Scaffold(
+    final item = async.valueOrNull;
+
+    // Nur bei initialem Laden (kein vorheriger Wert) Spinner/Fehler zeigen.
+    // Bei Daten-Updates (Stream re-emits) bleibt der ScrollController im
+    // Widget-Baum → Scroll-Position springt nicht.
+    if (item == null) {
+      if (async.isLoading) {
+        return const Scaffold(
+          backgroundColor: MFColors.bg,
+          body: Center(child: CircularProgressIndicator(color: MFColors.teal)),
+        );
+      }
+      if (async.hasError) {
+        return Scaffold(
+          backgroundColor: MFColors.bg,
+          appBar: AppBar(),
+          body: Center(child: Text('${async.error}')),
+        );
+      }
+      return Scaffold(
         backgroundColor: MFColors.bg,
         appBar: AppBar(),
-        body: Center(child: Text('$e')),
-      ),
-      data: (item) {
-        if (item == null) {
-          return Scaffold(
-            backgroundColor: MFColors.bg,
-            appBar: AppBar(),
-            body: const Center(
-                child: Text('Eintrag nicht gefunden',
-                    style: TextStyle(color: MFColors.textSecondary))),
-          );
-        }
-        final entry = item.entry;
+        body: const Center(
+            child: Text('Eintrag nicht gefunden',
+                style: TextStyle(color: MFColors.textSecondary))),
+      );
+    }
 
-        // Beim ersten Öffnen des Edit-Modus Felder befüllen
-        if (_isEditing &&
-            _titleCtrl.text.isEmpty &&
-            _bodyCtrl.text.isEmpty) {
-          _titleCtrl.text = entry.title ?? '';
-          _bodyCtrl.text = entry.body;
-        }
+    final entry = item.entry;
 
-        return Scaffold(
+    // Beim ersten Öffnen des Edit-Modus Felder befüllen
+    if (_isEditing &&
+        _titleCtrl.text.isEmpty &&
+        _bodyCtrl.text.isEmpty) {
+      _titleCtrl.text = entry.title ?? '';
+      _bodyCtrl.text = entry.body;
+    }
+
+    return Scaffold(
           backgroundColor: MFColors.bg,
           appBar: AppBar(
             backgroundColor: MFColors.bg,
@@ -519,6 +530,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
             ],
           ),
           body: SingleChildScrollView(
+            controller: _scrollCtrl,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -787,8 +799,6 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
             ),
           ),
         );
-      },
-    );
   }
 
   PopupMenuItem<String> _popItem(String v, IconData icon, String label,
@@ -1510,6 +1520,13 @@ class _TemplateApplyButton extends ConsumerWidget {
           .toList();
       newProps = [
         ...kept,
+        EntryPropertiesCompanion(
+          id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-_tpl'),
+          entryId: drift.Value(entryId),
+          key: const drift.Value('_template'),
+          value: drift.Value(template.id),
+          type: const drift.Value('text'),
+        ),
         ...template.fields.map((f) => EntryPropertiesCompanion(
               id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${f.key}'),
               entryId: drift.Value(entryId),
@@ -1532,11 +1549,21 @@ class _TemplateApplyButton extends ConsumerWidget {
               ))
           .toList();
       newProps = [
-        ...current.map((p) => EntryPropertiesCompanion(
-              id: drift.Value(p.id), entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key), value: drift.Value(p.value),
-              type: drift.Value(p.type),
-            )),
+        // Bestehende Props behalten, altes _template-Marker entfernen
+        ...current
+            .where((p) => p.key != '_template')
+            .map((p) => EntryPropertiesCompanion(
+                  id: drift.Value(p.id), entryId: drift.Value(p.entryId),
+                  key: drift.Value(p.key), value: drift.Value(p.value),
+                  type: drift.Value(p.type),
+                )),
+        EntryPropertiesCompanion(
+          id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-_tpl'),
+          entryId: drift.Value(entryId),
+          key: const drift.Value('_template'),
+          value: drift.Value(template.id),
+          type: const drift.Value('text'),
+        ),
         ...toAdd,
       ];
     }
