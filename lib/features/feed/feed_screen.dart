@@ -467,7 +467,8 @@ class _FilterSheetState extends State<_FilterSheet> {
         color: MFColors.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: Column(
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -541,6 +542,7 @@ class _FilterSheetState extends State<_FilterSheet> {
               flex: 2,
               child: DropdownButtonFormField<String>(
                 value: _selectedKey,
+                isExpanded: true,
                 hint: const Text('Key', style: TextStyle(
                     fontSize: 12, color: MFColors.textMuted)),
                 dropdownColor: MFColors.surface,
@@ -555,7 +557,9 @@ class _FilterSheetState extends State<_FilterSheet> {
                 ),
                 items: _availableKeys.map((k) => DropdownMenuItem(
                   value: k,
-                  child: Text(k, style: const TextStyle(fontSize: 12)),
+                  child: Text(k,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12)),
                 )).toList(),
                 onChanged: (v) => setState(() => _selectedKey = v),
               ),
@@ -618,6 +622,7 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ]),
         ],
+      ),
       ),
     );
   }

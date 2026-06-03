@@ -377,16 +377,19 @@ class _VaultSetupScreenState extends State<_VaultSetupScreen> {
                       color: MFColors.teal, size: 28),
                 ),
                 const SizedBox(width: 14),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('MindFeed',
-                        style: TextStyle(fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: MFColors.textPrimary)),
-                    Text('Willkommen — richte deinen Vault ein',
-                        style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text('MindFeed',
+                          style: TextStyle(fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: MFColors.textPrimary)),
+                      Text('Willkommen — richte deinen Vault ein',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
+                    ],
+                  ),
                 ),
               ]),
               const SizedBox(height: 40),
