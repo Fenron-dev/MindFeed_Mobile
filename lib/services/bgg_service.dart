@@ -97,24 +97,41 @@ class BggService {
             .where((n) => n.isNotEmpty)
             .toList();
 
+    // BGG-Kategorien
     final categories = [
       ..._names('boardgamecategory'),
-      ..._names('videogamecategory'),
+      ..._names('boardgamesubdomain'),
+      // VGG-Genres & Kategorien
       ..._names('videogamegenre'),
+      ..._names('videogametheme'),
+      // RPGG-Kategorien & Genres
       ..._names('rpgcategory'),
+      ..._names('rpggenre'),
+      ..._names('rpgsetting'),
     ];
     final mechanics = [
       ..._names('boardgamemechanic'),
-      ..._names('videogamemechanic'),
+      // RPGG-Mechaniken
+      ..._names('rpgmechanic'),
     ];
     final designers = [
       ..._names('boardgamedesigner'),
-      ..._names('videogamedesigner'),
+      // VGG-Entwickler (mehrere mögliche Namen)
+      ..._names('videogamedeveloper'),
+      ..._names('videogamecompany'),
+      // RPGG-Designer
+      ..._names('rpgdesigner'),
+      ..._names('rpgartist'),
     ];
     final publishers = [
       ..._names('boardgamepublisher'),
+      // VGG-Publisher
       ..._names('videogamepublisher'),
+      // RPGG-Verleger
+      ..._names('rpgpublisher'),
     ];
+    // VGG-Plattformen (nur VideoGameGeek)
+    final platforms = _names('videogameplatform');
 
     // MediaType aus subtype ableiten
     final mediaType = switch (subtype) {
@@ -142,6 +159,7 @@ class BggService {
       mechanics: mechanics,
       designers: designers,
       publishers: publishers,
+      platforms: platforms,
     );
   }
 
@@ -206,6 +224,7 @@ class BggGame {
   final List<String> mechanics;
   final List<String> designers;
   final List<String> publishers;
+  final List<String> platforms; // VGG: Plattformen
 
   const BggGame({
     required this.id,
@@ -225,6 +244,7 @@ class BggGame {
     required this.mechanics,
     required this.designers,
     required this.publishers,
+    this.platforms = const [],
   });
 
   String get bggUrl {

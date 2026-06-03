@@ -4,6 +4,8 @@ import '../../data/repositories/entry_repository.dart';
 
 // ─── Feed: alle Einträge reaktiv ──────────────────────────────────────────────
 final feedProvider = StreamProvider<List<EntryWithDetails>>((ref) {
+  // keepAlive verhindert Entsorgung beim Navigieren zum Capture-Screen
+  ref.keepAlive();
   return ref.watch(entryRepositoryProvider).watchAll();
 });
 

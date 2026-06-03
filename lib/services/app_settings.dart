@@ -205,6 +205,22 @@ class ApiFieldSettings {
   final bool bggDesigners;
   final bool bggPublishers;
   final bool bggMechanics;
+  // VGG / RPGGeek (teilen BGG-Felder, aber mit eigenen Schaltern)
+  final bool vggImage;
+  final bool vggCategories;
+  final bool vggPlatforms;
+  final bool vggDescription;
+  final bool rpggImage;
+  final bool rpggCategories;
+  final bool rpggMechanics;
+  final bool rpggDescription;
+  // GitHub
+  final bool ghImage;
+  final bool ghTopics;
+  final bool ghStars;
+  final bool ghLicense;
+  final bool ghWebsite;
+  final bool ghDescription;
 
   const ApiFieldSettings({
     this.aniDescription = true,
@@ -226,6 +242,20 @@ class ApiFieldSettings {
     this.bggDesigners = false,
     this.bggPublishers = false,
     this.bggMechanics = false,
+    this.vggImage = true,
+    this.vggCategories = true,
+    this.vggPlatforms = true,
+    this.vggDescription = true,
+    this.rpggImage = true,
+    this.rpggCategories = true,
+    this.rpggMechanics = true,
+    this.rpggDescription = true,
+    this.ghImage = true,
+    this.ghTopics = true,
+    this.ghStars = true,
+    this.ghLicense = true,
+    this.ghWebsite = true,
+    this.ghDescription = true,
   });
 
   ApiFieldSettings copyWith({
@@ -235,6 +265,10 @@ class ApiFieldSettings {
     bool? bggDescription, bool? bggImage, bool? bggCategories, bool? bggScore,
     bool? bggPlayers, bool? bggPlayTime, bool? bggYear,
     bool? bggDesigners, bool? bggPublishers, bool? bggMechanics,
+    bool? vggImage, bool? vggCategories, bool? vggPlatforms, bool? vggDescription,
+    bool? rpggImage, bool? rpggCategories, bool? rpggMechanics, bool? rpggDescription,
+    bool? ghImage, bool? ghTopics, bool? ghStars, bool? ghLicense,
+    bool? ghWebsite, bool? ghDescription,
   }) => ApiFieldSettings(
     aniDescription: aniDescription ?? this.aniDescription,
     aniImage: aniImage ?? this.aniImage,
@@ -255,6 +289,20 @@ class ApiFieldSettings {
     bggDesigners: bggDesigners ?? this.bggDesigners,
     bggPublishers: bggPublishers ?? this.bggPublishers,
     bggMechanics: bggMechanics ?? this.bggMechanics,
+    vggImage: vggImage ?? this.vggImage,
+    vggCategories: vggCategories ?? this.vggCategories,
+    vggPlatforms: vggPlatforms ?? this.vggPlatforms,
+    vggDescription: vggDescription ?? this.vggDescription,
+    rpggImage: rpggImage ?? this.rpggImage,
+    rpggCategories: rpggCategories ?? this.rpggCategories,
+    rpggMechanics: rpggMechanics ?? this.rpggMechanics,
+    rpggDescription: rpggDescription ?? this.rpggDescription,
+    ghImage: ghImage ?? this.ghImage,
+    ghTopics: ghTopics ?? this.ghTopics,
+    ghStars: ghStars ?? this.ghStars,
+    ghLicense: ghLicense ?? this.ghLicense,
+    ghWebsite: ghWebsite ?? this.ghWebsite,
+    ghDescription: ghDescription ?? this.ghDescription,
   );
 
   Map<String, dynamic> toJson() => {
@@ -267,6 +315,12 @@ class ApiFieldSettings {
     'bggPlayers': bggPlayers, 'bggPlayTime': bggPlayTime,
     'bggYear': bggYear, 'bggDesigners': bggDesigners,
     'bggPublishers': bggPublishers, 'bggMechanics': bggMechanics,
+    'vggImage': vggImage, 'vggCategories': vggCategories,
+    'vggPlatforms': vggPlatforms, 'vggDescription': vggDescription,
+    'rpggImage': rpggImage, 'rpggCategories': rpggCategories,
+    'rpggMechanics': rpggMechanics, 'rpggDescription': rpggDescription,
+    'ghImage': ghImage, 'ghTopics': ghTopics, 'ghStars': ghStars,
+    'ghLicense': ghLicense, 'ghWebsite': ghWebsite, 'ghDescription': ghDescription,
   };
 
   factory ApiFieldSettings.fromJson(Map<String, dynamic> j) => ApiFieldSettings(
@@ -289,6 +343,20 @@ class ApiFieldSettings {
     bggDesigners: j['bggDesigners'] as bool? ?? false,
     bggPublishers: j['bggPublishers'] as bool? ?? false,
     bggMechanics: j['bggMechanics'] as bool? ?? false,
+    vggImage: j['vggImage'] as bool? ?? true,
+    vggCategories: j['vggCategories'] as bool? ?? true,
+    vggPlatforms: j['vggPlatforms'] as bool? ?? true,
+    vggDescription: j['vggDescription'] as bool? ?? true,
+    rpggImage: j['rpggImage'] as bool? ?? true,
+    rpggCategories: j['rpggCategories'] as bool? ?? true,
+    rpggMechanics: j['rpggMechanics'] as bool? ?? true,
+    rpggDescription: j['rpggDescription'] as bool? ?? true,
+    ghImage: j['ghImage'] as bool? ?? true,
+    ghTopics: j['ghTopics'] as bool? ?? true,
+    ghStars: j['ghStars'] as bool? ?? true,
+    ghLicense: j['ghLicense'] as bool? ?? true,
+    ghWebsite: j['ghWebsite'] as bool? ?? true,
+    ghDescription: j['ghDescription'] as bool? ?? true,
   );
 }
 

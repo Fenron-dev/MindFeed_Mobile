@@ -975,6 +975,8 @@ class _PropertiesTable extends ConsumerWidget {
   static const _hidden = {
     'og_image', 'og_title', 'og_description',
     'anilist_season', 'anilist_total_seasons',
+    'genres', // wird im Template als 'Genre' angezeigt
+    'media_type', 'domain', // interne System-Properties
   };
 
   const _PropertiesTable(
@@ -1911,18 +1913,93 @@ class _AttachmentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     if (att.type == 'audio') return _AudioTile(att);
     if (att.type == 'image') return _ImageTile(att);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        const Icon(Icons.attach_file, size: 18, color: MFColors.textSecondary),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(att.fileName,
-              style: const TextStyle(fontSize: 13, color: MFColors.textPrimary)),
-        ),
-      ]),
-    );
+    if (att.type == 'video') return _VideoTile(att);
+    return _FileTile(att);
   }
+}
+
+// ─── Video-Vorschau ───────────────────────────────────────────────────────────
+class _VideoTile extends StatelessWidget {
+  final Attachment att;
+  const _VideoTile(this.att);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: GestureDetector(
+          onTap: () async {
+            final uri = Uri.file(att.localPath);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Row(children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.play_circle_outline_rounded,
+                    color: Color(0xFFF59E0B), size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(att.fileName,
+                      style: const TextStyle(fontSize: 13, color: MFColors.textPrimary),
+                      overflow: TextOverflow.ellipsis),
+                  Text('Video · Zum Abspielen tippen',
+                      style: const TextStyle(fontSize: 10, color: MFColors.textMuted)),
+                ],
+              )),
+              const Icon(Icons.open_in_new_rounded, size: 14, color: MFColors.textMuted),
+            ]),
+          ),
+        ),
+      );
+}
+
+// ─── Sonstige Datei ───────────────────────────────────────────────────────────
+class _FileTile extends StatelessWidget {
+  final Attachment att;
+  const _FileTile(this.att);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: GestureDetector(
+          onTap: () async {
+            final uri = Uri.file(att.localPath);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Row(children: [
+              const Icon(Icons.insert_drive_file_outlined,
+                  size: 20, color: MFColors.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(child: Text(att.fileName,
+                  style: const TextStyle(fontSize: 13, color: MFColors.textPrimary),
+                  overflow: TextOverflow.ellipsis)),
+              const Icon(Icons.open_in_new_rounded, size: 13, color: MFColors.textMuted),
+            ]),
+          ),
+        ),
+      );
 }
 
 // ─── Bild-Vorschau ────────────────────────────────────────────────────────────

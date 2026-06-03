@@ -102,6 +102,7 @@ class EntryRepository {
     String? githubWebsite,
     String? githubLanguage,
     String? githubDefaultBranch,
+    Map<String, String> extraProps = const {},
     List<String> containerIds = const [],
   }) async {
     final id = 'e-${_uuid.v4()}';
@@ -166,6 +167,10 @@ class EntryRepository {
       if (anilistTotalSeasons != null) addProp('anilist_total_seasons', anilistTotalSeasons.toString(), 'number');
       // YouTube
       addProp('url_author', urlAuthor, 'string');
+      // Generische Zusatz-Properties (BGG/VGG/RPGG)
+      for (final e in extraProps.entries) {
+        if (e.value.isNotEmpty) addProp(e.key, e.value, 'string');
+      }
       // GitHub
       if (githubStars != null) addProp('github_stars', githubStars.toString(), 'number');
       if (githubForks != null) addProp('github_forks', githubForks.toString(), 'number');

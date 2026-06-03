@@ -29,6 +29,8 @@ class UrlMetadata {
   final String? githubWebsite;
   final String? githubLanguage;
   final String? githubDefaultBranch;
+  // Generische Zusatz-Properties (BGG/VGG/RPGG-spezifisch)
+  final Map<String, String> extraProps;
 
   const UrlMetadata({
     required this.title,
@@ -53,6 +55,7 @@ class UrlMetadata {
     this.githubWebsite,
     this.githubLanguage,
     this.githubDefaultBranch,
+    this.extraProps = const {},
   });
 }
 
@@ -356,6 +359,16 @@ class UrlMetadataService {
 
       final domain = Uri.parse(url).host.replaceFirst('www.', '');
 
+      // Alle spielspezifischen Daten als extraProps
+      final extra = <String, String>{};
+      if (game.year.isNotEmpty) extra['bgg_year'] = game.year;
+      if (game.playersLabel.isNotEmpty) extra['bgg_players'] = game.playersLabel;
+      if (game.playtimeLabel.isNotEmpty) extra['bgg_playtime'] = game.playtimeLabel;
+      if (game.publishers.isNotEmpty) extra['bgg_publisher'] = game.publishers.take(3).join(', ');
+      if (game.designers.isNotEmpty) extra['bgg_designer'] = game.designers.take(3).join(', ');
+      if (game.mechanics.isNotEmpty) extra['bgg_mechanic'] = game.mechanics.take(5).join(', ');
+      if (game.platforms.isNotEmpty) extra['bgg_platform'] = game.platforms.join(', ');
+
       return UrlMetadata(
         title: game.name,
         description: desc,
@@ -364,6 +377,7 @@ class UrlMetadataService {
         genres: game.categories,
         score: game.avgRating != null ? (game.avgRating! * 10).round() : null,
         mediaType: game.mediaType,
+        extraProps: extra,
       );
     } catch (_) {
       return _domainFallback(Uri.parse(url));

@@ -154,29 +154,39 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   }
 
   void _initShareIntent() {
-    ReceiveSharingIntent.instance.getInitialMedia().then((media) {
-      final text = media
-          .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
-          .map((m) => m.path)
-          .firstOrNull;
-      if (text != null && text.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          ref.read(routerProvider).push(
-              '${AppRoutes.capture}?sharedText=${Uri.encodeComponent(text)}');
-        });
-      }
-    });
+    ReceiveSharingIntent.instance.getInitialMedia().then(_handleSharedMedia);
+    ReceiveSharingIntent.instance.getMediaStream().listen(_handleSharedMedia);
+  }
 
-    ReceiveSharingIntent.instance.getMediaStream().listen((media) {
-      final text = media
-          .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
-          .map((m) => m.path)
-          .firstOrNull;
-      if (text != null && text.isNotEmpty) {
+  void _handleSharedMedia(List<SharedMediaFile> media) {
+    if (media.isEmpty) return;
+
+    // Text/URL → Capture-Screen mit vorausgefülltem Text
+    final text = media
+        .where((m) => m.type == SharedMediaType.text || m.type == SharedMediaType.url)
+        .map((m) => m.path)
+        .firstOrNull;
+    if (text != null && text.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(routerProvider).push(
             '${AppRoutes.capture}?sharedText=${Uri.encodeComponent(text)}');
-      }
-    });
+      });
+      return;
+    }
+
+    // Dateien (Bilder, Videos, Audio, Sonstige) → Capture-Screen
+    final files = media.where((m) =>
+        m.type == SharedMediaType.image ||
+        m.type == SharedMediaType.video ||
+        m.type == SharedMediaType.file).toList();
+    if (files.isNotEmpty) {
+      // Dateipfade als komma-getrennte Liste übergeben
+      final paths = files.map((f) => Uri.encodeComponent(f.path)).join(',');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(routerProvider).push(
+            '${AppRoutes.capture}?sharedFiles=${Uri.encodeComponent(paths)}');
+      });
+    }
   }
 
   @override

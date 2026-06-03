@@ -1613,6 +1613,61 @@ class _ApiFieldSection extends StatelessWidget {
               (v) => onChanged(settings.copyWith(bggMechanics: v))),
         ],
       ),
+      const SizedBox(height: 10),
+      // ── VideoGameGeek ────────────────────────────────────────────────────
+      _ApiGroup(
+        title: 'VideoGameGeek (Videospiele)',
+        icon: Icons.videogame_asset_outlined,
+        color: const Color(0xFF7C3AED),
+        children: [
+          _ApiToggle('Beschreibung', settings.vggDescription,
+              (v) => onChanged(settings.copyWith(vggDescription: v))),
+          _ApiToggle('Cover-Bild', settings.vggImage,
+              (v) => onChanged(settings.copyWith(vggImage: v))),
+          _ApiToggle('Genres', settings.vggCategories,
+              (v) => onChanged(settings.copyWith(vggCategories: v))),
+          _ApiToggle('Plattformen', settings.vggPlatforms,
+              (v) => onChanged(settings.copyWith(vggPlatforms: v))),
+        ],
+      ),
+      const SizedBox(height: 10),
+      // ── RPGGeek ──────────────────────────────────────────────────────────
+      _ApiGroup(
+        title: 'RPGGeek (Rollenspiele)',
+        icon: Icons.auto_fix_high_outlined,
+        color: const Color(0xFF059669),
+        children: [
+          _ApiToggle('Beschreibung', settings.rpggDescription,
+              (v) => onChanged(settings.copyWith(rpggDescription: v))),
+          _ApiToggle('Cover-Bild', settings.rpggImage,
+              (v) => onChanged(settings.copyWith(rpggImage: v))),
+          _ApiToggle('Kategorien & Genres', settings.rpggCategories,
+              (v) => onChanged(settings.copyWith(rpggCategories: v))),
+          _ApiToggle('Mechaniken', settings.rpggMechanics,
+              (v) => onChanged(settings.copyWith(rpggMechanics: v))),
+        ],
+      ),
+      const SizedBox(height: 10),
+      // ── GitHub ───────────────────────────────────────────────────────────
+      _ApiGroup(
+        title: 'GitHub (Repositories)',
+        icon: Icons.code_outlined,
+        color: const Color(0xFF6366F1),
+        children: [
+          _ApiToggle('Beschreibung', settings.ghDescription,
+              (v) => onChanged(settings.copyWith(ghDescription: v))),
+          _ApiToggle('Vorschau-Bild', settings.ghImage,
+              (v) => onChanged(settings.copyWith(ghImage: v))),
+          _ApiToggle('Topics (Genres)', settings.ghTopics,
+              (v) => onChanged(settings.copyWith(ghTopics: v))),
+          _ApiToggle('Stars & Forks', settings.ghStars,
+              (v) => onChanged(settings.copyWith(ghStars: v))),
+          _ApiToggle('Lizenz', settings.ghLicense,
+              (v) => onChanged(settings.copyWith(ghLicense: v))),
+          _ApiToggle('Website-Link', settings.ghWebsite,
+              (v) => onChanged(settings.copyWith(ghWebsite: v))),
+        ],
+      ),
     ]);
   }
 }

@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
@@ -23,7 +24,8 @@ const _keyAiModel = 'openrouter_model';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   final String? initialText;
-  const CaptureScreen({super.key, this.initialText});
+  final List<String>? sharedFilePaths;
+  const CaptureScreen({super.key, this.initialText, this.sharedFilePaths});
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -59,6 +61,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Duration _recordingDuration = Duration.zero;
   Timer? _recordingTimer;
 
+  // Sonstige Datei-Anhänge (Video, PDF, etc.)
+  final List<PlatformFile> _pendingFiles = [];
+
   // Capture-Optionen
   bool _autoSave = false;
   bool _autoAi = false;
@@ -71,6 +76,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       if (widget.initialText != null && widget.initialText!.isNotEmpty) {
         _bodyCtrl.text = widget.initialText!;
         _onBodyChanged();
+      }
+      // Geteilte Dateien aus anderen Apps übernehmen
+      if (widget.sharedFilePaths != null) {
+        _importSharedFiles(widget.sharedFilePaths!);
       }
       _bodyFocus.requestFocus();
     });
@@ -172,6 +181,49 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   void _scheduleUrlCheck() {
     _urlDebounce?.cancel();
     _urlDebounce = Timer(const Duration(milliseconds: 600), _checkUrl);
+  }
+
+  void _importSharedFiles(List<String> paths) {
+    final imageExts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'};
+    for (final path in paths) {
+      final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+      if (imageExts.contains(ext)) {
+        _pendingImages.add(XFile(path));
+      } else {
+        final file = File(path);
+        if (file.existsSync()) {
+          _pendingFiles.add(PlatformFile(
+            name: p.basename(path),
+            path: path,
+            size: file.lengthSync(),
+          ));
+        }
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      allowMultiple: true,
+      withData: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final nonImages = result.files.where((f) {
+      final ext = (f.extension ?? '').toLowerCase();
+      return !['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].contains(ext);
+    }).toList();
+    final images = result.files.where((f) {
+      final ext = (f.extension ?? '').toLowerCase();
+      return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].contains(ext);
+    }).toList();
+    if (mounted) {
+      setState(() {
+        _pendingFiles.addAll(nonImages);
+        _pendingImages.addAll(images.map((f) => XFile(f.path!)));
+      });
+    }
   }
 
   Future<void> _pickImage() async {
@@ -292,6 +344,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
     // Pre-fill-Werte aus Metadaten
     final prefill = <String, String>{};
+    final extra = _urlPreview?.extraProps ?? {};
+
     if (mediaType == 'ANIME' || mediaType == 'MANGA') {
       if (_urlPreview?.anilistStudio != null) prefill['studio'] = _urlPreview!.anilistStudio!;
       if (_urlPreview?.anilistFormat != null) prefill['format'] = _urlPreview!.anilistFormat!;
@@ -300,6 +354,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       if (_urlPreview?.anilistChapters != null) prefill['kapitel'] = _urlPreview!.anilistChapters.toString();
       if (_urlPreview?.genres.isNotEmpty == true) prefill['genre'] = _urlPreview!.genres.join(', ');
       if (_urlPreview?.score != null) prefill['bewertung'] = (_urlPreview!.score! / 10).toStringAsFixed(1);
+    }
+    if (mediaType == 'BOARDGAME') {
+      if (extra['bgg_year']?.isNotEmpty == true) prefill['jahr'] = extra['bgg_year']!;
+      if (extra['bgg_players']?.isNotEmpty == true) prefill['spieler'] = extra['bgg_players']!;
+      if (extra['bgg_playtime']?.isNotEmpty == true) prefill['spielzeit'] = extra['bgg_playtime']!;
+      if (extra['bgg_publisher']?.isNotEmpty == true) prefill['verlag'] = extra['bgg_publisher']!;
+      if (extra['bgg_designer']?.isNotEmpty == true) prefill['designer'] = extra['bgg_designer']!;
+      if (_urlPreview?.genres.isNotEmpty == true) prefill['genre'] = _urlPreview!.genres.take(5).join(', ');
+    }
+    if (mediaType == 'VIDEOGAME') {
+      if (extra['bgg_year']?.isNotEmpty == true) prefill['jahr'] = extra['bgg_year']!;
+      if (extra['bgg_designer']?.isNotEmpty == true) prefill['entwickler'] = extra['bgg_designer']!;
+      if (extra['bgg_publisher']?.isNotEmpty == true) prefill['publisher'] = extra['bgg_publisher']!;
+      if (extra['bgg_platform']?.isNotEmpty == true) prefill['plattform'] = extra['bgg_platform']!;
+      if (extra['bgg_playtime']?.isNotEmpty == true) prefill['spielzeit'] = extra['bgg_playtime']!;
+      if (_urlPreview?.genres.isNotEmpty == true) prefill['genre'] = _urlPreview!.genres.take(5).join(', ');
+    }
+    if (mediaType == 'TTRPG') {
+      if (extra['bgg_publisher']?.isNotEmpty == true) prefill['verlag'] = extra['bgg_publisher']!;
+      if (_urlPreview?.genres.isNotEmpty == true) prefill['genre'] = _urlPreview!.genres.take(5).join(', ');
     }
     if (mediaType == 'YOUTUBE') {
       if (_urlPreview?.authorName != null) prefill['kanal'] = _urlPreview!.authorName!;
@@ -357,6 +431,34 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       ));
     }
 
+    // Sonstige Dateien (Video, PDF, etc.)
+    if (_pendingFiles.isNotEmpty) {
+      final attachmentsBase = await VaultManager.getAttachmentsPath();
+      final now = DateTime.now();
+      final subDir = Directory(
+          p.join(attachmentsBase, '${now.year}', now.month.toString().padLeft(2, '0')));
+      await subDir.create(recursive: true);
+      for (final pf in _pendingFiles) {
+        if (pf.path == null) continue;
+        final src = File(pf.path!);
+        if (!src.existsSync()) continue;
+        final ext = pf.extension?.isNotEmpty == true ? '.${pf.extension}' : '';
+        final destPath = p.join(subDir.path, '${DateTime.now().millisecondsSinceEpoch}$ext');
+        await src.copy(destPath);
+        final mime = _mimeForExt(pf.extension ?? '');
+        final attType = _typeForMime(mime);
+        await ref.read(attachmentDaoProvider).upsert(AttachmentsCompanion(
+          id: drift.Value('att-${DateTime.now().millisecondsSinceEpoch}'),
+          entryId: drift.Value(entryId),
+          type: drift.Value(attType),
+          mimeType: drift.Value(mime),
+          localPath: drift.Value(destPath),
+          fileName: drift.Value(pf.name),
+          fileSize: drift.Value(await File(destPath).length()),
+        ));
+      }
+    }
+
     if (_pendingImages.isEmpty) return;
     final attachmentsBase = await VaultManager.getAttachmentsPath();
     final now = DateTime.now();
@@ -383,6 +485,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         fileSize: drift.Value(await File(destPath).length()),
       ));
     }
+  }
+
+  static String _fmtBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String _mimeForExt(String ext) => switch (ext.toLowerCase()) {
+    'mp4' || 'mov' || 'avi' || 'mkv' || 'm4v' => 'video/mp4',
+    'mp3' || 'm4a' || 'aac' || 'wav' || 'ogg' => 'audio/mpeg',
+    'pdf' => 'application/pdf',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'png' => 'image/png',
+    _ => 'application/octet-stream',
+  };
+
+  static String _typeForMime(String mime) {
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('image/')) return 'image';
+    return 'file';
   }
 
   Future<void> _checkUrl() async {
@@ -489,6 +613,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             githubWebsite: _urlPreview?.githubWebsite,
             githubLanguage: _urlPreview?.githubLanguage,
             githubDefaultBranch: _urlPreview?.githubDefaultBranch,
+            extraProps: _urlPreview?.extraProps ?? {},
           );
       await _saveAttachments(createdEntry.entry.id);
 
@@ -867,6 +992,40 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
             ),
 
+          // Sonstige Datei-Anhänge (Video/PDF/etc.)
+          if (_pendingFiles.isNotEmpty)
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: MFColors.border))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _pendingFiles.asMap().entries.map((e) {
+                  final f = e.value;
+                  final ext = (f.extension ?? '').toLowerCase();
+                  final isVideo = ['mp4','mov','avi','mkv','m4v'].contains(ext);
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(
+                      isVideo ? Icons.videocam_outlined : Icons.attach_file_rounded,
+                      color: isVideo ? const Color(0xFFF59E0B) : MFColors.teal,
+                      size: 18,
+                    ),
+                    title: Text(f.name,
+                        style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
+                        overflow: TextOverflow.ellipsis),
+                    subtitle: f.size > 0
+                        ? Text(_fmtBytes(f.size),
+                            style: const TextStyle(fontSize: 10, color: MFColors.textMuted))
+                        : null,
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
+                      onPressed: () => setState(() => _pendingFiles.removeAt(e.key)),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
           // Toolbar
           // Audio-Aufnahme-Anzeige
           if (_isRecording || _recordedAudioPath != null)
@@ -923,6 +1082,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             onTitleToggle: () =>
                 setState(() => _showTitle = !_showTitle),
             onImagePick: _pickImage,
+            onFilePick: _pickFile,
             onTagInsert: () => _insertAtCursor('#'),
             onLinkInsert: () => _insertAtCursor('https://'),
             onMicTap: _toggleRecording,
@@ -958,6 +1118,7 @@ class _TagPreviewChip extends StatelessWidget {
 class _CaptureToolbar extends StatelessWidget {
   final VoidCallback onTitleToggle;
   final VoidCallback onImagePick;
+  final VoidCallback onFilePick;
   final VoidCallback onTagInsert;
   final VoidCallback onLinkInsert;
   final VoidCallback onMicTap;
@@ -966,6 +1127,7 @@ class _CaptureToolbar extends StatelessWidget {
   const _CaptureToolbar({
     required this.onTitleToggle,
     required this.onImagePick,
+    required this.onFilePick,
     required this.onTagInsert,
     required this.onLinkInsert,
     required this.onMicTap,
@@ -982,6 +1144,7 @@ class _CaptureToolbar extends StatelessWidget {
         child: Row(children: [
           _TBtn(Icons.title_rounded, 'Titel', onTitleToggle),
           _TBtn(Icons.image_outlined, 'Bild', onImagePick),
+          _TBtn(Icons.attach_file_rounded, 'Datei', onFilePick),
           _TBtn(Icons.link_rounded, 'Link', onLinkInsert),
           IconButton(
             icon: Icon(

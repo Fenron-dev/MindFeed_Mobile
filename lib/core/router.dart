@@ -25,6 +25,14 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ? Uri.decodeComponent(
                     state.uri.queryParameters['sharedText']!)
                 : null,
+            sharedFilePaths: state.uri.queryParameters['sharedFiles'] != null
+                ? Uri.decodeComponent(
+                        state.uri.queryParameters['sharedFiles']!)
+                    .split(',')
+                    .map(Uri.decodeComponent)
+                    .where((s) => s.isNotEmpty)
+                    .toList()
+                : null,
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             // Slide von rechts rein (Gmail-Compose Style)
