@@ -25,7 +25,13 @@ const _keyAiModel = 'openrouter_model';
 class CaptureScreen extends ConsumerStatefulWidget {
   final String? initialText;
   final List<String>? sharedFilePaths;
-  const CaptureScreen({super.key, this.initialText, this.sharedFilePaths});
+  final String? initialContainerId;
+  const CaptureScreen({
+    super.key,
+    this.initialText,
+    this.sharedFilePaths,
+    this.initialContainerId,
+  });
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -566,6 +572,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       final createdEntry = await ref.read(entryRepositoryProvider).createEntry(
             body: finalBody,
             title: resolvedTitle,
+            containerIds: widget.initialContainerId != null
+                ? [widget.initialContainerId!]
+                : [],
             sourceUrl: detectedUrl,
             urlTitle: _urlPreview?.title,
             // Beschreibung je nach API-Settings

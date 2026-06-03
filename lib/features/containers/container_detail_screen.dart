@@ -169,6 +169,12 @@ class _ContainerDetailScreenState
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Notiz hinzufügen',
+        onPressed: () => context.push(
+            '${AppRoutes.capture}?containerId=${widget.containerId}'),
+        child: const Icon(Icons.edit_outlined),
+      ),
       body: rawFeedAsync.when(
         loading: () => const Center(
             child: CircularProgressIndicator(color: MFColors.teal)),
@@ -192,12 +198,15 @@ class _ContainerDetailScreenState
 
           final entries = _applySort(filtered);
 
-          if (entries.isEmpty) {
+          // Container-Beschreibung als Notiz-Header (wenn gesetzt)
+          final hasDesc = container?.description?.isNotEmpty == true;
+
+          if (entries.isEmpty && !hasDesc) {
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.inbox_outlined,
+                  const Icon(Icons.edit_note_outlined,
                       size: 48, color: MFColors.border),
                   const SizedBox(height: 12),
                   Text(
@@ -209,24 +218,41 @@ class _ContainerDetailScreenState
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Füge Einträge über den Feed hinzu.',
-                    style:
-                        TextStyle(fontSize: 12, color: MFColors.textMuted),
+                    'Tippe auf ✏️ um eine Notiz hinzuzufügen.',
+                    style: TextStyle(fontSize: 12, color: MFColors.textMuted),
                   ),
                 ],
               ),
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-            itemCount: entries.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (ctx, i) => EntryCard(
-              item: entries[i],
-              onTap: () => context
-                  .push(AppRoutes.entryDetailPath(entries[i].entry.id)),
-            ),
+          return CustomScrollView(
+            slivers: [
+              // ── Beschreibung / Kontext-Notiz ──────────────────────────
+              if (hasDesc)
+                SliverToBoxAdapter(
+                  child: _ContainerNoteCard(
+                    description: container!.description!,
+                    onEdit: () =>
+                        context.push(AppRoutes.containerEditPath(container.id)),
+                  ),
+                ),
+
+              // ── Einträge ──────────────────────────────────────────────
+              if (entries.isNotEmpty)
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(12, hasDesc ? 4 : 8, 12, 88),
+                  sliver: SliverList.separated(
+                    itemCount: entries.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, i) => EntryCard(
+                      item: entries[i],
+                      onTap: () => context.push(
+                          AppRoutes.entryDetailPath(entries[i].entry.id)),
+                    ),
+                  ),
+                ),
+            ],
           );
         },
       ),
@@ -253,6 +279,54 @@ class _ContainerDetailScreenState
           if (active)
             const Icon(Icons.check_rounded, size: 16, color: MFColors.teal),
         ]),
+      );
+}
+
+// ─── Beschreibungs-Karte ─────────────────────────────────────────────────────
+
+class _ContainerNoteCard extends StatelessWidget {
+  final String description;
+  final VoidCallback onEdit;
+  const _ContainerNoteCard({required this.description, required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: GestureDetector(
+          onTap: onEdit,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: MFColors.tealBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF0F766E), width: 0.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.notes_rounded, size: 13, color: MFColors.teal),
+                  const SizedBox(width: 6),
+                  const Text('NOTIZEN',
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: MFColors.teal,
+                          letterSpacing: 1.2)),
+                  const Spacer(),
+                  const Icon(Icons.edit_outlined, size: 13, color: MFColors.teal),
+                ]),
+                const SizedBox(height: 8),
+                Text(description,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: MFColors.textPrimary,
+                        height: 1.5)),
+              ],
+            ),
+          ),
+        ),
       );
 }
 

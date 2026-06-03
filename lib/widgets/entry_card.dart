@@ -290,20 +290,28 @@ class _PropertiesRow extends StatelessWidget {
   final List properties;
   const _PropertiesRow(this.properties);
 
-  // System-Properties die in der Karte nicht sinnvoll sind
-  static const _excludedKeys = {
-    'og_image', 'cover_image', 'cover', 'bild',
-    'og_description', 'og_title',
-    'genres', 'media_type', 'domain',
-    'url_author', 'youtube_channel',
-    'anilist_season', 'anilist_total_seasons',
-    'score',
+  // System-Property-Prefixe und exakte Keys, die in der Karte versteckt werden
+  static const _excludedPrefixes = [
+    'og_', 'bgg_', 'anilist_', 'github_', 'youtube_', 'vgg_', 'rpg_',
+  ];
+  static const _excludedExact = {
+    'cover_image', 'cover', 'bild', 'genres', 'media_type', 'domain',
+    'url_author', 'score',
   };
+
+  static bool _isExcluded(String key) {
+    final k = key.toLowerCase();
+    if (_excludedExact.contains(k)) return true;
+    for (final prefix in _excludedPrefixes) {
+      if (k.startsWith(prefix)) return true;
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
     final visible = properties
-        .where((p) => !_excludedKeys.contains(p.key.toLowerCase()))
+        .where((p) => !_isExcluded(p.key))
         .take(4)
         .toList();
     if (visible.isEmpty) return const SizedBox.shrink();
@@ -326,7 +334,7 @@ class _PropChip extends StatelessWidget {
     final val = prop.value as String? ?? '';
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 160),
+      constraints: const BoxConstraints(maxWidth: 170),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
@@ -337,24 +345,33 @@ class _PropChip extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(type.icon, size: 9, color: type.color),
           const SizedBox(width: 3),
+          // Key: max 30% der Chip-Breite
           Flexible(
+            flex: 2,
             child: Text(
               '${prop.key}: ',
               style: const TextStyle(
                   fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
               overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
-          _renderValue(type, val),
+          // Value: nimmt Rest, immer clipped
+          Flexible(
+            flex: 3,
+            child: _renderValue(type, val),
+          ),
         ]),
       ),
     );
   }
 
+  static const _vs = TextStyle(fontSize: 10, fontFamily: 'monospace');
+
   Widget _renderValue(PropType type, String val) {
     if (val.isEmpty) {
-      return const Text('—',
-          style: TextStyle(fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'));
+      return const Text('—', style: TextStyle(fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
+          overflow: TextOverflow.ellipsis, maxLines: 1);
     }
     switch (type) {
       case PropType.boolean:
@@ -365,38 +382,29 @@ class _PropChip extends StatelessWidget {
           color: isOn ? const Color(0xFF10B981) : MFColors.textMuted,
         );
       case PropType.rating:
-        final stars = int.tryParse(val) ?? 0;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(
-            stars.clamp(0, 5),
-            (_) => const Icon(Icons.star_rounded, size: 10, color: Color(0xFFF59E0B)),
-          ),
-        );
+        final stars = (int.tryParse(val) ?? 0).clamp(0, 5);
+        return Row(mainAxisSize: MainAxisSize.min,
+          children: List.generate(stars,
+              (_) => const Icon(Icons.star_rounded, size: 10, color: Color(0xFFF59E0B))));
       case PropType.date:
         final dt = DateTime.tryParse(val);
         final label = dt != null
             ? '${dt.day.toString().padLeft(2,'0')}.${dt.month.toString().padLeft(2,'0')}.${dt.year}'
             : val;
-        return Text(label,
-            style: const TextStyle(
-                fontSize: 10, color: MFColors.textPrimary, fontFamily: 'monospace'));
+        return Text(label, style: _vs.copyWith(color: MFColors.textPrimary),
+            overflow: TextOverflow.ellipsis, maxLines: 1);
       case PropType.url:
         final host = Uri.tryParse(val)?.host.replaceFirst('www.', '') ?? val;
-        final display = host.length > 18 ? '${host.substring(0, 18)}…' : host;
-        return Text(display,
-            style: const TextStyle(
-                fontSize: 10, color: Color(0xFF60A5FA), fontFamily: 'monospace'));
+        return Text(host, style: _vs.copyWith(color: const Color(0xFF60A5FA)),
+            overflow: TextOverflow.ellipsis, maxLines: 1);
       case PropType.tags:
-        final first = val.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).take(2).join(', ');
-        return Text(first,
-            style: const TextStyle(
-                fontSize: 10, color: MFColors.teal, fontFamily: 'monospace'));
+        final first = val.split(',').map((t) => t.trim())
+            .where((t) => t.isNotEmpty).take(2).join(', ');
+        return Text(first, style: _vs.copyWith(color: MFColors.teal),
+            overflow: TextOverflow.ellipsis, maxLines: 1);
       default:
-        final display = val.length > 22 ? '${val.substring(0, 22)}…' : val;
-        return Text(display,
-            style: const TextStyle(
-                fontSize: 10, color: MFColors.textPrimary, fontFamily: 'monospace'));
+        return Text(val, style: _vs.copyWith(color: MFColors.textPrimary),
+            overflow: TextOverflow.ellipsis, maxLines: 1);
     }
   }
 }

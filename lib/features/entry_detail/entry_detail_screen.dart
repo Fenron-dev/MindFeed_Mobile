@@ -965,35 +965,83 @@ class _LinkPreview extends StatelessWidget {
   }
 }
 
-class _PropertiesTable extends ConsumerWidget {
+class _PropertiesTable extends ConsumerStatefulWidget {
   final List<EntryProperty> properties;
   final String entryId;
 
-  // Nur technische interne Properties verstecken;
-  // og_title / og_description werden im Link-Preview angezeigt,
-  // anilist_season/total_seasons im Cover-Badge
+  const _PropertiesTable({required this.properties, required this.entryId});
+
+  @override
+  ConsumerState<_PropertiesTable> createState() => _PropertiesTableState();
+}
+
+class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
+  bool _collapsed = false;
+
+  // Technische interne Properties verstecken
   static const _hidden = {
     'og_image', 'og_title', 'og_description',
     'anilist_season', 'anilist_total_seasons',
-    'genres', // wird im Template als 'Genre' angezeigt
-    'media_type', 'domain', // interne System-Properties
-    'url_author', // ersetzt durch youtube_channel
+    'genres', 'media_type', 'domain', 'url_author',
   };
+  static const _hiddenPrefixes = [
+    'bgg_', 'github_', 'youtube_',
+  ];
 
-  const _PropertiesTable(
-      {required this.properties, required this.entryId});
+  static bool _isHidden(String key) {
+    final k = key.toLowerCase();
+    if (_hidden.contains(k)) return true;
+    for (final p in _hiddenPrefixes) {
+      if (k.startsWith(p)) return true;
+    }
+    return false;
+  }
+
+  String get entryId => widget.entryId;
+  List<EntryProperty> get properties => widget.properties;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final visible = properties
-        .where((p) => !_hidden.contains(p.key.toLowerCase()))
+        .where((p) => !_isHidden(p.key.toLowerCase()))
         .toList();
 
-    return _Section(
-      label: 'Eigenschaften',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Kopfzeile mit Collapse-Toggle
+        GestureDetector(
+          onTap: () => setState(() => _collapsed = !_collapsed),
+          child: Row(children: [
+            const Text('EIGENSCHAFTEN',
+                style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.bold,
+                    color: MFColors.textMuted, letterSpacing: 1.2)),
+            if (visible.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text('${visible.length}',
+                    style: const TextStyle(
+                        fontSize: 9, color: MFColors.teal, fontWeight: FontWeight.bold)),
+              ),
+            ],
+            const Spacer(),
+            Icon(
+              _collapsed ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+              size: 16, color: MFColors.textMuted,
+            ),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        if (!_collapsed)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           if (visible.isNotEmpty)
             Container(
               decoration: BoxDecoration(
@@ -1104,7 +1152,8 @@ class _PropertiesTable extends ConsumerWidget {
             _TemplateApplyButton(entryId: entryId, existingProps: properties),
           ]),
         ],
-      ),
+        ),  // Ende if (!_collapsed)
+      ],
     );
   }
 

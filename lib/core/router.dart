@@ -33,6 +33,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     .where((s) => s.isNotEmpty)
                     .toList()
                 : null,
+            initialContainerId: state.uri.queryParameters['containerId'],
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             // Slide von rechts rein (Gmail-Compose Style)
