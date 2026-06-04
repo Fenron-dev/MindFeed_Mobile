@@ -30,12 +30,22 @@ jobs:
       - name: Code-Generator ausführen (Drift + Riverpod)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: macOS App bauen (Debug, ad-hoc signiert)
+      - name: Flutter Workspace vorbereiten (pod install + Flutter-Artefakte)
+        run: flutter build macos --config-only
+
+      - name: macOS App bauen via xcodebuild (kein Zertifikat nötig)
         run: |
-          flutter build macos --debug \
-            -- CODE_SIGN_IDENTITY="-" \
-               CODE_SIGNING_REQUIRED=NO \
-               CODE_SIGNING_ALLOWED=YES
+          cd macos
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            SYMROOT="$PWD/../build/macos/Build/Products" \
+            OBJROOT="$PWD/../build/macos/Build/Intermediates" \
+            | xcpretty || cat /dev/stdin
 
       - name: App zippen
         run: |
@@ -43,14 +53,13 @@ jobs:
           APP_DIR="build/macos/Build/Products/Debug"
           ZIP_NAME="MindFeed-macOS-debug-${SHORT_SHA}.zip"
           cd "$APP_DIR"
-          zip -r --symlinks "../../../${ZIP_NAME}" "mindfeed_mobile.app"
+          zip -r --symlinks "../../${ZIP_NAME}" "mindfeed_mobile.app"
           cd -
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
 
-      - name: Quarantine-Flag entfernen (für einfacheres Öffnen)
-        run: |
-          xattr -dr com.apple.quarantine "build/${ZIP_NAME}" 2>/dev/null || true
+      - name: Quarantine-Flag entfernen
+        run: xattr -dr com.apple.quarantine "build/macos/${ZIP_NAME}" 2>/dev/null || true
 
       - name: GitHub Release aktualisieren (latest-debug)
         uses: softprops/action-gh-release@v2
@@ -70,4 +79,4 @@ jobs:
             - ZIP herunterladen und entpacken
             - Beim ersten Start: Rechtsklick → Öffnen (Gatekeeper-Bypass)
             - Oder im Terminal: `xattr -dr com.apple.quarantine MindFeed.app`
-          files: build/${{ env.ZIP_NAME }}
+          files: build/macos/${{ env.ZIP_NAME }}
