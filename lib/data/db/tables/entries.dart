@@ -35,6 +35,9 @@ class Entries extends Table {
   TextColumn get serverId => text().nullable()();
   DateTimeColumn get syncUpdatedAt => dateTime().nullable()();
 
+  // Soft-Delete für Sync-Tombstones; null = aktiv
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

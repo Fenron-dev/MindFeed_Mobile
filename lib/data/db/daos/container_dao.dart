@@ -24,4 +24,29 @@ class ContainerDao extends DatabaseAccessor<AppDatabase> with _$ContainerDaoMixi
 
   Future<void> deleteById(String id) =>
       (delete(containers)..where((c) => c.id.equals(id))).go();
+
+  // ── Sync helpers ────────────────────────────────────────────────────────────
+
+  Future<List<Container>> getModifiedSince(DateTime since) =>
+      (select(containers)
+            ..where((c) =>
+                c.updatedAt.isBiggerThanValue(since) & c.deletedAt.isNull()))
+          .get();
+
+  Future<List<Container>> getUnsynced() =>
+      (select(containers)
+            ..where((c) => c.deletedAt.isNull()))
+          .get();
+
+  Future<List<Container>> getSoftDeletedSince(DateTime since) =>
+      (select(containers)
+            ..where((c) =>
+                c.deletedAt.isNotNull() &
+                c.deletedAt.isBiggerThanValue(since)))
+          .get();
+
+  Future<void> softDelete(String id) =>
+      (update(containers)..where((c) => c.id.equals(id))).write(
+        ContainersCompanion(deletedAt: Value(DateTime.now().toUtc())),
+      );
 }

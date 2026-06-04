@@ -26,6 +26,15 @@ dependencies:
   # ─── HTTP / Networking ────────────────────────────────────────────
   http: ^1.6.0
 
+  # ─── Sync (P2P) ──────────────────────────────────────────────────
+  shelf: ^1.4.0
+  shelf_router: ^1.1.0
+  bonsoir: ^7.1.1
+  dart_jsonwebtoken: ^2.12.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^6.0.0
+  connectivity_plus: ^6.0.0
+
   # ─── Media ───────────────────────────────────────────────────────
   # media_kit & media_kit_native_event_loop: werden bei Audio-Feature
   # korrekt mit media_kit_libs_android_audio eingebunden (Phase 2)

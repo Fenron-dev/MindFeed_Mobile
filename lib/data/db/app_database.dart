@@ -48,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -58,7 +58,14 @@ class AppDatabase extends _$AppDatabase {
           await _createIndexes();
         },
         onUpgrade: (m, from, to) async {
-          // Migrationen hier einfügen
+          if (from < 2) {
+            await m.addColumn(entries, entries.deletedAt);
+            await m.addColumn(containers, containers.updatedAt);
+            await m.addColumn(containers, containers.deletedAt);
+            // Backfill updatedAt für bestehende Container
+            await customStatement(
+                'UPDATE containers SET updated_at = created_at WHERE updated_at IS NULL');
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');

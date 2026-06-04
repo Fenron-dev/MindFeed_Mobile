@@ -1,7 +1,14 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../domain/prop_type.dart';
+
+// ─── Sync-Einstellungen ───────────────────────────────────────────────────────
+
+enum SyncRole { server, client }
+
+enum SyncAttachmentsDirection { both, downloadOnly, uploadOnly }
 
 // ─── Tag-Stil ─────────────────────────────────────────────────────────────────
 
@@ -484,5 +491,96 @@ class AppSettings {
       else if (v is String) await p.setString(k, v);
       else if (v is List) await p.setStringList(k, v.cast<String>());
     }
+  }
+
+  // ── Sync-Einstellungen ────────────────────────────────────────────────────
+
+  static String getDeviceId() {
+    final id = _prefs?.getString('sync_device_id');
+    if (id != null && id.isNotEmpty) return id;
+    final newId = 'dev-${_randomHex(8)}';
+    _prefs?.setString('sync_device_id', newId);
+    return newId;
+  }
+
+  static String getDeviceName() =>
+      _prefs?.getString('sync_device_name') ?? 'MindFeed Mobile';
+
+  static Future<void> saveDeviceName(String name) async =>
+      _prefs?.setString('sync_device_name', name);
+
+  static SyncRole getSyncRole() {
+    final raw = _prefs?.getString('sync_role') ?? 'client';
+    return raw == 'server' ? SyncRole.server : SyncRole.client;
+  }
+
+  static Future<void> saveSyncRole(SyncRole role) async =>
+      _prefs?.setString('sync_role', role == SyncRole.server ? 'server' : 'client');
+
+  static bool getSyncEnabled() => _prefs?.getBool('sync_enabled') ?? false;
+
+  static Future<void> saveSyncEnabled(bool v) async =>
+      _prefs?.setBool('sync_enabled', v);
+
+  static String? getSyncServerUrl() => _prefs?.getString('sync_server_url');
+
+  static Future<void> saveSyncServerUrl(String? url) async {
+    if (url == null) {
+      _prefs?.remove('sync_server_url');
+    } else {
+      _prefs?.setString('sync_server_url', url);
+    }
+  }
+
+  static bool getSyncAutoEnabled() => _prefs?.getBool('sync_auto_enabled') ?? false;
+
+  static Future<void> saveSyncAutoEnabled(bool v) async =>
+      _prefs?.setBool('sync_auto_enabled', v);
+
+  static int getSyncAutoIntervalMinutes() =>
+      _prefs?.getInt('sync_auto_interval_minutes') ?? 15;
+
+  static Future<void> saveSyncAutoIntervalMinutes(int v) async =>
+      _prefs?.setInt('sync_auto_interval_minutes', v);
+
+  static bool getSyncOnAppStart() => _prefs?.getBool('sync_on_app_start') ?? false;
+
+  static Future<void> saveSyncOnAppStart(bool v) async =>
+      _prefs?.setBool('sync_on_app_start', v);
+
+  static bool getSyncOnResume() => _prefs?.getBool('sync_on_resume') ?? false;
+
+  static Future<void> saveSyncOnResume(bool v) async =>
+      _prefs?.setBool('sync_on_resume', v);
+
+  static bool getSyncAttachments() => _prefs?.getBool('sync_attachments') ?? false;
+
+  static Future<void> saveSyncAttachments(bool v) async =>
+      _prefs?.setBool('sync_attachments', v);
+
+  static SyncAttachmentsDirection getSyncAttachmentsDirection() {
+    final raw = _prefs?.getString('sync_attachments_direction') ?? 'both';
+    return SyncAttachmentsDirection.values.firstWhere(
+      (d) => d.name == raw,
+      orElse: () => SyncAttachmentsDirection.both,
+    );
+  }
+
+  static Future<void> saveSyncAttachmentsDirection(SyncAttachmentsDirection d) async =>
+      _prefs?.setString('sync_attachments_direction', d.name);
+
+  static DateTime? getLastSyncAt() {
+    final raw = _prefs?.getString('sync_last_sync_at');
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  static Future<void> saveLastSyncAt(DateTime dt) async =>
+      _prefs?.setString('sync_last_sync_at', dt.toIso8601String());
+
+  static String _randomHex(int bytes) {
+    final rng = Random.secure();
+    final buf = List<int>.generate(bytes, (_) => rng.nextInt(256));
+    return buf.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 }

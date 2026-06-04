@@ -187,6 +187,17 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
         type: DriftSqlType.dateTime,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -206,6 +217,7 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
     aiEnrichedAt,
     serverId,
     syncUpdatedAt,
+    deletedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -326,6 +338,12 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
         ),
       );
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -403,6 +421,10 @@ class $EntriesTable extends Entries with TableInfo<$EntriesTable, Entry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}sync_updated_at'],
       ),
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
     );
   }
 
@@ -430,6 +452,7 @@ class Entry extends DataClass implements Insertable<Entry> {
   final DateTime? aiEnrichedAt;
   final String? serverId;
   final DateTime? syncUpdatedAt;
+  final DateTime? deletedAt;
   const Entry({
     required this.id,
     required this.createdAt,
@@ -448,6 +471,7 @@ class Entry extends DataClass implements Insertable<Entry> {
     this.aiEnrichedAt,
     this.serverId,
     this.syncUpdatedAt,
+    this.deletedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -489,6 +513,9 @@ class Entry extends DataClass implements Insertable<Entry> {
     if (!nullToAbsent || syncUpdatedAt != null) {
       map['sync_updated_at'] = Variable<DateTime>(syncUpdatedAt);
     }
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
     return map;
   }
 
@@ -529,6 +556,9 @@ class Entry extends DataClass implements Insertable<Entry> {
       syncUpdatedAt: syncUpdatedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(syncUpdatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
     );
   }
 
@@ -555,6 +585,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       aiEnrichedAt: serializer.fromJson<DateTime?>(json['aiEnrichedAt']),
       serverId: serializer.fromJson<String?>(json['serverId']),
       syncUpdatedAt: serializer.fromJson<DateTime?>(json['syncUpdatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
     );
   }
   @override
@@ -578,6 +609,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       'aiEnrichedAt': serializer.toJson<DateTime?>(aiEnrichedAt),
       'serverId': serializer.toJson<String?>(serverId),
       'syncUpdatedAt': serializer.toJson<DateTime?>(syncUpdatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
     };
   }
 
@@ -599,6 +631,7 @@ class Entry extends DataClass implements Insertable<Entry> {
     Value<DateTime?> aiEnrichedAt = const Value.absent(),
     Value<String?> serverId = const Value.absent(),
     Value<DateTime?> syncUpdatedAt = const Value.absent(),
+    Value<DateTime?> deletedAt = const Value.absent(),
   }) => Entry(
     id: id ?? this.id,
     createdAt: createdAt ?? this.createdAt,
@@ -619,6 +652,7 @@ class Entry extends DataClass implements Insertable<Entry> {
     syncUpdatedAt: syncUpdatedAt.present
         ? syncUpdatedAt.value
         : this.syncUpdatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
   );
   Entry copyWithCompanion(EntriesCompanion data) {
     return Entry(
@@ -645,6 +679,7 @@ class Entry extends DataClass implements Insertable<Entry> {
       syncUpdatedAt: data.syncUpdatedAt.present
           ? data.syncUpdatedAt.value
           : this.syncUpdatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
     );
   }
 
@@ -667,7 +702,8 @@ class Entry extends DataClass implements Insertable<Entry> {
           ..write('lang: $lang, ')
           ..write('aiEnrichedAt: $aiEnrichedAt, ')
           ..write('serverId: $serverId, ')
-          ..write('syncUpdatedAt: $syncUpdatedAt')
+          ..write('syncUpdatedAt: $syncUpdatedAt, ')
+          ..write('deletedAt: $deletedAt')
           ..write(')'))
         .toString();
   }
@@ -691,6 +727,7 @@ class Entry extends DataClass implements Insertable<Entry> {
     aiEnrichedAt,
     serverId,
     syncUpdatedAt,
+    deletedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -712,7 +749,8 @@ class Entry extends DataClass implements Insertable<Entry> {
           other.lang == this.lang &&
           other.aiEnrichedAt == this.aiEnrichedAt &&
           other.serverId == this.serverId &&
-          other.syncUpdatedAt == this.syncUpdatedAt);
+          other.syncUpdatedAt == this.syncUpdatedAt &&
+          other.deletedAt == this.deletedAt);
 }
 
 class EntriesCompanion extends UpdateCompanion<Entry> {
@@ -733,6 +771,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
   final Value<DateTime?> aiEnrichedAt;
   final Value<String?> serverId;
   final Value<DateTime?> syncUpdatedAt;
+  final Value<DateTime?> deletedAt;
   final Value<int> rowid;
   const EntriesCompanion({
     this.id = const Value.absent(),
@@ -752,6 +791,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     this.aiEnrichedAt = const Value.absent(),
     this.serverId = const Value.absent(),
     this.syncUpdatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   EntriesCompanion.insert({
@@ -772,6 +812,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     this.aiEnrichedAt = const Value.absent(),
     this.serverId = const Value.absent(),
     this.syncUpdatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id);
   static Insertable<Entry> custom({
@@ -792,6 +833,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     Expression<DateTime>? aiEnrichedAt,
     Expression<String>? serverId,
     Expression<DateTime>? syncUpdatedAt,
+    Expression<DateTime>? deletedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -812,6 +854,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
       if (aiEnrichedAt != null) 'ai_enriched_at': aiEnrichedAt,
       if (serverId != null) 'server_id': serverId,
       if (syncUpdatedAt != null) 'sync_updated_at': syncUpdatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -834,6 +877,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     Value<DateTime?>? aiEnrichedAt,
     Value<String?>? serverId,
     Value<DateTime?>? syncUpdatedAt,
+    Value<DateTime?>? deletedAt,
     Value<int>? rowid,
   }) {
     return EntriesCompanion(
@@ -854,6 +898,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
       aiEnrichedAt: aiEnrichedAt ?? this.aiEnrichedAt,
       serverId: serverId ?? this.serverId,
       syncUpdatedAt: syncUpdatedAt ?? this.syncUpdatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -912,6 +957,9 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
     if (syncUpdatedAt.present) {
       map['sync_updated_at'] = Variable<DateTime>(syncUpdatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -938,6 +986,7 @@ class EntriesCompanion extends UpdateCompanion<Entry> {
           ..write('aiEnrichedAt: $aiEnrichedAt, ')
           ..write('serverId: $serverId, ')
           ..write('syncUpdatedAt: $syncUpdatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1587,6 +1636,18 @@ class $ContainersTable extends Containers
     requiredDuringInsert: false,
     clientDefault: () => DateTime.now().toUtc(),
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: () => DateTime.now().toUtc(),
+  );
   static const VerificationMeta _archivedMeta = const VerificationMeta(
     'archived',
   );
@@ -1670,6 +1731,17 @@ class $ContainersTable extends Containers
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1679,6 +1751,7 @@ class $ContainersTable extends Containers
     icon,
     color,
     createdAt,
+    updatedAt,
     archived,
     filterTag,
     filterStatus,
@@ -1686,6 +1759,7 @@ class $ContainersTable extends Containers
     sortOrder,
     viewMode,
     parentId,
+    deletedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1745,6 +1819,12 @@ class $ContainersTable extends Containers
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     if (data.containsKey('archived')) {
       context.handle(
         _archivedMeta,
@@ -1790,6 +1870,12 @@ class $ContainersTable extends Containers
         parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta),
       );
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -1827,6 +1913,10 @@ class $ContainersTable extends Containers
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
       archived: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}archived'],
@@ -1855,6 +1945,10 @@ class $ContainersTable extends Containers
         DriftSqlType.string,
         data['${effectivePrefix}parent_id'],
       ),
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
     );
   }
 
@@ -1872,6 +1966,7 @@ class Container extends DataClass implements Insertable<Container> {
   final String icon;
   final String color;
   final DateTime createdAt;
+  final DateTime updatedAt;
   final bool archived;
   final String? filterTag;
   final String? filterStatus;
@@ -1879,6 +1974,7 @@ class Container extends DataClass implements Insertable<Container> {
   final String sortOrder;
   final String viewMode;
   final String? parentId;
+  final DateTime? deletedAt;
   const Container({
     required this.id,
     required this.kind,
@@ -1887,6 +1983,7 @@ class Container extends DataClass implements Insertable<Container> {
     required this.icon,
     required this.color,
     required this.createdAt,
+    required this.updatedAt,
     required this.archived,
     this.filterTag,
     this.filterStatus,
@@ -1894,6 +1991,7 @@ class Container extends DataClass implements Insertable<Container> {
     required this.sortOrder,
     required this.viewMode,
     this.parentId,
+    this.deletedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1907,6 +2005,7 @@ class Container extends DataClass implements Insertable<Container> {
     map['icon'] = Variable<String>(icon);
     map['color'] = Variable<String>(color);
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
     map['archived'] = Variable<bool>(archived);
     if (!nullToAbsent || filterTag != null) {
       map['filter_tag'] = Variable<String>(filterTag);
@@ -1922,6 +2021,9 @@ class Container extends DataClass implements Insertable<Container> {
     if (!nullToAbsent || parentId != null) {
       map['parent_id'] = Variable<String>(parentId);
     }
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
     return map;
   }
 
@@ -1936,6 +2038,7 @@ class Container extends DataClass implements Insertable<Container> {
       icon: Value(icon),
       color: Value(color),
       createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
       archived: Value(archived),
       filterTag: filterTag == null && nullToAbsent
           ? const Value.absent()
@@ -1951,6 +2054,9 @@ class Container extends DataClass implements Insertable<Container> {
       parentId: parentId == null && nullToAbsent
           ? const Value.absent()
           : Value(parentId),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
     );
   }
 
@@ -1967,6 +2073,7 @@ class Container extends DataClass implements Insertable<Container> {
       icon: serializer.fromJson<String>(json['icon']),
       color: serializer.fromJson<String>(json['color']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       archived: serializer.fromJson<bool>(json['archived']),
       filterTag: serializer.fromJson<String?>(json['filterTag']),
       filterStatus: serializer.fromJson<String?>(json['filterStatus']),
@@ -1974,6 +2081,7 @@ class Container extends DataClass implements Insertable<Container> {
       sortOrder: serializer.fromJson<String>(json['sortOrder']),
       viewMode: serializer.fromJson<String>(json['viewMode']),
       parentId: serializer.fromJson<String?>(json['parentId']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
     );
   }
   @override
@@ -1987,6 +2095,7 @@ class Container extends DataClass implements Insertable<Container> {
       'icon': serializer.toJson<String>(icon),
       'color': serializer.toJson<String>(color),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'archived': serializer.toJson<bool>(archived),
       'filterTag': serializer.toJson<String?>(filterTag),
       'filterStatus': serializer.toJson<String?>(filterStatus),
@@ -1994,6 +2103,7 @@ class Container extends DataClass implements Insertable<Container> {
       'sortOrder': serializer.toJson<String>(sortOrder),
       'viewMode': serializer.toJson<String>(viewMode),
       'parentId': serializer.toJson<String?>(parentId),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
     };
   }
 
@@ -2005,6 +2115,7 @@ class Container extends DataClass implements Insertable<Container> {
     String? icon,
     String? color,
     DateTime? createdAt,
+    DateTime? updatedAt,
     bool? archived,
     Value<String?> filterTag = const Value.absent(),
     Value<String?> filterStatus = const Value.absent(),
@@ -2012,6 +2123,7 @@ class Container extends DataClass implements Insertable<Container> {
     String? sortOrder,
     String? viewMode,
     Value<String?> parentId = const Value.absent(),
+    Value<DateTime?> deletedAt = const Value.absent(),
   }) => Container(
     id: id ?? this.id,
     kind: kind ?? this.kind,
@@ -2020,6 +2132,7 @@ class Container extends DataClass implements Insertable<Container> {
     icon: icon ?? this.icon,
     color: color ?? this.color,
     createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
     archived: archived ?? this.archived,
     filterTag: filterTag.present ? filterTag.value : this.filterTag,
     filterStatus: filterStatus.present ? filterStatus.value : this.filterStatus,
@@ -2027,6 +2140,7 @@ class Container extends DataClass implements Insertable<Container> {
     sortOrder: sortOrder ?? this.sortOrder,
     viewMode: viewMode ?? this.viewMode,
     parentId: parentId.present ? parentId.value : this.parentId,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
   );
   Container copyWithCompanion(ContainersCompanion data) {
     return Container(
@@ -2039,6 +2153,7 @@ class Container extends DataClass implements Insertable<Container> {
       icon: data.icon.present ? data.icon.value : this.icon,
       color: data.color.present ? data.color.value : this.color,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       archived: data.archived.present ? data.archived.value : this.archived,
       filterTag: data.filterTag.present ? data.filterTag.value : this.filterTag,
       filterStatus: data.filterStatus.present
@@ -2050,6 +2165,7 @@ class Container extends DataClass implements Insertable<Container> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       viewMode: data.viewMode.present ? data.viewMode.value : this.viewMode,
       parentId: data.parentId.present ? data.parentId.value : this.parentId,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
     );
   }
 
@@ -2063,13 +2179,15 @@ class Container extends DataClass implements Insertable<Container> {
           ..write('icon: $icon, ')
           ..write('color: $color, ')
           ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('archived: $archived, ')
           ..write('filterTag: $filterTag, ')
           ..write('filterStatus: $filterStatus, ')
           ..write('filterType: $filterType, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('viewMode: $viewMode, ')
-          ..write('parentId: $parentId')
+          ..write('parentId: $parentId, ')
+          ..write('deletedAt: $deletedAt')
           ..write(')'))
         .toString();
   }
@@ -2083,6 +2201,7 @@ class Container extends DataClass implements Insertable<Container> {
     icon,
     color,
     createdAt,
+    updatedAt,
     archived,
     filterTag,
     filterStatus,
@@ -2090,6 +2209,7 @@ class Container extends DataClass implements Insertable<Container> {
     sortOrder,
     viewMode,
     parentId,
+    deletedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -2102,13 +2222,15 @@ class Container extends DataClass implements Insertable<Container> {
           other.icon == this.icon &&
           other.color == this.color &&
           other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
           other.archived == this.archived &&
           other.filterTag == this.filterTag &&
           other.filterStatus == this.filterStatus &&
           other.filterType == this.filterType &&
           other.sortOrder == this.sortOrder &&
           other.viewMode == this.viewMode &&
-          other.parentId == this.parentId);
+          other.parentId == this.parentId &&
+          other.deletedAt == this.deletedAt);
 }
 
 class ContainersCompanion extends UpdateCompanion<Container> {
@@ -2119,6 +2241,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
   final Value<String> icon;
   final Value<String> color;
   final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
   final Value<bool> archived;
   final Value<String?> filterTag;
   final Value<String?> filterStatus;
@@ -2126,6 +2249,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
   final Value<String> sortOrder;
   final Value<String> viewMode;
   final Value<String?> parentId;
+  final Value<DateTime?> deletedAt;
   final Value<int> rowid;
   const ContainersCompanion({
     this.id = const Value.absent(),
@@ -2135,6 +2259,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.icon = const Value.absent(),
     this.color = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.archived = const Value.absent(),
     this.filterTag = const Value.absent(),
     this.filterStatus = const Value.absent(),
@@ -2142,6 +2267,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.sortOrder = const Value.absent(),
     this.viewMode = const Value.absent(),
     this.parentId = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ContainersCompanion.insert({
@@ -2152,6 +2278,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.icon = const Value.absent(),
     this.color = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.archived = const Value.absent(),
     this.filterTag = const Value.absent(),
     this.filterStatus = const Value.absent(),
@@ -2159,6 +2286,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.sortOrder = const Value.absent(),
     this.viewMode = const Value.absent(),
     this.parentId = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name);
@@ -2170,6 +2298,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Expression<String>? icon,
     Expression<String>? color,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
     Expression<bool>? archived,
     Expression<String>? filterTag,
     Expression<String>? filterStatus,
@@ -2177,6 +2306,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Expression<String>? sortOrder,
     Expression<String>? viewMode,
     Expression<String>? parentId,
+    Expression<DateTime>? deletedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2187,6 +2317,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       if (icon != null) 'icon': icon,
       if (color != null) 'color': color,
       if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (archived != null) 'archived': archived,
       if (filterTag != null) 'filter_tag': filterTag,
       if (filterStatus != null) 'filter_status': filterStatus,
@@ -2194,6 +2325,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (viewMode != null) 'view_mode': viewMode,
       if (parentId != null) 'parent_id': parentId,
+      if (deletedAt != null) 'deleted_at': deletedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2206,6 +2338,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Value<String>? icon,
     Value<String>? color,
     Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
     Value<bool>? archived,
     Value<String?>? filterTag,
     Value<String?>? filterStatus,
@@ -2213,6 +2346,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Value<String>? sortOrder,
     Value<String>? viewMode,
     Value<String?>? parentId,
+    Value<DateTime?>? deletedAt,
     Value<int>? rowid,
   }) {
     return ContainersCompanion(
@@ -2223,6 +2357,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       icon: icon ?? this.icon,
       color: color ?? this.color,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       archived: archived ?? this.archived,
       filterTag: filterTag ?? this.filterTag,
       filterStatus: filterStatus ?? this.filterStatus,
@@ -2230,6 +2365,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       sortOrder: sortOrder ?? this.sortOrder,
       viewMode: viewMode ?? this.viewMode,
       parentId: parentId ?? this.parentId,
+      deletedAt: deletedAt ?? this.deletedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2258,6 +2394,9 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
     if (archived.present) {
       map['archived'] = Variable<bool>(archived.value);
     }
@@ -2279,6 +2418,9 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     if (parentId.present) {
       map['parent_id'] = Variable<String>(parentId.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2295,6 +2437,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
           ..write('icon: $icon, ')
           ..write('color: $color, ')
           ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('archived: $archived, ')
           ..write('filterTag: $filterTag, ')
           ..write('filterStatus: $filterStatus, ')
@@ -2302,6 +2445,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
           ..write('sortOrder: $sortOrder, ')
           ..write('viewMode: $viewMode, ')
           ..write('parentId: $parentId, ')
+          ..write('deletedAt: $deletedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3884,6 +4028,7 @@ typedef $$EntriesTableCreateCompanionBuilder =
       Value<DateTime?> aiEnrichedAt,
       Value<String?> serverId,
       Value<DateTime?> syncUpdatedAt,
+      Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
 typedef $$EntriesTableUpdateCompanionBuilder =
@@ -3905,6 +4050,7 @@ typedef $$EntriesTableUpdateCompanionBuilder =
       Value<DateTime?> aiEnrichedAt,
       Value<String?> serverId,
       Value<DateTime?> syncUpdatedAt,
+      Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
 
@@ -4116,6 +4262,11 @@ class $$EntriesTableFilterComposer
 
   ColumnFilters<DateTime> get syncUpdatedAt => $composableBuilder(
     column: $table.syncUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4363,6 +4514,11 @@ class $$EntriesTableOrderingComposer
     column: $table.syncUpdatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$EntriesTableAnnotationComposer
@@ -4430,6 +4586,9 @@ class $$EntriesTableAnnotationComposer
     column: $table.syncUpdatedAt,
     builder: (column) => column,
   );
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
 
   Expression<T> entryTagsRefs<T extends Object>(
     Expression<T> Function($$EntryTagsTableAnnotationComposer a) f,
@@ -4634,6 +4793,7 @@ class $$EntriesTableTableManager
                 Value<DateTime?> aiEnrichedAt = const Value.absent(),
                 Value<String?> serverId = const Value.absent(),
                 Value<DateTime?> syncUpdatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EntriesCompanion(
                 id: id,
@@ -4653,6 +4813,7 @@ class $$EntriesTableTableManager
                 aiEnrichedAt: aiEnrichedAt,
                 serverId: serverId,
                 syncUpdatedAt: syncUpdatedAt,
+                deletedAt: deletedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4674,6 +4835,7 @@ class $$EntriesTableTableManager
                 Value<DateTime?> aiEnrichedAt = const Value.absent(),
                 Value<String?> serverId = const Value.absent(),
                 Value<DateTime?> syncUpdatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EntriesCompanion.insert(
                 id: id,
@@ -4693,6 +4855,7 @@ class $$EntriesTableTableManager
                 aiEnrichedAt: aiEnrichedAt,
                 serverId: serverId,
                 syncUpdatedAt: syncUpdatedAt,
+                deletedAt: deletedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5524,6 +5687,7 @@ typedef $$ContainersTableCreateCompanionBuilder =
       Value<String> icon,
       Value<String> color,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
       Value<bool> archived,
       Value<String?> filterTag,
       Value<String?> filterStatus,
@@ -5531,6 +5695,7 @@ typedef $$ContainersTableCreateCompanionBuilder =
       Value<String> sortOrder,
       Value<String> viewMode,
       Value<String?> parentId,
+      Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
 typedef $$ContainersTableUpdateCompanionBuilder =
@@ -5542,6 +5707,7 @@ typedef $$ContainersTableUpdateCompanionBuilder =
       Value<String> icon,
       Value<String> color,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
       Value<bool> archived,
       Value<String?> filterTag,
       Value<String?> filterStatus,
@@ -5549,6 +5715,7 @@ typedef $$ContainersTableUpdateCompanionBuilder =
       Value<String> sortOrder,
       Value<String> viewMode,
       Value<String?> parentId,
+      Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
 
@@ -5624,6 +5791,11 @@ class $$ContainersTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<bool> get archived => $composableBuilder(
     column: $table.archived,
     builder: (column) => ColumnFilters(column),
@@ -5656,6 +5828,11 @@ class $$ContainersTableFilterComposer
 
   ColumnFilters<String> get parentId => $composableBuilder(
     column: $table.parentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5729,6 +5906,11 @@ class $$ContainersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get archived => $composableBuilder(
     column: $table.archived,
     builder: (column) => ColumnOrderings(column),
@@ -5761,6 +5943,11 @@ class $$ContainersTableOrderingComposer
 
   ColumnOrderings<String> get parentId => $composableBuilder(
     column: $table.parentId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
     builder: (column) => ColumnOrderings(column),
   );
 }
@@ -5797,6 +5984,9 @@ class $$ContainersTableAnnotationComposer
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
   GeneratedColumn<bool> get archived =>
       $composableBuilder(column: $table.archived, builder: (column) => column);
 
@@ -5821,6 +6011,9 @@ class $$ContainersTableAnnotationComposer
 
   GeneratedColumn<String> get parentId =>
       $composableBuilder(column: $table.parentId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
 
   Expression<T> entryContainersRefs<T extends Object>(
     Expression<T> Function($$EntryContainersTableAnnotationComposer a) f,
@@ -5883,6 +6076,7 @@ class $$ContainersTableTableManager
                 Value<String> icon = const Value.absent(),
                 Value<String> color = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<String?> filterTag = const Value.absent(),
                 Value<String?> filterStatus = const Value.absent(),
@@ -5890,6 +6084,7 @@ class $$ContainersTableTableManager
                 Value<String> sortOrder = const Value.absent(),
                 Value<String> viewMode = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ContainersCompanion(
                 id: id,
@@ -5899,6 +6094,7 @@ class $$ContainersTableTableManager
                 icon: icon,
                 color: color,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
                 archived: archived,
                 filterTag: filterTag,
                 filterStatus: filterStatus,
@@ -5906,6 +6102,7 @@ class $$ContainersTableTableManager
                 sortOrder: sortOrder,
                 viewMode: viewMode,
                 parentId: parentId,
+                deletedAt: deletedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5917,6 +6114,7 @@ class $$ContainersTableTableManager
                 Value<String> icon = const Value.absent(),
                 Value<String> color = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<String?> filterTag = const Value.absent(),
                 Value<String?> filterStatus = const Value.absent(),
@@ -5924,6 +6122,7 @@ class $$ContainersTableTableManager
                 Value<String> sortOrder = const Value.absent(),
                 Value<String> viewMode = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ContainersCompanion.insert(
                 id: id,
@@ -5933,6 +6132,7 @@ class $$ContainersTableTableManager
                 icon: icon,
                 color: color,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
                 archived: archived,
                 filterTag: filterTag,
                 filterStatus: filterStatus,
@@ -5940,6 +6140,7 @@ class $$ContainersTableTableManager
                 sortOrder: sortOrder,
                 viewMode: viewMode,
                 parentId: parentId,
+                deletedAt: deletedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

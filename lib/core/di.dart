@@ -8,6 +8,8 @@ import '../data/db/daos/property_dao.dart';
 import '../data/repositories/entry_repository.dart';
 import '../domain/feed_filter.dart';
 import '../services/app_settings.dart';
+// Sync providers are declared in sync/sync_provider.dart and imported where needed.
+// Registering them here would create a circular dependency.
 
 // ─── Database (wird in main.dart via override initialisiert) ──────────────────
 final databaseProvider = Provider<AppDatabase>(

@@ -80,4 +80,40 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
         .get();
     return rows.length;
   }
+
+  // ── Sync helpers ────────────────────────────────────────────────────────────
+
+  /// Returns entries modified after [since] that are not soft-deleted.
+  Future<List<Entry>> getModifiedSince(DateTime since) =>
+      (select(entries)
+            ..where((e) =>
+                e.updatedAt.isBiggerThanValue(since) & e.deletedAt.isNull()))
+          .get();
+
+  /// Returns entries that have never been synced (syncUpdatedAt IS NULL).
+  Future<List<Entry>> getUnsynced() =>
+      (select(entries)
+            ..where((e) => e.syncUpdatedAt.isNull() & e.deletedAt.isNull()))
+          .get();
+
+  /// Returns soft-deleted entries (tombstones) modified after [since].
+  Future<List<Entry>> getSoftDeletedSince(DateTime since) =>
+      (select(entries)
+            ..where((e) =>
+                e.deletedAt.isNotNull() &
+                e.deletedAt.isBiggerThanValue(since)))
+          .get();
+
+  /// Soft-deletes an entry (sets deletedAt).
+  Future<void> softDelete(String id) =>
+      (update(entries)..where((e) => e.id.equals(id)))
+          .write(EntriesCompanion(deletedAt: Value(DateTime.now().toUtc())));
+
+  /// Marks entries as synced (updates syncUpdatedAt).
+  Future<void> markSynced(List<String> ids, DateTime syncedAt) async {
+    for (final id in ids) {
+      await (update(entries)..where((e) => e.id.equals(id)))
+          .write(EntriesCompanion(syncUpdatedAt: Value(syncedAt)));
+    }
+  }
 }

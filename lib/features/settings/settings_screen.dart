@@ -12,6 +12,7 @@ import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
+import '../settings/sync_settings_screen.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
@@ -424,6 +425,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onTap: _resetToDefaultVault,
             ),
           ],
+
+          const SizedBox(height: 24),
+          // ─── Sync ──────────────────────────────────────────────────────
+          _SectionHeader('SYNC & GERÄTE'),
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.sync,
+            iconColor: MFColors.teal,
+            title: 'Sync & Geräte',
+            subtitle: 'P2P-Sync mit anderen Geräten konfigurieren',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const SyncSettingsScreen(),
+              ),
+            ),
+          ),
 
           const SizedBox(height: 24),
           // ─── Datensicherung ────────────────────────────────────────────

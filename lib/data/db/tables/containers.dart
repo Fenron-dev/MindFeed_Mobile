@@ -18,6 +18,8 @@ class Containers extends Table {
 
   DateTimeColumn get createdAt =>
       dateTime().clientDefault(() => DateTime.now().toUtc())();
+  DateTimeColumn get updatedAt =>
+      dateTime().clientDefault(() => DateTime.now().toUtc())();
   BoolColumn get archived =>
       boolean().withDefault(const Constant(false))();
 
@@ -34,6 +36,9 @@ class Containers extends Table {
       text().withDefault(const Constant('list'))();
 
   TextColumn get parentId => text().nullable()();
+
+  // Soft-Delete für Sync-Tombstones; null = aktiv
+  DateTimeColumn get deletedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

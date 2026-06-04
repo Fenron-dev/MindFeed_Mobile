@@ -8,6 +8,8 @@ import '../../core/theme.dart';
 import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
+import '../../sync/dto/sync_dto.dart';
+import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
@@ -145,6 +147,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               ),
             ),
             actions: [
+              // Sync-Status-Button
+              _SyncStatusButton(),
               // Filter-Button (leuchtet wenn aktiv)
               IconButton(
                 icon: Icon(
@@ -898,6 +902,47 @@ class _EmptyFeed extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Sync-Status-Button in der AppBar ──────────────────────────────────────────
+
+class _SyncStatusButton extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(syncStateProvider);
+
+    if (state.status == SyncStatus.disabled ||
+        state.status == SyncStatus.notConfigured) {
+      return const SizedBox.shrink();
+    }
+
+    final (icon, color) = switch (state.status) {
+      SyncStatus.syncing => (Icons.sync, MFColors.teal),
+      SyncStatus.success => (Icons.cloud_done_outlined, MFColors.teal),
+      SyncStatus.error => (Icons.cloud_off_outlined, Colors.red),
+      _ => (Icons.cloud_outlined, MFColors.textSecondary),
+    };
+
+    return IconButton(
+      icon: state.status == SyncStatus.syncing
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: MFColors.teal),
+            )
+          : Icon(icon, color: color, size: 22),
+      tooltip: switch (state.status) {
+        SyncStatus.syncing => 'Synchronisiert…',
+        SyncStatus.success => 'Synchronisiert',
+        SyncStatus.error => state.message ?? 'Sync-Fehler',
+        _ => 'Jetzt synchronisieren',
+      },
+      onPressed: state.status == SyncStatus.syncing
+          ? null
+          : () => ref.read(syncStateProvider.notifier).triggerSync(),
     );
   }
 }
