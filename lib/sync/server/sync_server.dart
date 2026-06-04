@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
+import '../../core/secure_storage.dart';
 import '../../data/db/app_database.dart';
 import 'routes/health_routes.dart';
 import 'routes/pairing_routes.dart';
@@ -13,9 +13,6 @@ import 'routes/sync_routes.dart';
 
 const kSyncPort = 8766;
 
-const _storage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-);
 const _kServerJwtSecret    = 'sync_server_jwt_secret';
 const _kServerRefreshTokens = 'sync_server_refresh_tokens';
 const _kServerClients      = 'sync_server_clients';
@@ -73,15 +70,15 @@ class SyncServer {
 
   Future<void> _loadPersistedAuth() async {
     // JWT-Secret laden oder erstellen
-    var secret = await _storage.read(key: _kServerJwtSecret);
+    var secret = await secureRead(_kServerJwtSecret);
     if (secret == null || secret.isEmpty) {
       secret = base64Url.encode(List<int>.generate(32, (_) => Random.secure().nextInt(256)));
-      await _storage.write(key: _kServerJwtSecret, value: secret);
+      await secureWrite(_kServerJwtSecret, secret);
     }
     _jwtSecret = secret;
 
     // Refresh-Tokens wiederherstellen
-    final tokensJson = await _storage.read(key: _kServerRefreshTokens);
+    final tokensJson = await secureRead(_kServerRefreshTokens);
     if (tokensJson != null) {
       try {
         final map = jsonDecode(tokensJson) as Map<String, dynamic>;
@@ -90,7 +87,7 @@ class SyncServer {
     }
 
     // Bekannte Clients wiederherstellen (IPs ändern sich, werden als 'gespeichert' markiert)
-    final clientsJson = await _storage.read(key: _kServerClients);
+    final clientsJson = await secureRead(_kServerClients);
     if (clientsJson != null) {
       try {
         final list = jsonDecode(clientsJson) as List<dynamic>;
@@ -107,16 +104,13 @@ class SyncServer {
   }
 
   Future<void> _persistRefreshTokens() async {
-    await _storage.write(
-      key: _kServerRefreshTokens,
-      value: jsonEncode(refreshTokens),
-    );
+    await secureWrite(_kServerRefreshTokens, jsonEncode(refreshTokens));
   }
 
   Future<void> _persistClients() async {
-    await _storage.write(
-      key: _kServerClients,
-      value: jsonEncode(connectedClients.map((c) => c.toJson()).toList()),
+    await secureWrite(
+      _kServerClients,
+      jsonEncode(connectedClients.map((c) => c.toJson()).toList()),
     );
   }
 

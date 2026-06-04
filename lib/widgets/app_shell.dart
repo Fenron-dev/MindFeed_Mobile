@@ -8,6 +8,7 @@ import '../core/theme.dart';
 import '../data/repositories/container_repository.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_provider.dart';
+import '../features/entry_detail/entry_detail_screen.dart';
 
 bool get _isDesktop =>
     Platform.isMacOS || Platform.isWindows || Platform.isLinux;
@@ -105,8 +106,19 @@ class _AppShellState extends State<AppShell> {
 
 // Provider für ausgewählten Container (Desktop Explorer-Stil)
 final desktopSelectedContainerProvider = StateProvider<String?>((ref) => null);
+// Provider für geöffneten Eintrag (Desktop inline-Ansicht)
+final desktopSelectedEntryProvider = StateProvider<String?>((ref) => null);
 // Provider für Sidebar-Pin (true = permanent sichtbar)
 final desktopSidebarPinnedProvider = StateProvider<bool>((ref) => true);
+
+/// Navigiert zu einem Eintrag: auf Desktop inline, auf Mobile per Route.
+void navigateToEntry(BuildContext context, WidgetRef ref, String entryId) {
+  if (_isDesktop) {
+    ref.read(desktopSelectedEntryProvider.notifier).state = entryId;
+  } else {
+    context.push(AppRoutes.entryDetailPath(entryId));
+  }
+}
 
 class _DesktopShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
@@ -127,6 +139,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
   Widget build(BuildContext context) {
     final pinned = ref.watch(desktopSidebarPinnedProvider);
     final selectedContainer = ref.watch(desktopSelectedContainerProvider);
+    final selectedEntry = ref.watch(desktopSelectedEntryProvider);
 
     final sidebar = AnimatedContainer(
       duration: const Duration(milliseconds: 220),
@@ -140,9 +153,14 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
           : null,
     );
 
-    // Hauptinhalt: ausgewählter Container oder Shell
+    // Hauptinhalt: Eintrag > Container > Shell (Priorität)
     Widget mainContent;
-    if (selectedContainer != null) {
+    if (selectedEntry != null) {
+      mainContent = _DesktopEntryView(
+        entryId: selectedEntry,
+        onClose: () => ref.read(desktopSelectedEntryProvider.notifier).state = null,
+      );
+    } else if (selectedContainer != null) {
       mainContent = _DesktopContainerView(
         containerId: selectedContainer,
         onClose: () => ref.read(desktopSelectedContainerProvider.notifier).state = null,
@@ -703,21 +721,29 @@ class _DesktopContainerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // ContainerDetailScreen direkt eingebettet (kein separates Route-Push)
-        ContainerDetailScreen(containerId: containerId),
-        // Schließen-Button oben rechts
-        Positioned(
-          top: 52, right: 8,
-          child: IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: 'Zurück zum Feed',
-            color: MFColors.textSecondary,
-            onPressed: onClose,
-          ),
-        ),
-      ],
+    return ContainerDetailScreen(
+      containerId: containerId,
+      onBack: onClose,
+    );
+  }
+}
+
+// ── Desktop: Eintrag inline anzeigen ──────────────────────────────────────────
+
+class _DesktopEntryView extends StatelessWidget {
+  final String entryId;
+  final VoidCallback onClose;
+
+  const _DesktopEntryView({
+    required this.entryId,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return EntryDetailScreen(
+      entryId: entryId,
+      onBack: onClose,
     );
   }
 }

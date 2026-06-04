@@ -4,7 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../core/secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
 import '../../data/db/app_database.dart' hide Container;
@@ -17,7 +17,6 @@ import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
 import '../settings/sync_settings_screen.dart';
 
-const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
 const _keyTemperature = 'openrouter_temperature';
@@ -74,10 +73,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadAiSettings() async {
-    final key = await _storage.read(key: _keyApiKey) ?? '';
-    final model = await _storage.read(key: _keyAiModel) ?? '';
-    final tempStr = await _storage.read(key: _keyTemperature);
-    final tokStr = await _storage.read(key: _keyMaxTokens);
+    final key = await secureRead(_keyApiKey) ?? '';
+    final model = await secureRead(_keyAiModel) ?? '';
+    final tempStr = await secureRead(_keyTemperature);
+    final tokStr = await secureRead(_keyMaxTokens);
     if (mounted) {
       setState(() {
         _apiKeyCtrl.text = key;
@@ -90,10 +89,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _saveAiSettings() async {
-    await _storage.write(key: _keyApiKey, value: _apiKeyCtrl.text.trim());
-    await _storage.write(key: _keyAiModel, value: _selectedModel);
-    await _storage.write(key: _keyTemperature, value: _temperature.toString());
-    await _storage.write(key: _keyMaxTokens, value: _maxTokens.toString());
+    await secureWrite(_keyApiKey, _apiKeyCtrl.text.trim());
+    await secureWrite(_keyAiModel, _selectedModel);
+    await secureWrite(_keyTemperature, _temperature.toString());
+    await secureWrite(_keyMaxTokens, _maxTokens.toString());
     if (mounted) {
       setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -316,60 +315,82 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ─── Neuen Vault erstellen ─────────────────────────────────────────────────
 
   Future<void> _createNewVault() async {
-    // Ordner-Picker VOR dem Dialog aufrufen (vermeidet macOS z-order Konflikte)
-    final chosenDir = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Speicherort für neuen Vault wählen',
-    );
-    if (!mounted) return;
-
     final nameCtrl = TextEditingController(text: 'MindFeed');
+    String? chosenDir;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: MFColors.surface,
-        title: const Text('Neuen Vault erstellen',
-            style: TextStyle(color: MFColors.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              chosenDir != null ? 'Ort: $chosenDir' : 'Ort: Standard-Dokumente',
-              style: const TextStyle(fontSize: 11, color: MFColors.textMuted,
-                  fontFamily: 'monospace'),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 2,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: nameCtrl,
-              autofocus: true,
-              style: const TextStyle(color: MFColors.textPrimary),
-              decoration: const InputDecoration(
-                labelText: 'Vault-Name',
-                labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-                border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.border)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.teal)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Neuen Vault erstellen',
+              style: TextStyle(color: MFColors.textPrimary)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                style: const TextStyle(color: MFColors.textPrimary),
+                decoration: const InputDecoration(
+                  labelText: 'Vault-Name',
+                  labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+                  border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
               ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    final path = await FilePicker.platform.getDirectoryPath(
+                      dialogTitle: 'Speicherort wählen',
+                    );
+                    if (path != null) setS(() => chosenDir = path);
+                  } catch (_) {
+                    // Picker nicht verfügbar — Standard-Speicherort wird genutzt
+                  }
+                },
+                icon: const Icon(Icons.folder_outlined, size: 16),
+                label: Text(
+                  chosenDir != null
+                      ? p.basename(chosenDir!)
+                      : 'Speicherort wählen (optional)',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (chosenDir != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    chosenDir!,
+                    style: const TextStyle(
+                        fontSize: 10, color: MFColors.textMuted,
+                        fontFamily: 'monospace'),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: MFColors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+              child: const Text('Erstellen'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen',
-                style: TextStyle(color: MFColors.textMuted)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-                backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
-            child: const Text('Erstellen'),
-          ),
-        ],
       ),
     );
 
@@ -380,8 +401,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final base = chosenDir ?? p.join(dir.path, 'MindFeed');
-      final name = vaultName;
-      final vaultPath = p.join(base, name);
+      final vaultPath = p.join(base, vaultName);
       await Directory(vaultPath).create(recursive: true);
       final db = AppDatabase(p.join(vaultPath, 'mindfeed.db'));
       await db.close();
@@ -395,7 +415,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           title: const Text('Vault erstellt',
               style: TextStyle(color: MFColors.textPrimary)),
           content: Text(
-            'Vault "$name" wurde angelegt.\nDie App wird jetzt neu geladen.',
+            'Vault "$vaultName" wurde angelegt.\nDie App wird jetzt neu geladen.',
             style: const TextStyle(color: MFColors.textSecondary, fontSize: 13),
           ),
           actions: [

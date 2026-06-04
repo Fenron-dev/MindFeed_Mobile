@@ -10,7 +10,7 @@ import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/sync_provider.dart';
-import '../../widgets/app_shell.dart' show appScaffoldKey;
+import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToEntry;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
 
@@ -248,8 +248,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (ctx, i) => _GridCard(
                         item: entries[i],
-                        onTap: () => context.push(
-                            AppRoutes.entryDetailPath(entries[i].entry.id)),
+                        onTap: () => navigateToEntry(
+                            context, ref, entries[i].entry.id),
                       ),
                       childCount: entries.length,
                     ),
@@ -321,8 +321,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       child: EntryCard(
                         item: item,
                         compact: _viewMode == 'view_list',
-                        onTap: () => context.push(
-                            AppRoutes.entryDetailPath(item.entry.id)),
+                        onTap: () => navigateToEntry(context, ref, item.entry.id),
                       ),
                     );
                   },

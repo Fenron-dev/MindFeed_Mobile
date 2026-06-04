@@ -7,12 +7,15 @@ import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../data/repositories/container_repository.dart';
 import '../../features/feed/feed_provider.dart';
+import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/entry_card.dart';
 import 'container_provider.dart';
 
 class ContainerDetailScreen extends ConsumerStatefulWidget {
   final String containerId;
-  const ContainerDetailScreen({super.key, required this.containerId});
+  /// Desktop: Callback statt context.pop() für den Zurück-Pfeil.
+  final VoidCallback? onBack;
+  const ContainerDetailScreen({super.key, required this.containerId, this.onBack});
 
   @override
   ConsumerState<ContainerDetailScreen> createState() =>
@@ -75,7 +78,7 @@ class _ContainerDetailScreenState
         backgroundColor: MFColors.bg,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: MFColors.textSecondary),
-          onPressed: () => context.pop(),
+          onPressed: widget.onBack ?? () => context.pop(),
         ),
         title: container != null
             ? Row(mainAxisSize: MainAxisSize.min, children: [
@@ -259,8 +262,8 @@ class _ContainerDetailScreenState
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (ctx, i) => EntryCard(
                       item: entries[i],
-                      onTap: () => context.push(
-                          AppRoutes.entryDetailPath(entries[i].entry.id)),
+                      onTap: () => navigateToEntry(
+                          context, ref, entries[i].entry.id),
                     ),
                   ),
                 ),

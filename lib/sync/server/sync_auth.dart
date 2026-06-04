@@ -1,11 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
-const _storage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-);
+import '../../core/secure_storage.dart';
 
 const _kSecretKey = 'mindfeed_sync_jwt_secret';
 const _kRefreshTokensKey = 'mindfeed_sync_refresh_tokens';
@@ -19,12 +15,12 @@ class SyncAuth {
   // ── Server-side secret ────────────────────────────────────────────────────
 
   static Future<String> _getOrCreateSecret() async {
-    String? secret = await _storage.read(key: _kSecretKey);
+    String? secret = await secureRead(_kSecretKey);
     if (secret == null || secret.isEmpty) {
       final rng = Random.secure();
       final bytes = List<int>.generate(32, (_) => rng.nextInt(256));
       secret = base64Url.encode(bytes);
-      await _storage.write(key: _kSecretKey, value: secret);
+      await secureWrite(_kSecretKey, secret);
     }
     return secret;
   }
@@ -88,8 +84,6 @@ class SyncAuth {
   }
 
   // ── Pairing code → 6-digit PIN ────────────────────────────────────────────
-  // The server generates a random 6-digit code and stores it with an expiry.
-  // On claim, the client sends the code; the server exchanges it for tokens.
 
   static String generate6DigitCode() {
     final rng = Random.secure();
@@ -99,7 +93,7 @@ class SyncAuth {
   // ── Refresh token persistence (server-side) ───────────────────────────────
 
   static Future<Map<String, String>> _loadRefreshTokens() async {
-    final raw = await _storage.read(key: _kRefreshTokensKey);
+    final raw = await secureRead(_kRefreshTokensKey);
     if (raw == null || raw.isEmpty) return {};
     try {
       return (jsonDecode(raw) as Map<String, dynamic>)
@@ -110,7 +104,7 @@ class SyncAuth {
   }
 
   static Future<void> _saveRefreshTokens(Map<String, String> tokens) async {
-    await _storage.write(key: _kRefreshTokensKey, value: jsonEncode(tokens));
+    await secureWrite(_kRefreshTokensKey, jsonEncode(tokens));
   }
 
   static Future<void> revokeClient(String clientDeviceId) async {
@@ -122,18 +116,18 @@ class SyncAuth {
   // ── Client-side token storage ─────────────────────────────────────────────
 
   static Future<void> saveClientTokens(String access, String refresh) async {
-    await _storage.write(key: _kClientAccessKey, value: access);
-    await _storage.write(key: _kClientRefreshKey, value: refresh);
+    await secureWrite(_kClientAccessKey, access);
+    await secureWrite(_kClientRefreshKey, refresh);
   }
 
   static Future<String?> loadClientAccessToken() =>
-      _storage.read(key: _kClientAccessKey);
+      secureRead(_kClientAccessKey);
 
   static Future<String?> loadClientRefreshToken() =>
-      _storage.read(key: _kClientRefreshKey);
+      secureRead(_kClientRefreshKey);
 
   static Future<void> clearClientTokens() async {
-    await _storage.delete(key: _kClientAccessKey);
-    await _storage.delete(key: _kClientRefreshKey);
+    await secureDelete(_kClientAccessKey);
+    await secureDelete(_kClientRefreshKey);
   }
 }

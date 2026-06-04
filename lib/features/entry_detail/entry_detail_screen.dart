@@ -5,7 +5,7 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../core/secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -19,17 +19,19 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
+import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
 
-const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
 
 class EntryDetailScreen extends ConsumerStatefulWidget {
   final String entryId;
-  const EntryDetailScreen({super.key, required this.entryId});
+  /// Desktop: Callback statt context.pop() für den Zurück-Pfeil.
+  final VoidCallback? onBack;
+  const EntryDetailScreen({super.key, required this.entryId, this.onBack});
 
   @override
   ConsumerState<EntryDetailScreen> createState() => _EntryDetailScreenState();
@@ -209,7 +211,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   }
 
   Future<void> _enrichWithAi(String entryId, String body, String? title) async {
-    final apiKey = await _storage.read(key: _keyApiKey) ?? '';
+    final apiKey = await secureRead(_keyApiKey) ?? '';
     if (apiKey.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -243,9 +245,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         if (descProp?.value?.isNotEmpty == true) descProp!.value!,
       ];
 
-      final model = await _storage.read(key: _keyAiModel) ?? '';
-      final tempStr = await _storage.read(key: 'openrouter_temperature');
-      final tokStr = await _storage.read(key: 'openrouter_max_tokens');
+      final model = await secureRead(_keyAiModel) ?? '';
+      final tempStr = await secureRead('openrouter_temperature');
+      final tokStr = await secureRead('openrouter_max_tokens');
       final svc = OpenRouterService(
         apiKey: apiKey,
         model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
@@ -418,7 +420,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
             leading: IconButton(
               icon: const Icon(Icons.arrow_back,
                   color: MFColors.textSecondary),
-              onPressed: () => context.pop(),
+              onPressed: widget.onBack ?? () => context.pop(),
             ),
             actions: [
               // Home-Button: zurück zum Feed-Root
@@ -738,8 +740,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                                   title.toLowerCase())
                               .firstOrNull;
                           if (found != null && mounted) {
-                            context.push(AppRoutes.entryDetailPath(
-                                found.entry.id));
+                            navigateToEntry(context, ref, found.entry.id);
                           }
                         },
                       ),
@@ -2456,8 +2457,7 @@ class _BacklinksSection extends ConsumerWidget {
                   child: EntryCard(
                     item: bl,
                     compact: true,
-                    onTap: () => context.push(
-                        AppRoutes.entryDetailPath(bl.entry.id)),
+                    onTap: () => navigateToEntry(context, ref, bl.entry.id),
                   ),
                 )),
           ],
@@ -2640,8 +2640,7 @@ class _SubNotesSection extends ConsumerWidget {
                   child: EntryCard(
                     item: note,
                     compact: true,
-                    onTap: () => context.push(
-                        AppRoutes.entryDetailPath(note.entry.id)),
+                    onTap: () => navigateToEntry(context, ref, note.entry.id),
                   ),
                 )),
           ],
