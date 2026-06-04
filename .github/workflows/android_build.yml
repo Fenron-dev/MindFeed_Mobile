@@ -5,12 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write   # Nötig für gh release create
-
 jobs:
   build:
-    name: Build & Release APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -39,26 +36,9 @@ jobs:
       - name: APK bauen (Debug)
         run: flutter build apk --debug --target-platform android-arm64
 
-      - name: APK umbenennen
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          cp build/app/outputs/flutter-apk/app-debug.apk \
-             build/app/outputs/flutter-apk/mindfeed-debug-${SHORT_SHA}.apk
-          echo "APK_NAME=mindfeed-debug-${SHORT_SHA}.apk" >> $GITHUB_ENV
-          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
-
-      - name: GitHub Release aktualisieren (latest-debug)
-        uses: softprops/action-gh-release@v2
+      - name: Artifact hochladen
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: latest-debug
-          name: "Latest Debug Build"
-          prerelease: true
-          body: |
-            Automatischer Debug-Build vom ${{ github.event.head_commit.timestamp || 'letzten Push' }}
-            Commit: `${{ github.sha }}`
-
-            **Installation:**
-            1. APK herunterladen
-            2. Android: Einstellungen → Unbekannte Quellen erlauben
-            3. APK tippen und installieren
-          files: build/app/outputs/flutter-apk/${{ env.APK_NAME }}
+          name: MindFeed-Android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14

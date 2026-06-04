@@ -5,12 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
-    name: Build & Release macOS
+    name: Build macOS
     runs-on: macos-latest
 
     steps:
@@ -33,7 +30,7 @@ jobs:
       - name: Flutter Workspace vorbereiten (pod install + Flutter-Artefakte)
         run: flutter build macos --config-only
 
-      - name: macOS App bauen via xcodebuild (kein Zertifikat nötig)
+      - name: macOS App bauen via xcodebuild
         run: |
           cd macos
           xcodebuild \
@@ -44,39 +41,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             SYMROOT="$PWD/../build/macos/Build/Products" \
-            OBJROOT="$PWD/../build/macos/Build/Intermediates" \
-            | xcpretty || cat /dev/stdin
+            OBJROOT="$PWD/../build/macos/Build/Intermediates"
 
       - name: App zippen
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          APP_DIR="build/macos/Build/Products/Debug"
-          ZIP_NAME="MindFeed-macOS-debug-${SHORT_SHA}.zip"
-          cd "$APP_DIR"
-          zip -r --symlinks "../../${ZIP_NAME}" "mindfeed_mobile.app"
-          cd -
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+          cd build/macos/Build/Products/Debug
+          zip -r --symlinks MindFeed-macOS.zip mindfeed_mobile.app
 
-      - name: Quarantine-Flag entfernen
-        run: xattr -dr com.apple.quarantine "build/macos/${ZIP_NAME}" 2>/dev/null || true
-
-      - name: GitHub Release aktualisieren (latest-debug)
-        uses: softprops/action-gh-release@v2
+      - name: Artifact hochladen
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: latest-debug
-          name: "Latest Debug Build"
-          prerelease: true
-          body: |
-            Automatischer Debug-Build vom ${{ github.event.head_commit.timestamp || 'letzten Push' }}
-            Commit: `${{ github.sha }}`
-
-            ## Android
-            - APK herunterladen → auf Gerät installieren
-            - Einstellungen → Unbekannte Quellen erlauben
-
-            ## macOS
-            - ZIP herunterladen und entpacken
-            - Beim ersten Start: Rechtsklick → Öffnen (Gatekeeper-Bypass)
-            - Oder im Terminal: `xattr -dr com.apple.quarantine MindFeed.app`
-          files: build/macos/${{ env.ZIP_NAME }}
+          name: MindFeed-macOS-debug
+          path: build/macos/Build/Products/Debug/MindFeed-macOS.zip
+          retention-days: 14
