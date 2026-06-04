@@ -205,113 +205,122 @@ Router syncRouter(AppDatabase db, SyncServer server) {
 
     final conflicts = <SyncConflict>[];
 
-    await db.transaction(() async {
-      // 1. Apply tombstones first
-      for (final t in clientTombstones) {
-        final deletedAt = DateTime.tryParse(t.deletedAt) ?? DateTime.now().toUtc();
-        if (t.entityType == 'entry') {
-          await (db.update(db.entries)..where((e) => e.id.equals(t.entityId)))
-              .write(EntriesCompanion(deletedAt: Value(deletedAt)));
-        } else if (t.entityType == 'container') {
-          await (db.update(db.containers)..where((c) => c.id.equals(t.entityId)))
-              .write(ContainersCompanion(deletedAt: Value(deletedAt)));
-        }
-      }
-
-      // 2. Upsert entries (LWW)
-      for (final incoming in clientEntries) {
-        final existing = await (db.select(db.entries)
-              ..where((e) => e.id.equals(incoming.id)))
-            .getSingleOrNull();
-
-        // Skip if already tombstoned locally
-        if (existing?.deletedAt != null) continue;
-
-        final incomingTs = DateTime.tryParse(incoming.updatedAt);
-        if (existing != null && incomingTs != null) {
-          if (!incomingTs.isAfter(existing.updatedAt)) {
-            conflicts.add(SyncConflict(
-              entityType: 'entry',
-              entityId: incoming.id,
-              serverModifiedAt: existing.updatedAt.toIso8601String(),
-            ));
-            continue;
+    try {
+      await db.transaction(() async {
+        // 1. Tombstones zuerst
+        for (final t in clientTombstones) {
+          final deletedAt = DateTime.tryParse(t.deletedAt) ?? DateTime.now().toUtc();
+          if (t.entityType == 'entry') {
+            await (db.update(db.entries)..where((e) => e.id.equals(t.entityId)))
+                .write(EntriesCompanion(deletedAt: Value(deletedAt)));
+          } else if (t.entityType == 'container') {
+            await (db.update(db.containers)..where((c) => c.id.equals(t.entityId)))
+                .write(ContainersCompanion(deletedAt: Value(deletedAt)));
           }
         }
 
-        // Upsert the entry row
-        await db.into(db.entries).insertOnConflictUpdate(EntriesCompanion(
-          id: Value(incoming.id),
-          createdAt: Value(DateTime.tryParse(incoming.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
-          updatedAt: Value(incomingTs?.toUtc() ?? DateTime.now().toUtc()),
-          type: Value(incoming.type),
-          title: Value(incoming.title),
-          body: Value(incoming.body),
-          status: Value(incoming.status),
-          pinned: Value(incoming.pinned),
-          geoLat: Value(incoming.geoLat),
-          geoLng: Value(incoming.geoLng),
-          reminderAt: Value(incoming.reminderAt != null ? DateTime.tryParse(incoming.reminderAt!) : null),
-          sourceUrl: Value(incoming.sourceUrl),
-          sourceApp: Value(incoming.sourceApp),
-          lang: Value(incoming.lang),
-          aiEnrichedAt: Value(incoming.aiEnrichedAt != null ? DateTime.tryParse(incoming.aiEnrichedAt!) : null),
-          syncUpdatedAt: Value(DateTime.now().toUtc()),
-        ));
+        // 2. Containers VOR Entries (FK-Constraint: entry_containers → containers)
+        for (final incoming in clientContainers) {
+          final existing = await (db.select(db.containers)
+                ..where((c) => c.id.equals(incoming.id)))
+              .getSingleOrNull();
 
-        // Sync containers relation
-        await (db.delete(db.entryContainers)
-              ..where((ec) => ec.entryId.equals(incoming.id)))
-            .go();
-        for (final cid in incoming.containers) {
-          await db.into(db.entryContainers).insertOnConflictUpdate(
-            EntryContainersCompanion(
-              entryId: Value(incoming.id),
-              containerId: Value(cid),
-            ),
-          );
+          if (existing?.deletedAt != null) continue;
+
+          final incomingTs = DateTime.tryParse(incoming.updatedAt);
+          if (existing != null && incomingTs != null) {
+            if (!incomingTs.isAfter(existing.updatedAt)) {
+              conflicts.add(SyncConflict(
+                entityType: 'container',
+                entityId: incoming.id,
+                serverModifiedAt: existing.updatedAt.toIso8601String(),
+              ));
+              continue;
+            }
+          }
+
+          await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
+            id: Value(incoming.id),
+            kind: Value(incoming.kind),
+            name: Value(incoming.name),
+            description: Value(incoming.description),
+            icon: Value(incoming.icon),
+            color: Value(incoming.color),
+            createdAt: Value(DateTime.tryParse(incoming.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
+            updatedAt: Value(incomingTs?.toUtc() ?? DateTime.now().toUtc()),
+            archived: Value(incoming.archived),
+            filterTag: Value(incoming.filterTag),
+            filterStatus: Value(incoming.filterStatus),
+            filterType: Value(incoming.filterType),
+            sortOrder: Value(incoming.sortOrder),
+            viewMode: Value(incoming.viewMode),
+            parentId: Value(incoming.parentId),
+          ));
         }
-      }
 
-      // 3. Upsert containers (LWW)
-      for (final incoming in clientContainers) {
-        final existing = await (db.select(db.containers)
-              ..where((c) => c.id.equals(incoming.id)))
-            .getSingleOrNull();
+        // 3. Entries (nach Containers, damit FK-Referenzen existieren)
+        for (final incoming in clientEntries) {
+          final existing = await (db.select(db.entries)
+                ..where((e) => e.id.equals(incoming.id)))
+              .getSingleOrNull();
 
-        if (existing?.deletedAt != null) continue;
+          if (existing?.deletedAt != null) continue;
 
-        final incomingTs = DateTime.tryParse(incoming.updatedAt);
-        if (existing != null && incomingTs != null) {
-          if (!incomingTs.isAfter(existing.updatedAt)) {
-            conflicts.add(SyncConflict(
-              entityType: 'container',
-              entityId: incoming.id,
-              serverModifiedAt: existing.updatedAt.toIso8601String(),
-            ));
-            continue;
+          final incomingTs = DateTime.tryParse(incoming.updatedAt);
+          if (existing != null && incomingTs != null) {
+            if (!incomingTs.isAfter(existing.updatedAt)) {
+              conflicts.add(SyncConflict(
+                entityType: 'entry',
+                entityId: incoming.id,
+                serverModifiedAt: existing.updatedAt.toIso8601String(),
+              ));
+              continue;
+            }
+          }
+
+          await db.into(db.entries).insertOnConflictUpdate(EntriesCompanion(
+            id: Value(incoming.id),
+            createdAt: Value(DateTime.tryParse(incoming.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
+            updatedAt: Value(incomingTs?.toUtc() ?? DateTime.now().toUtc()),
+            type: Value(incoming.type),
+            title: Value(incoming.title),
+            body: Value(incoming.body),
+            status: Value(incoming.status),
+            pinned: Value(incoming.pinned),
+            geoLat: Value(incoming.geoLat),
+            geoLng: Value(incoming.geoLng),
+            reminderAt: Value(incoming.reminderAt != null ? DateTime.tryParse(incoming.reminderAt!) : null),
+            sourceUrl: Value(incoming.sourceUrl),
+            sourceApp: Value(incoming.sourceApp),
+            lang: Value(incoming.lang),
+            aiEnrichedAt: Value(incoming.aiEnrichedAt != null ? DateTime.tryParse(incoming.aiEnrichedAt!) : null),
+            syncUpdatedAt: Value(DateTime.now().toUtc()),
+          ));
+
+          // Entry-Container-Relationen: nur für existierende Container
+          await (db.delete(db.entryContainers)
+                ..where((ec) => ec.entryId.equals(incoming.id)))
+              .go();
+          for (final cid in incoming.containers) {
+            final containerExists = await (db.select(db.containers)
+                  ..where((c) => c.id.equals(cid) & c.deletedAt.isNull()))
+                .getSingleOrNull();
+            if (containerExists == null) continue;
+            await db.into(db.entryContainers).insertOnConflictUpdate(
+              EntryContainersCompanion(
+                entryId: Value(incoming.id),
+                containerId: Value(cid),
+              ),
+            );
           }
         }
-
-        await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
-          id: Value(incoming.id),
-          kind: Value(incoming.kind),
-          name: Value(incoming.name),
-          description: Value(incoming.description),
-          icon: Value(incoming.icon),
-          color: Value(incoming.color),
-          createdAt: Value(DateTime.tryParse(incoming.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
-          updatedAt: Value(incomingTs?.toUtc() ?? DateTime.now().toUtc()),
-          archived: Value(incoming.archived),
-          filterTag: Value(incoming.filterTag),
-          filterStatus: Value(incoming.filterStatus),
-          filterType: Value(incoming.filterType),
-          sortOrder: Value(incoming.sortOrder),
-          viewMode: Value(incoming.viewMode),
-          parentId: Value(incoming.parentId),
-        ));
-      }
-    });
+      });
+    } catch (e) {
+      return Response.internalServerError(
+        body: jsonEncode({'error': 'transaction_failed', 'detail': e.toString()}),
+        headers: {'content-type': 'application/json'},
+      );
+    }
 
     return Response.ok(
       jsonEncode({'conflicts': conflicts.map((c) => {

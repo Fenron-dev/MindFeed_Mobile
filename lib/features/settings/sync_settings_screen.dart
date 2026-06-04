@@ -164,21 +164,38 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
             ),
             _IpTile(),
           ] else ...[
-            ListTile(
-              leading: const Icon(Icons.link),
-              title: const Text('Mit Server verbinden'),
-              subtitle: serverUrl != null
-                  ? Text(serverUrl, overflow: TextOverflow.ellipsis)
-                  : const Text('Noch nicht verbunden'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PairingFlowScreen()),
-                );
-                setState(() {});
-              },
-            ),
+            if (serverUrl != null) ...[
+              // Bereits verbunden
+              ListTile(
+                leading: const Icon(Icons.check_circle_outline, color: Colors.green),
+                title: const Text('Verbunden'),
+                subtitle: Text(serverUrl, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.link_off_outlined),
+                title: const Text('Anderen Server koppeln'),
+                subtitle: const Text('Verbindung ersetzen'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const PairingFlowScreen()));
+                  setState(() {});
+                },
+              ),
+            ] else ...[
+              ListTile(
+                leading: const Icon(Icons.link),
+                title: const Text('Mit Server verbinden'),
+                subtitle: const Text('Noch nicht verbunden'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const PairingFlowScreen()));
+                  setState(() {});
+                },
+              ),
+            ],
           ],
 
           const SizedBox(height: 24),
@@ -384,15 +401,19 @@ class _RoleChip extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 20, color: selected ? cs.primary : Colors.grey),
+            Icon(icon, size: 20,
+                color: selected ? cs.onPrimaryContainer : Colors.grey),
             const SizedBox(height: 6),
             Text(label,
                 style: TextStyle(
                     fontWeight: FontWeight.w600,
-                    color: selected ? cs.primary : null)),
+                    color: selected ? cs.onPrimaryContainer : null)),
             Text(subtitle,
-                style:
-                    const TextStyle(fontSize: 11, color: Colors.grey)),
+                style: TextStyle(
+                    fontSize: 11,
+                    color: selected
+                        ? cs.onPrimaryContainer.withValues(alpha: 0.75)
+                        : Colors.grey)),
           ],
         ),
       ),
