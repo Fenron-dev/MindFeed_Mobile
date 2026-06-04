@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart'
     if (dart.library.html) 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'core/constants.dart';
+import 'sync/sync_provider.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
 import 'core/di.dart';
@@ -171,6 +172,8 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   @override
   void initState() {
     super.initState();
+    // Scheduler eager initialisieren → startet Server falls Rolle = Server
+    ref.read(syncSchedulerProvider);
     _initShareIntent();
   }
 

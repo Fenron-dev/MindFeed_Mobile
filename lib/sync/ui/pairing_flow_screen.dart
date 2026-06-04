@@ -206,11 +206,37 @@ class _QrDisplayTab extends ConsumerStatefulWidget {
 
 class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   String? _code;
+  String? _localIp;
+  bool _serverStarting = false;
 
   @override
   void initState() {
     super.initState();
+    _startServerAndGenerate();
+  }
+
+  Future<void> _startServerAndGenerate() async {
+    setState(() => _serverStarting = true);
+    // Eigene IP ermitteln
+    try {
+      final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback) {
+            _localIp = addr.address;
+            break;
+          }
+        }
+        if (_localIp != null) break;
+      }
+    } catch (_) {}
+
+    // Server starten (falls noch nicht läuft)
+    final server = ref.read(syncServerProvider);
+    if (!server.isRunning) await server.start();
+
     _generate();
+    if (mounted) setState(() => _serverStarting = false);
   }
 
   void _generate() {
@@ -221,11 +247,23 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   @override
   Widget build(BuildContext context) {
     final code = _code;
-    if (code == null) return const Center(child: CircularProgressIndicator());
 
-    // Build the QR data URI
-    // In a real scenario, use the device's IP. For now use a placeholder.
-    final qrData = 'mindfeed://pair?url=${AppSettings.getSyncServerUrl() ?? ''}&code=$code';
+    if (_serverStarting || code == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('Server wird gestartet…', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
+    // QR-Daten: eigene IP:Port + Pairing-Code
+    final ip = _localIp ?? '127.0.0.1';
+    final qrData = 'mindfeed://pair?url=http://$ip:8766&code=$code';
 
     return Center(
       child: Padding(
@@ -238,8 +276,25 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
               style: TextStyle(fontSize: 16),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            QrImageView(data: qrData, size: 220),
+            const SizedBox(height: 8),
+            Text(
+              'Server: http://$ip:8766',
+              style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: 'monospace'),
+            ),
+            const SizedBox(height: 16),
+            // Weißer Hintergrund damit QR-Code in Dark Mode sichtbar ist
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: QrImageView(
+                data: qrData,
+                size: 200,
+                backgroundColor: Colors.white,
+              ),
+            ),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),

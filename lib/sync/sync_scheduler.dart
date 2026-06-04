@@ -11,8 +11,22 @@ class SyncScheduler with WidgetsBindingObserver {
   SyncScheduler(this._ref) {
     WidgetsBinding.instance.addObserver(this);
     _setupTimer();
+    Future.microtask(_onAppStart);
+  }
+
+  Future<void> _onAppStart() async {
+    // Server automatisch starten wenn Rolle = Server
+    if (AppSettings.getSyncRole() == SyncRole.server && AppSettings.getSyncEnabled()) {
+      final server = _ref.read(syncServerProvider);
+      if (!server.isRunning) await server.start();
+      await _ref.read(mdnsServiceProvider).startAdvertising(
+        AppSettings.getDeviceId(),
+        AppSettings.getDeviceName(),
+      );
+    }
+    // Sync beim App-Start ausführen (falls konfiguriert)
     if (AppSettings.getSyncOnAppStart() && AppSettings.getSyncEnabled()) {
-      Future.microtask(_doSync);
+      await _doSync();
     }
   }
 
