@@ -12,6 +12,19 @@ import 'routes/sync_routes.dart';
 
 const kSyncPort = 8766;
 
+class SyncClientInfo {
+  final String deviceId;
+  final String deviceName;
+  final String remoteIp;
+  final DateTime connectedAt;
+  const SyncClientInfo({
+    required this.deviceId,
+    required this.deviceName,
+    required this.remoteIp,
+    required this.connectedAt,
+  });
+}
+
 /// In-memory Pairing-Code Eintrag (5 Minuten gültig)
 class PairingCode {
   final String code;
@@ -84,6 +97,20 @@ class SyncServer {
     } catch (_) {
       return null;
     }
+  }
+
+  // ── Verbundene Clients ────────────────────────────────────────────────────
+
+  final connectedClients = <SyncClientInfo>[];
+
+  void registerClient(String deviceId, String deviceName, String remoteIp) {
+    connectedClients.removeWhere((c) => c.deviceId == deviceId);
+    connectedClients.add(SyncClientInfo(
+      deviceId: deviceId,
+      deviceName: deviceName,
+      remoteIp: remoteIp,
+      connectedAt: DateTime.now(),
+    ));
   }
 
   // ── Pairing-Code Verwaltung ───────────────────────────────────────────────

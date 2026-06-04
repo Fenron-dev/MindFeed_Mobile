@@ -5,6 +5,7 @@ import '../client/sync_api_client.dart';
 import '../../data/db/app_database.dart';
 import '../../data/db/daos/entry_dao.dart';
 import '../../data/db/daos/container_dao.dart';
+import '../../data/db/tables/tags.dart';
 import '../../services/app_settings.dart';
 
 const _uuid = Uuid();
@@ -210,18 +211,31 @@ class SyncService {
         }
 
         // Sync properties
-        await (db.delete(db.entryProperties)
-              ..where((p) => p.entryId.equals(se.id)))
-            .go();
+        await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(se.id))).go();
         for (final prop in se.properties) {
+          final key = prop['key'] as String? ?? '';
+          if (key.isEmpty) continue;
           await db.into(db.entryProperties).insertOnConflictUpdate(
             EntryPropertiesCompanion(
-              id: Value('prop-${_uuid.v4()}'),
+              id: Value('prop-${se.id}-$key'),
               entryId: Value(se.id),
-              key: Value(prop['key'] as String? ?? ''),
+              key: Value(key),
               value: Value(prop['value'] as String?),
               type: Value(prop['type'] as String? ?? 'text'),
             ),
+          );
+        }
+
+        // Sync tags
+        await (db.delete(db.entryTags)..where((t) => t.entryId.equals(se.id))).go();
+        for (final tagName in se.tags) {
+          if (tagName.isEmpty) continue;
+          final tagId = 'tag-$tagName';
+          await db.into(db.tags).insertOnConflictUpdate(
+            TagsCompanion(id: Value(tagId), name: Value(tagName)),
+          );
+          await db.into(db.entryTags).insertOnConflictUpdate(
+            EntryTagsCompanion(entryId: Value(se.id), tagId: Value(tagId)),
           );
         }
       }

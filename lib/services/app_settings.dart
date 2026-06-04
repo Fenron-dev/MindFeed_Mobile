@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -503,8 +504,16 @@ class AppSettings {
     return newId;
   }
 
-  static String getDeviceName() =>
-      _prefs?.getString('sync_device_name') ?? 'MindFeed Mobile';
+  static String getDeviceName() {
+    final saved = _prefs?.getString('sync_device_name');
+    if (saved != null && saved.isNotEmpty) return saved;
+    // Hostname als Fallback (z.B. "Dennis-MacBook" oder "iPhone von Dennis")
+    try {
+      return Platform.localHostname;
+    } catch (_) {
+      return 'MindFeed';
+    }
+  }
 
   static Future<void> saveDeviceName(String name) async =>
       _prefs?.setString('sync_device_name', name);

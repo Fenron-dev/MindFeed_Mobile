@@ -3,6 +3,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import '../../dto/sync_dto.dart';
 import '../../../data/db/app_database.dart';
+import '../../../data/db/tables/tags.dart';
 import '../sync_server.dart';
 import 'package:drift/drift.dart';
 
@@ -297,10 +298,37 @@ Router syncRouter(AppDatabase db, SyncServer server) {
             syncUpdatedAt: Value(DateTime.now().toUtc()),
           ));
 
-          // Entry-Container-Relationen: nur für existierende Container
-          await (db.delete(db.entryContainers)
-                ..where((ec) => ec.entryId.equals(incoming.id)))
-              .go();
+          // Properties sync
+          await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(incoming.id))).go();
+          for (final prop in incoming.properties) {
+            final key = prop['key'] as String? ?? '';
+            if (key.isEmpty) continue;
+            await db.into(db.entryProperties).insertOnConflictUpdate(
+              EntryPropertiesCompanion(
+                id: Value('prop-${incoming.id}-$key'),
+                entryId: Value(incoming.id),
+                key: Value(key),
+                value: Value(prop['value'] as String?),
+                type: Value(prop['type'] as String? ?? 'text'),
+              ),
+            );
+          }
+
+          // Tags sync
+          await (db.delete(db.entryTags)..where((t) => t.entryId.equals(incoming.id))).go();
+          for (final tagName in incoming.tags) {
+            if (tagName.isEmpty) continue;
+            final tagId = 'tag-$tagName';
+            await db.into(db.tags).insertOnConflictUpdate(
+              TagsCompanion(id: Value(tagId), name: Value(tagName)),
+            );
+            await db.into(db.entryTags).insertOnConflictUpdate(
+              EntryTagsCompanion(entryId: Value(incoming.id), tagId: Value(tagId)),
+            );
+          }
+
+          // Container-Relationen: nur für existierende Container
+          await (db.delete(db.entryContainers)..where((ec) => ec.entryId.equals(incoming.id))).go();
           for (final cid in incoming.containers) {
             final containerExists = await (db.select(db.containers)
                   ..where((c) => c.id.equals(cid) & c.deletedAt.isNull()))

@@ -33,6 +33,11 @@ Router pairingRouter(SyncServer server) {
     final tokens = server.issueTokens(deviceId, deviceName);
     server.pairingCodes.remove(match);
 
+    // Client als verbunden registrieren
+    final remoteIp = req.headers['x-forwarded-for'] ??
+        req.context['shelf.io.connection_info'].toString();
+    server.registerClient(deviceId, deviceName, remoteIp);
+
     return Response.ok(
       jsonEncode({
         'accessToken': tokens.access,

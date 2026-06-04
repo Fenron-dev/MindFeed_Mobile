@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/constants.dart';
+import '../core/router.dart';
 import '../core/theme.dart';
 import '../data/repositories/container_repository.dart';
 import '../features/containers/container_provider.dart';
@@ -101,34 +103,90 @@ class _AppShellState extends State<AppShell> {
 
 // ── Desktop-Layout: permanente Sidebar + Content ──────────────────────────────
 
-class _DesktopShell extends StatelessWidget {
+class _DesktopShell extends ConsumerWidget {
   final StatefulNavigationShell shell;
   const _DesktopShell({required this.shell});
 
   void _go(int index) => shell.goBranch(index);
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      key: appScaffoldKey,
-      body: Row(
-        children: [
-          // Linke Sidebar (feste Breite 240px)
-          SizedBox(
-            width: 240,
-            child: _DesktopSidebar(
-              currentIndex: shell.currentIndex,
-              onDestinationSelected: _go,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.read(routerProvider);
+
+    // Plattform-aware: Cmd auf macOS, Ctrl auf Windows/Linux
+    final modifier = Platform.isMacOS
+        ? const CharacterActivator('n', meta: true)
+        : const CharacterActivator('n', control: true);
+    final searchShortcut = Platform.isMacOS
+        ? const CharacterActivator('f', meta: true)
+        : const CharacterActivator('f', control: true);
+    final syncShortcut = Platform.isMacOS
+        ? const CharacterActivator('r', meta: true)
+        : const CharacterActivator('r', control: true);
+    final settingsShortcut = Platform.isMacOS
+        ? const CharacterActivator(',', meta: true)
+        : const CharacterActivator(',', control: true);
+
+    return Shortcuts(
+      shortcuts: {
+        modifier: const _NewEntryIntent(),
+        searchShortcut: const _SearchIntent(),
+        syncShortcut: const _SyncIntent(),
+        settingsShortcut: const _SettingsIntent(),
+      },
+      child: Actions(
+        actions: {
+          _NewEntryIntent: CallbackAction<_NewEntryIntent>(
+            onInvoke: (_) => router.push(AppRoutes.capture),
+          ),
+          _SearchIntent: CallbackAction<_SearchIntent>(
+            onInvoke: (_) => _go(1),
+          ),
+          _SyncIntent: CallbackAction<_SyncIntent>(
+            onInvoke: (_) {
+              // Trigger sync via provider — later can be ref.read(syncStateProvider.notifier).triggerSync()
+              return null;
+            },
+          ),
+          _SettingsIntent: CallbackAction<_SettingsIntent>(
+            onInvoke: (_) => _go(2),
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            key: appScaffoldKey,
+            body: Row(
+              children: [
+                SizedBox(
+                  width: 240,
+                  child: _DesktopSidebar(
+                    currentIndex: shell.currentIndex,
+                    onDestinationSelected: _go,
+                  ),
+                ),
+                const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
+                Expanded(child: shell),
+              ],
             ),
           ),
-          // Vertikaler Trennstrich
-          const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
-          // Hauptinhalt
-          Expanded(child: shell),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _NewEntryIntent extends Intent {
+  const _NewEntryIntent();
+}
+class _SearchIntent extends Intent {
+  const _SearchIntent();
+}
+class _SyncIntent extends Intent {
+  const _SyncIntent();
+}
+class _SettingsIntent extends Intent {
+  const _SettingsIntent();
 }
 
 class _DesktopSidebar extends ConsumerWidget {
@@ -176,6 +234,28 @@ class _DesktopSidebar extends ConsumerWidget {
                       color: MFColors.textPrimary)),
             ]),
           ),
+          const Divider(color: MFColors.border, height: 1),
+          const SizedBox(height: 8),
+
+          // Neu-Button (prominent, ersetzt den weit entfernten FAB)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.capture),
+                icon: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('Neuer Eintrag'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: MFColors.teal,
+                  foregroundColor: MFColors.bg,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           const Divider(color: MFColors.border, height: 1),
           const SizedBox(height: 6),
 

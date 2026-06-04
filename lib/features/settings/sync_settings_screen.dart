@@ -116,13 +116,24 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
               ),
             ),
           const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: syncState.status == SyncStatus.syncing
-                ? null
-                : () => ref.read(syncStateProvider.notifier).triggerSync(),
-            icon: const Icon(Icons.sync),
-            label: const Text('Jetzt synchronisieren'),
-          ),
+          if (_role == SyncRole.server) ...[
+            // Server: zeigt verbundene Clients statt Sync-Button
+            _ConnectedClientsWidget(),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: null,
+              icon: const Icon(Icons.info_outline, size: 16),
+              label: const Text('Als Server synchronisieren Clients automatisch'),
+            ),
+          ] else ...[
+            FilledButton.icon(
+              onPressed: syncState.status == SyncStatus.syncing
+                  ? null
+                  : () => ref.read(syncStateProvider.notifier).triggerSync(),
+              icon: const Icon(Icons.sync),
+              label: const Text('Jetzt synchronisieren'),
+            ),
+          ],
 
           const SizedBox(height: 24),
 
@@ -453,5 +464,53 @@ class _IpTile extends StatelessWidget {
       }
     } catch (_) {}
     return 'Unbekannt';
+  }
+}
+
+// ── Verbundene Clients Widget ─────────────────────────────────────────────────
+
+class _ConnectedClientsWidget extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final server = ref.watch(syncServerProvider);
+    final clients = server.connectedClients;
+
+    if (clients.isEmpty) {
+      return const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.devices_other, color: Colors.grey),
+        title: Text('Noch keine Clients verbunden'),
+        subtitle: Text('Clients müssen sich einmalig über den QR-Code koppeln'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${clients.length} verbundene${clients.length == 1 ? 'r' : ''} Client${clients.length == 1 ? '' : 's'}',
+            style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 4),
+        ...clients.map((c) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: const Icon(Icons.phone_android, size: 18),
+              title: Text(c.deviceName, style: const TextStyle(fontSize: 13)),
+              subtitle: Text(c.remoteIp,
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+              trailing: Text(
+                _timeAgo(c.connectedAt),
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            )),
+      ],
+    );
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'gerade eben';
+    if (diff.inMinutes < 60) return 'vor ${diff.inMinutes} Min';
+    if (diff.inHours < 24) return 'vor ${diff.inHours} Std';
+    return 'vor ${diff.inDays} Tagen';
   }
 }
