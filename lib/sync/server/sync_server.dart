@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
@@ -11,6 +12,13 @@ import 'routes/pairing_routes.dart';
 import 'routes/sync_routes.dart';
 
 const kSyncPort = 8766;
+
+const _storage = FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+);
+const _kServerJwtSecret    = 'sync_server_jwt_secret';
+const _kServerRefreshTokens = 'sync_server_refresh_tokens';
+const _kServerClients      = 'sync_server_clients';
 
 class SyncClientInfo {
   final String deviceId;
@@ -23,6 +31,12 @@ class SyncClientInfo {
     required this.remoteIp,
     required this.connectedAt,
   });
+
+  Map<String, dynamic> toJson() => {
+        'deviceId': deviceId,
+        'deviceName': deviceName,
+        'connectedAt': connectedAt.toIso8601String(),
+      };
 }
 
 /// In-memory Pairing-Code Eintrag (5 Minuten gültig)
@@ -40,45 +54,95 @@ class SyncServer {
 
   HttpServer? _server;
 
-  // ── In-memory Auth-Zustand (kein FlutterSecureStorage in HTTP-Handlern) ──
-  late final String jwtSecret;
-  final pairingCodes = <PairingCode>[];
-  final refreshTokens = <String, String>{}; // clientDeviceId → refreshToken
+  // In-memory Auth — wird beim start() aus SecureStorage geladen,
+  // damit HTTP-Handler nie Platform-Channels aufrufen
+  String _jwtSecret = '';
+  final pairingCodes  = <PairingCode>[];
+  final refreshTokens = <String, String>{};
+  final connectedClients = <SyncClientInfo>[];
 
   SyncServer({
     required this.db,
     required this.deviceId,
     required this.deviceName,
-  }) {
-    // JWT-Secret einmalig beim Erstellen generieren
-    final rng = Random.secure();
-    jwtSecret = base64Url.encode(List<int>.generate(32, (_) => rng.nextInt(256)));
-  }
+  });
 
   bool get isRunning => _server != null;
 
-  // ── Token-Operationen (in-memory, kein Platform-Channel) ─────────────────
+  // ── Auth laden/speichern (vor HTTP-Start, sicher auf Main-Isolate) ─────────
+
+  Future<void> _loadPersistedAuth() async {
+    // JWT-Secret laden oder erstellen
+    var secret = await _storage.read(key: _kServerJwtSecret);
+    if (secret == null || secret.isEmpty) {
+      secret = base64Url.encode(List<int>.generate(32, (_) => Random.secure().nextInt(256)));
+      await _storage.write(key: _kServerJwtSecret, value: secret);
+    }
+    _jwtSecret = secret;
+
+    // Refresh-Tokens wiederherstellen
+    final tokensJson = await _storage.read(key: _kServerRefreshTokens);
+    if (tokensJson != null) {
+      try {
+        final map = jsonDecode(tokensJson) as Map<String, dynamic>;
+        refreshTokens.addAll(map.cast<String, String>());
+      } catch (_) {}
+    }
+
+    // Bekannte Clients wiederherstellen (IPs ändern sich, werden als 'gespeichert' markiert)
+    final clientsJson = await _storage.read(key: _kServerClients);
+    if (clientsJson != null) {
+      try {
+        final list = jsonDecode(clientsJson) as List<dynamic>;
+        for (final item in list) {
+          connectedClients.add(SyncClientInfo(
+            deviceId:   item['deviceId'] as String,
+            deviceName: item['deviceName'] as String,
+            remoteIp:   '(gespeichert)',
+            connectedAt: DateTime.parse(item['connectedAt'] as String),
+          ));
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _persistRefreshTokens() async {
+    await _storage.write(
+      key: _kServerRefreshTokens,
+      value: jsonEncode(refreshTokens),
+    );
+  }
+
+  Future<void> _persistClients() async {
+    await _storage.write(
+      key: _kServerClients,
+      value: jsonEncode(connectedClients.map((c) => c.toJson()).toList()),
+    );
+  }
+
+  // ── Token-Operationen ──────────────────────────────────────────────────────
 
   ({String access, String refresh}) issueTokens(String clientDeviceId, String clientDeviceName) {
     final access = JWT({
       'sub': clientDeviceId,
       'name': clientDeviceName,
       'type': 'access',
-    }).sign(SecretKey(jwtSecret), expiresIn: const Duration(hours: 24));
+    }).sign(SecretKey(_jwtSecret), expiresIn: const Duration(hours: 24));
 
     final refresh = JWT({
       'sub': clientDeviceId,
       'name': clientDeviceName,
       'type': 'refresh',
-    }).sign(SecretKey(jwtSecret), expiresIn: const Duration(days: 7));
+    }).sign(SecretKey(_jwtSecret), expiresIn: const Duration(days: 30));
 
     refreshTokens[clientDeviceId] = refresh;
+    _persistRefreshTokens(); // fire-and-forget
     return (access: access, refresh: refresh);
   }
 
   ({String access, String refresh})? refreshTokensFor(String refreshToken) {
     try {
-      final jwt = JWT.verify(refreshToken, SecretKey(jwtSecret));
+      final jwt = JWT.verify(refreshToken, SecretKey(_jwtSecret));
       if (jwt.payload['type'] != 'refresh') return null;
       final clientDeviceId = jwt.payload['sub'] as String;
       if (refreshTokens[clientDeviceId] != refreshToken) return null;
@@ -88,10 +152,9 @@ class SyncServer {
     }
   }
 
-  /// Validiert Bearer-Token und gibt clientDeviceId zurück, sonst null.
   String? verifyAccessToken(String token) {
     try {
-      final jwt = JWT.verify(token, SecretKey(jwtSecret));
+      final jwt = JWT.verify(token, SecretKey(_jwtSecret));
       if (jwt.payload['type'] != 'access') return null;
       return jwt.payload['sub'] as String?;
     } catch (_) {
@@ -99,9 +162,7 @@ class SyncServer {
     }
   }
 
-  // ── Verbundene Clients ────────────────────────────────────────────────────
-
-  final connectedClients = <SyncClientInfo>[];
+  // ── Client-Verwaltung ──────────────────────────────────────────────────────
 
   void registerClient(String deviceId, String deviceName, String remoteIp) {
     connectedClients.removeWhere((c) => c.deviceId == deviceId);
@@ -111,9 +172,10 @@ class SyncServer {
       remoteIp: remoteIp,
       connectedAt: DateTime.now(),
     ));
+    _persistClients(); // fire-and-forget
   }
 
-  // ── Pairing-Code Verwaltung ───────────────────────────────────────────────
+  // ── Pairing-Code Verwaltung ────────────────────────────────────────────────
 
   String generatePairingCode() {
     pairingCodes.removeWhere((c) => c.isExpired);
@@ -122,10 +184,13 @@ class SyncServer {
     return code;
   }
 
-  // ── Server Start/Stop ─────────────────────────────────────────────────────
+  // ── Server Start/Stop ──────────────────────────────────────────────────────
 
   Future<void> start() async {
     if (_server != null) return;
+
+    // Auth aus SecureStorage laden BEVOR der HTTP-Server startet
+    await _loadPersistedAuth();
 
     final router = Router()
       ..mount('/', healthRouter(deviceId, deviceName))

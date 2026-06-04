@@ -1,12 +1,12 @@
 import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/constants.dart';
-import '../core/router.dart';
 import '../core/theme.dart';
 import '../data/repositories/container_repository.dart';
+import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_provider.dart';
 
 bool get _isDesktop =>
@@ -103,90 +103,91 @@ class _AppShellState extends State<AppShell> {
 
 // ── Desktop-Layout: permanente Sidebar + Content ──────────────────────────────
 
-class _DesktopShell extends ConsumerWidget {
+// Provider für ausgewählten Container (Desktop Explorer-Stil)
+final desktopSelectedContainerProvider = StateProvider<String?>((ref) => null);
+// Provider für Sidebar-Pin (true = permanent sichtbar)
+final desktopSidebarPinnedProvider = StateProvider<bool>((ref) => true);
+
+class _DesktopShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
   const _DesktopShell({required this.shell});
 
-  void _go(int index) => shell.goBranch(index);
+  @override
+  ConsumerState<_DesktopShell> createState() => _DesktopShellState();
+}
+
+class _DesktopShellState extends ConsumerState<_DesktopShell> {
+  void _go(int index) {
+    // Beim Tab-Wechsel Container-Selektion aufheben
+    ref.read(desktopSelectedContainerProvider.notifier).state = null;
+    widget.shell.goBranch(index);
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final router = ref.read(routerProvider);
+  Widget build(BuildContext context) {
+    final pinned = ref.watch(desktopSidebarPinnedProvider);
+    final selectedContainer = ref.watch(desktopSelectedContainerProvider);
 
-    // Plattform-aware: Cmd auf macOS, Ctrl auf Windows/Linux
-    final modifier = Platform.isMacOS
-        ? const CharacterActivator('n', meta: true)
-        : const CharacterActivator('n', control: true);
-    final searchShortcut = Platform.isMacOS
-        ? const CharacterActivator('f', meta: true)
-        : const CharacterActivator('f', control: true);
-    final syncShortcut = Platform.isMacOS
-        ? const CharacterActivator('r', meta: true)
-        : const CharacterActivator('r', control: true);
-    final settingsShortcut = Platform.isMacOS
-        ? const CharacterActivator(',', meta: true)
-        : const CharacterActivator(',', control: true);
+    final sidebar = AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeInOut,
+      width: pinned ? 240 : 0,
+      child: pinned
+          ? _DesktopSidebar(
+              currentIndex: widget.shell.currentIndex,
+              onDestinationSelected: _go,
+            )
+          : null,
+    );
 
-    return Shortcuts(
-      shortcuts: {
-        modifier: const _NewEntryIntent(),
-        searchShortcut: const _SearchIntent(),
-        syncShortcut: const _SyncIntent(),
-        settingsShortcut: const _SettingsIntent(),
-      },
-      child: Actions(
-        actions: {
-          _NewEntryIntent: CallbackAction<_NewEntryIntent>(
-            onInvoke: (_) => router.push(AppRoutes.capture),
-          ),
-          _SearchIntent: CallbackAction<_SearchIntent>(
-            onInvoke: (_) => _go(1),
-          ),
-          _SyncIntent: CallbackAction<_SyncIntent>(
-            onInvoke: (_) {
-              // Trigger sync via provider — later can be ref.read(syncStateProvider.notifier).triggerSync()
-              return null;
-            },
-          ),
-          _SettingsIntent: CallbackAction<_SettingsIntent>(
-            onInvoke: (_) => _go(2),
-          ),
-        },
-        child: Focus(
-          autofocus: true,
-          child: Scaffold(
-            key: appScaffoldKey,
-            body: Row(
+    // Hauptinhalt: ausgewählter Container oder Shell
+    Widget mainContent;
+    if (selectedContainer != null) {
+      mainContent = _DesktopContainerView(
+        containerId: selectedContainer,
+        onClose: () => ref.read(desktopSelectedContainerProvider.notifier).state = null,
+      );
+    } else {
+      mainContent = widget.shell;
+    }
+
+    return Scaffold(
+      key: appScaffoldKey,
+      drawer: pinned
+          ? null
+          : Drawer(
+              child: _DesktopSidebar(
+                currentIndex: widget.shell.currentIndex,
+                onDestinationSelected: _go,
+              ),
+            ),
+      body: Row(
+        children: [
+          if (pinned) ...[
+            SizedBox(width: 240, child: sidebar),
+            const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
+          ],
+          Expanded(
+            child: Stack(
               children: [
-                SizedBox(
-                  width: 240,
-                  child: _DesktopSidebar(
-                    currentIndex: shell.currentIndex,
-                    onDestinationSelected: _go,
+                mainContent,
+                // Hamburger-Button wenn Sidebar ausgeblendet
+                if (!pinned)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: IconButton(
+                      icon: const Icon(Icons.menu, color: MFColors.textSecondary),
+                      onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+                    ),
                   ),
-                ),
-                const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
-                Expanded(child: shell),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }
-}
-
-class _NewEntryIntent extends Intent {
-  const _NewEntryIntent();
-}
-class _SearchIntent extends Intent {
-  const _SearchIntent();
-}
-class _SyncIntent extends Intent {
-  const _SyncIntent();
-}
-class _SettingsIntent extends Intent {
-  const _SettingsIntent();
 }
 
 class _DesktopSidebar extends ConsumerWidget {
@@ -204,34 +205,49 @@ class _DesktopSidebar extends ConsumerWidget {
     final areasAsync = ref.watch(areasProvider);
     final hubsAsync = ref.watch(hubsProvider);
 
-    void navigate(String containerId) =>
-        context.push(AppRoutes.containerDetailPath(containerId));
+    void navigate(String containerId) {
+      // Desktop: Inhalt inline rechts anzeigen (Explorer-Stil)
+      ref.read(desktopSelectedContainerProvider.notifier).state = containerId;
+    }
 
     return Container(
       color: MFColors.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // App-Header
-          const SizedBox(height: 20),
+          // App-Header mit Pin-Button
+          const SizedBox(height: 16),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
             child: Row(children: [
               Container(
-                width: 28, height: 28,
+                width: 26, height: 26,
                 decoration: BoxDecoration(
                   color: MFColors.tealBg,
                   borderRadius: BorderRadius.circular(7),
                 ),
                 child: const Icon(Icons.psychology_outlined,
-                    color: MFColors.teal, size: 16),
+                    color: MFColors.teal, size: 15),
               ),
-              const SizedBox(width: 10),
-              const Text('MindFeed',
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: MFColors.textPrimary)),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('MindFeed',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: MFColors.textPrimary)),
+              ),
+              // Pin-Button: Sidebar ausblenden/einblenden
+              Consumer(builder: (ctx, r, _) {
+                return IconButton(
+                  icon: const Icon(Icons.push_pin_outlined, size: 16),
+                  tooltip: 'Seitenleiste ausblenden',
+                  color: MFColors.textMuted,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => r.read(desktopSidebarPinnedProvider.notifier).state = false,
+                );
+              }),
             ]),
           ),
           const Divider(color: MFColors.border, height: 1),
@@ -672,4 +688,36 @@ class _EmptyHint extends StatelessWidget {
                 fontSize: 12, color: MFColors.textMuted,
                 fontStyle: FontStyle.italic)),
       );
+}
+
+// ── Desktop: Container-Inhalt inline anzeigen (Explorer-Stil) ─────────────────
+
+class _DesktopContainerView extends StatelessWidget {
+  final String containerId;
+  final VoidCallback onClose;
+
+  const _DesktopContainerView({
+    required this.containerId,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // ContainerDetailScreen direkt eingebettet (kein separates Route-Push)
+        ContainerDetailScreen(containerId: containerId),
+        // Schließen-Button oben rechts
+        Positioned(
+          top: 52, right: 8,
+          child: IconButton(
+            icon: const Icon(Icons.close),
+            tooltip: 'Zurück zum Feed',
+            color: MFColors.textSecondary,
+            onPressed: onClose,
+          ),
+        ),
+      ],
+    );
+  }
 }

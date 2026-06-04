@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
+import '../../data/db/app_database.dart' hide Container;
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../domain/prop_type.dart';
@@ -310,6 +313,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  // ─── Neuen Vault erstellen ─────────────────────────────────────────────────
+
+  Future<void> _createNewVault() async {
+    final nameCtrl = TextEditingController(text: 'MindFeed');
+    String? chosenDir;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Neuen Vault erstellen'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Vault-Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final path = await FilePicker.platform.getDirectoryPath(
+                    dialogTitle: 'Speicherort wählen',
+                  );
+                  if (path != null) setState(() => chosenDir = path);
+                },
+                icon: const Icon(Icons.folder_outlined),
+                label: Text(chosenDir ?? 'Speicherort wählen…'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Abbrechen')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Erstellen')),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final base = chosenDir ?? p.join(dir.path, 'MindFeed');
+      final vaultPath = p.join(base, nameCtrl.text.trim().isEmpty ? 'MindFeed' : nameCtrl.text.trim());
+      await Directory(vaultPath).create(recursive: true);
+      final db = AppDatabase(p.join(vaultPath, 'mindfeed.db'));
+      await db.close();
+      await VaultManager.saveVaultPath(vaultPath);
+      setState(() => _activeVaultPath = vaultPath);
+      await onRestartApp?.call();
+      if (mounted) _showSnack('Vault erstellt: $vaultPath', success: true);
+    } catch (e) {
+      if (mounted) _showSnack('Fehler: $e', success: false);
+    }
+  }
+
   // ─── Vault-Ordner wählen (OracleVault-Ansatz) ─────────────────────────────
 
   Future<void> _pickVaultFolder() async {
@@ -408,10 +472,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 8),
 
           _SettingsTile(
+            icon: Icons.create_new_folder_outlined,
+            iconColor: MFColors.teal,
+            title: 'Neuen Vault erstellen',
+            subtitle: 'Leeren Vault an einem neuen Speicherort anlegen',
+            onTap: _createNewVault,
+          ),
+          const SizedBox(height: 8),
+          _SettingsTile(
             icon: Icons.folder_open_outlined,
             iconColor: MFColors.teal,
-            title: 'Vault-Ordner öffnen',
-            subtitle: 'Kopierten MindFeed-Vault-Ordner wählen (z.B. von iCloud Drive)',
+            title: 'Vorhandenen Vault öffnen',
+            subtitle: 'Bestehenden MindFeed-Vault-Ordner wählen',
             onTap: _pickVaultFolder,
           ),
 

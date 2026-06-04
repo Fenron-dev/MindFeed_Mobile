@@ -36,6 +36,27 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Konflikt-Dialog automatisch anzeigen wenn neue Konflikte auftreten
+    ref.listenManual(syncStateProvider, (prev, next) {
+      if (next.pendingConflicts.isEmpty) return;
+      if (prev?.pendingConflicts.length == next.pendingConflicts.length) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showConflictDialog(next.pendingConflicts);
+      });
+    });
+  }
+
+  void _showConflictDialog(List<SyncConflict> conflicts) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _ConflictDialog(conflicts: conflicts),
+    );
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
@@ -943,6 +964,75 @@ class _SyncStatusButton extends ConsumerWidget {
       onPressed: state.status == SyncStatus.syncing
           ? null
           : () => ref.read(syncStateProvider.notifier).triggerSync(),
+    );
+  }
+}
+
+// ── Konflikt-Dialog ───────────────────────────────────────────────────────────
+
+class _ConflictDialog extends ConsumerWidget {
+  final List<SyncConflict> conflicts;
+  const _ConflictDialog({required this.conflicts});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entryCount = conflicts.where((c) => c.entityType == 'entry').length;
+    final containerCount = conflicts.where((c) => c.entityType == 'container').length;
+
+    return AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.sync_problem, color: Colors.orange),
+        const SizedBox(width: 8),
+        Text('${conflicts.length} Sync-Konflikte'),
+      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Sowohl lokal als auch auf dem Server wurden Änderungen vorgenommen:',
+            style: const TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          if (entryCount > 0)
+            Text('• $entryCount Eintrag${entryCount == 1 ? '' : 'träge'}',
+                style: const TextStyle(fontSize: 13)),
+          if (containerCount > 0)
+            Text('• $containerCount Container',
+                style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 16),
+          const Text('Was soll übernommen werden?',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        ],
+      ),
+      actions: [
+        // Server-Version behalten (Standardverhalten bisher)
+        TextButton(
+          onPressed: () {
+            ref.read(syncStateProvider.notifier).resolveConflicts(ConflictResolution.server);
+            Navigator.pop(context);
+          },
+          child: const Text('Server-Version'),
+        ),
+        // Meine Version erzwingen
+        TextButton(
+          onPressed: () {
+            ref.read(syncStateProvider.notifier).resolveConflicts(ConflictResolution.mine);
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Lokale Versionen werden übertragen…')),
+            );
+          },
+          child: const Text('Meine Version'),
+        ),
+        // Überspringen: Konflikte später entscheiden
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(context);
+          },
+          child: const Text('Überspringen'),
+        ),
+      ],
     );
   }
 }

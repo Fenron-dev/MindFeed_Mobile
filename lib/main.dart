@@ -8,7 +8,9 @@ import 'package:window_manager/window_manager.dart';
 // receive_sharing_intent ist nur auf iOS/Android verfügbar
 import 'package:receive_sharing_intent/receive_sharing_intent.dart'
     if (dart.library.html) 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:flutter/services.dart';
 import 'core/constants.dart';
+import 'core/router.dart';
 import 'sync/sync_provider.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
@@ -172,9 +174,47 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   @override
   void initState() {
     super.initState();
-    // Scheduler eager initialisieren → startet Server falls Rolle = Server
     ref.read(syncSchedulerProvider);
     _initShareIntent();
+    // Globale Keyboard-Shortcuts (Desktop) — funktioniert ohne Focus-Abhängigkeit
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
+  }
+
+  @override
+  void dispose() {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    }
+    super.dispose();
+  }
+
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final isMac = Platform.isMacOS;
+    final modifier = isMac
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (!modifier) return false;
+
+    final router = ref.read(routerProvider);
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.keyN:
+        router.push(AppRoutes.capture);
+        return true;
+      case LogicalKeyboardKey.keyF:
+        router.go(AppRoutes.search);
+        return true;
+      case LogicalKeyboardKey.keyR:
+        if (AppSettings.getSyncEnabled()) {
+          ref.read(syncStateProvider.notifier).triggerSync();
+        }
+        return true;
+      case LogicalKeyboardKey.comma:
+        router.go(AppRoutes.settings);
+        return true;
+    }
+    return false;
   }
 
   void _initShareIntent() {

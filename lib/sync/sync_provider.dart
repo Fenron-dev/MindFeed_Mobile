@@ -44,7 +44,24 @@ class SyncStateNotifier extends Notifier<SyncState> {
   }
 
   void clearConflicts() => state = state.copyWith(pendingConflicts: []);
+
+  /// Konflikte auflösen: 'mine' = lokale Version pushen, 'server' = nichts tun
+  Future<void> resolveConflicts(ConflictResolution resolution) async {
+    if (resolution == ConflictResolution.server) {
+      // Server hat gewonnen — nichts weiter nötig
+      state = state.copyWith(pendingConflicts: []);
+      return;
+    }
+    if (resolution == ConflictResolution.mine) {
+      // Lokale Versionen erneut pushen mit aktuellem Timestamp
+      final service = ref.read(syncServiceProvider);
+      await service.pushWithForcedTimestamp(state.pendingConflicts);
+    }
+    state = state.copyWith(pendingConflicts: []);
+  }
 }
+
+enum ConflictResolution { server, mine }
 
 final syncStateProvider =
     NotifierProvider<SyncStateNotifier, SyncState>(SyncStateNotifier.new);

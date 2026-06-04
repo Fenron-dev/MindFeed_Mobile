@@ -318,6 +318,50 @@ class SyncService {
     return result;
   }
 
+  /// "Meine Version behalten": Konflikte erneut pushen mit aktuellem Timestamp
+  Future<void> pushWithForcedTimestamp(List<SyncConflict> conflicts) async {
+    final serverUrl = AppSettings.getSyncServerUrl();
+    if (serverUrl == null) return;
+    final client = SyncApiClient(serverUrl);
+
+    final forcedEntries = <SyncEntry>[];
+    final now = DateTime.now().toUtc();
+
+    for (final conflict in conflicts) {
+      if (conflict.entityType != 'entry') continue;
+      final entry = await entryDao.getById(conflict.entityId);
+      if (entry == null) continue;
+      final entries = await _toSyncEntries([entry]);
+      if (entries.isEmpty) continue;
+      // Timestamp leicht in die Zukunft setzen → Server akzeptiert als neuere Version
+      final forced = SyncEntry(
+        id: entries.first.id,
+        createdAt: entries.first.createdAt,
+        updatedAt: now.add(const Duration(seconds: 1)).toIso8601String(),
+        type: entries.first.type,
+        title: entries.first.title,
+        body: entries.first.body,
+        status: entries.first.status,
+        pinned: entries.first.pinned,
+        tags: entries.first.tags,
+        properties: entries.first.properties,
+        containers: entries.first.containers,
+        attachments: entries.first.attachments,
+      );
+      forcedEntries.add(forced);
+    }
+
+    if (forcedEntries.isEmpty) return;
+    try {
+      await client.push(SyncPushRequest(
+        deviceId: AppSettings.getDeviceId(),
+        entries: forcedEntries,
+        containers: [],
+        tombstones: [],
+      ));
+    } catch (_) {}
+  }
+
   List<SyncContainer> _toSyncContainers(List<Container> containers) =>
       containers.map((c) => SyncContainer(
             id: c.id,
