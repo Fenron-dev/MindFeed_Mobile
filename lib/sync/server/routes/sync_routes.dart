@@ -1,24 +1,24 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import '../sync_auth.dart';
 import '../../dto/sync_dto.dart';
 import '../../../data/db/app_database.dart';
+import '../sync_server.dart';
 import 'package:drift/drift.dart';
 
-Router syncRouter(AppDatabase db) {
+Router syncRouter(AppDatabase db, SyncServer server) {
   final router = Router();
 
-  // ── Auth helper ────────────────────────────────────────────────────────────
+  // ── Auth helper (in-memory, kein Platform-Channel) ────────────────────────
 
-  Future<Response?> _requireAuth(Request req) async {
+  Response? _requireAuth(Request req) {
     final auth = req.headers['authorization'] ?? '';
     if (!auth.startsWith('Bearer ')) {
       return Response(401,
           body: jsonEncode({'error': 'unauthorized'}),
           headers: {'content-type': 'application/json'});
     }
-    final deviceId = await SyncAuth.verifyAccessToken(auth.substring(7));
+    final deviceId = server.verifyAccessToken(auth.substring(7));
     if (deviceId == null) {
       return Response(401,
           body: jsonEncode({'error': 'invalid_token'}),
@@ -30,7 +30,7 @@ Router syncRouter(AppDatabase db) {
   // ── GET /sync/pull ─────────────────────────────────────────────────────────
 
   router.get('/sync/pull', (Request req) async {
-    final authErr = await _requireAuth(req);
+    final authErr = _requireAuth(req);
     if (authErr != null) return authErr;
 
     final sinceStr = req.url.queryParameters['since'];
@@ -181,7 +181,7 @@ Router syncRouter(AppDatabase db) {
   // ── POST /sync/push ────────────────────────────────────────────────────────
 
   router.post('/sync/push', (Request req) async {
-    final authErr = await _requireAuth(req);
+    final authErr = _requireAuth(req);
     if (authErr != null) return authErr;
 
     Map<String, dynamic> body;

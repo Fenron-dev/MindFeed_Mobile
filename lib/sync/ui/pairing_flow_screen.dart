@@ -185,11 +185,17 @@ class _QrScanTabState extends ConsumerState<_QrScanTab> {
         Navigator.pop(context, true);
       }
     } catch (e) {
-      setState(() => _handled = false);
+      // _handled nicht zurücksetzen — verhindert Endlos-Retry wenn Scanner
+      // den QR erneut erkennt. "Erneut"-Button gibt Kontrolle zurück.
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fehler: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Fehler: $e'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'Erneut',
+            onPressed: () => setState(() => _handled = false),
+          ),
+        ));
       }
     }
   }
