@@ -316,59 +316,100 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ─── Neuen Vault erstellen ─────────────────────────────────────────────────
 
   Future<void> _createNewVault() async {
-    final nameCtrl = TextEditingController(text: 'MindFeed');
-    String? chosenDir;
+    // Ordner-Picker VOR dem Dialog aufrufen (vermeidet macOS z-order Konflikte)
+    final chosenDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Speicherort für neuen Vault wählen',
+    );
+    if (!mounted) return;
 
+    final nameCtrl = TextEditingController(text: 'MindFeed');
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Neuen Vault erstellen'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Vault-Name',
-                  border: OutlineInputBorder(),
-                ),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Neuen Vault erstellen',
+            style: TextStyle(color: MFColors.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              chosenDir != null ? 'Ort: $chosenDir' : 'Ort: Standard-Dokumente',
+              style: const TextStyle(fontSize: 11, color: MFColors.textMuted,
+                  fontFamily: 'monospace'),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(color: MFColors.textPrimary),
+              decoration: const InputDecoration(
+                labelText: 'Vault-Name',
+                labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+                border: OutlineInputBorder(),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: MFColors.border)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: MFColors.teal)),
               ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final path = await FilePicker.platform.getDirectoryPath(
-                    dialogTitle: 'Speicherort wählen',
-                  );
-                  if (path != null) setState(() => chosenDir = path);
-                },
-                icon: const Icon(Icons.folder_outlined),
-                label: Text(chosenDir ?? 'Speicherort wählen…'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Abbrechen')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Erstellen')),
+            ),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: MFColors.textMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+                backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+            child: const Text('Erstellen'),
+          ),
+        ],
       ),
     );
 
+    final vaultName = nameCtrl.text.trim().isEmpty ? 'MindFeed' : nameCtrl.text.trim();
+    nameCtrl.dispose();
     if (confirmed != true || !mounted) return;
 
     try {
       final dir = await getApplicationDocumentsDirectory();
       final base = chosenDir ?? p.join(dir.path, 'MindFeed');
-      final vaultPath = p.join(base, nameCtrl.text.trim().isEmpty ? 'MindFeed' : nameCtrl.text.trim());
+      final name = vaultName;
+      final vaultPath = p.join(base, name);
       await Directory(vaultPath).create(recursive: true);
       final db = AppDatabase(p.join(vaultPath, 'mindfeed.db'));
       await db.close();
       await VaultManager.saveVaultPath(vaultPath);
-      setState(() => _activeVaultPath = vaultPath);
+
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Vault erstellt',
+              style: TextStyle(color: MFColors.textPrimary)),
+          content: Text(
+            'Vault "$name" wurde angelegt.\nDie App wird jetzt neu geladen.',
+            style: const TextStyle(color: MFColors.textSecondary, fontSize: 13),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(
+                  backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
       await onRestartApp?.call();
-      if (mounted) _showSnack('Vault erstellt: $vaultPath', success: true);
     } catch (e) {
       if (mounted) _showSnack('Fehler: $e', success: false);
     }

@@ -22,5 +22,10 @@
 	<!-- Downloads-Ordner für Backups -->
 	<key>com.apple.security.files.downloads.read-write</key>
 	<true/>
+	<!-- Keychain-Zugriff für flutter_secure_storage (JWT-Secrets, Sync-Token) -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.fenron.mindfeedMobile</string>
+	</array>
 </dict>
 </plist>

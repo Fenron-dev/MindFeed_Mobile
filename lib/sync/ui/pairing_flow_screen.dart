@@ -214,6 +214,7 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   String? _code;
   String? _localIp;
   bool _serverStarting = false;
+  String? _startError;
 
   @override
   void initState() {
@@ -222,27 +223,32 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   }
 
   Future<void> _startServerAndGenerate() async {
-    setState(() => _serverStarting = true);
-    // Eigene IP ermitteln
+    if (mounted) setState(() { _serverStarting = true; _startError = null; });
     try {
-      final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback) {
-            _localIp = addr.address;
-            break;
+      // Eigene IP ermitteln
+      try {
+        final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+        for (final iface in interfaces) {
+          for (final addr in iface.addresses) {
+            if (!addr.isLoopback) {
+              _localIp = addr.address;
+              break;
+            }
           }
+          if (_localIp != null) break;
         }
-        if (_localIp != null) break;
-      }
-    } catch (_) {}
+      } catch (_) {}
 
-    // Server starten (falls noch nicht läuft)
-    final server = ref.read(syncServerProvider);
-    if (!server.isRunning) await server.start();
+      // Server starten (falls noch nicht läuft)
+      final server = ref.read(syncServerProvider);
+      if (!server.isRunning) await server.start();
 
-    _generate();
-    if (mounted) setState(() => _serverStarting = false);
+      _generate();
+    } catch (e) {
+      if (mounted) setState(() => _startError = e.toString());
+    } finally {
+      if (mounted) setState(() => _serverStarting = false);
+    }
   }
 
   void _generate() {
@@ -253,6 +259,32 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   @override
   Widget build(BuildContext context) {
     final code = _code;
+
+    if (_startError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 48),
+              const SizedBox(height: 12),
+              const Text('Server konnte nicht gestartet werden',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(_startError!, style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _startServerAndGenerate,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Erneut versuchen'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     if (_serverStarting || code == null) {
       return const Center(
