@@ -195,7 +195,10 @@ class SyncServer {
         .addMiddleware(_corsMiddleware())
         .addHandler(router.call);
 
-    _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, kSyncPort);
+    _server = await shelf_io.serve(
+      handler, InternetAddress.anyIPv4, kSyncPort,
+      shared: true, // erlaube re-bind nach Hot-Restart / Provider-Rebuild
+    );
   }
 
   Future<void> stop() async {

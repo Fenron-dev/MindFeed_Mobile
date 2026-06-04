@@ -415,7 +415,26 @@ class AppSettings {
       await _prefs?.remove('vault_path');
     } else {
       await _prefs?.setString('vault_path', path);
+      await addRecentVault(path);
     }
+  }
+
+  // ── Zuletzt geöffnete Vaults ──────────────────────────────────────────────
+
+  static List<String> getRecentVaults() =>
+      _prefs?.getStringList('recent_vaults') ?? [];
+
+  static Future<void> addRecentVault(String path) async {
+    final list = getRecentVaults();
+    list.remove(path); // Duplikat entfernen
+    list.insert(0, path); // Neuesten vorne
+    final trimmed = list.take(8).toList(); // Max. 8 einträge
+    await _prefs?.setStringList('recent_vaults', trimmed);
+  }
+
+  static Future<void> removeRecentVault(String path) async {
+    final list = getRecentVaults()..remove(path);
+    await _prefs?.setStringList('recent_vaults', list);
   }
 
   // ── API-Feld-Einstellungen ─────────────────────────────────────────────────

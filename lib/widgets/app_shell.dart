@@ -1,14 +1,16 @@
 import 'dart:io';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
 import '../core/constants.dart';
 import '../core/theme.dart';
+import '../core/vault_manager.dart';
 import '../data/repositories/container_repository.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_provider.dart';
 import '../features/entry_detail/entry_detail_screen.dart';
+import '../services/app_settings.dart';
 
 bool get _isDesktop =>
     Platform.isMacOS || Platform.isWindows || Platform.isLinux;
@@ -149,6 +151,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
           ? _DesktopSidebar(
               currentIndex: widget.shell.currentIndex,
               onDestinationSelected: _go,
+              pinned: true,
             )
           : null,
     );
@@ -177,6 +180,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
               child: _DesktopSidebar(
                 currentIndex: widget.shell.currentIndex,
                 onDestinationSelected: _go,
+                pinned: false,
               ),
             ),
       body: Row(
@@ -189,14 +193,20 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
             child: Stack(
               children: [
                 mainContent,
-                // Hamburger-Button wenn Sidebar ausgeblendet
+                // Hamburger-Button rechts oben wenn Sidebar ausgeblendet
+                // (rechts → kein Konflikt mit AppBar-Zurück-Button links)
                 if (!pinned)
                   Positioned(
                     top: 8,
-                    left: 8,
-                    child: IconButton(
-                      icon: const Icon(Icons.menu, color: MFColors.textSecondary),
-                      onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+                    right: 8,
+                    child: Material(
+                      color: MFColors.surface.withAlpha(220),
+                      borderRadius: BorderRadius.circular(8),
+                      child: IconButton(
+                        icon: const Icon(Icons.menu, color: MFColors.textSecondary, size: 20),
+                        tooltip: 'Seitenleiste anzeigen',
+                        onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+                      ),
                     ),
                   ),
               ],
@@ -211,11 +221,20 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
 class _DesktopSidebar extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onDestinationSelected;
+  final bool pinned;
 
   const _DesktopSidebar({
     required this.currentIndex,
     required this.onDestinationSelected,
+    this.pinned = true,
   });
+
+  String _vaultLabel() {
+    final path = AppSettings.getVaultPath();
+    if (path == null) return 'Standard-Vault';
+    final name = p.basename(path);
+    return name.isEmpty ? 'Standard-Vault' : name;
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -224,8 +243,19 @@ class _DesktopSidebar extends ConsumerWidget {
     final hubsAsync = ref.watch(hubsProvider);
 
     void navigate(String containerId) {
-      // Desktop: Inhalt inline rechts anzeigen (Explorer-Stil)
       ref.read(desktopSelectedContainerProvider.notifier).state = containerId;
+      // Drawer schließen wenn nicht gepinnt
+      if (!pinned) Navigator.of(context).pop();
+    }
+
+    void togglePin() {
+      if (pinned) {
+        ref.read(desktopSidebarPinnedProvider.notifier).state = false;
+      } else {
+        ref.read(desktopSidebarPinnedProvider.notifier).state = true;
+        // Drawer schließen
+        Navigator.of(context).maybePop();
+      }
     }
 
     return Container(
@@ -255,21 +285,47 @@ class _DesktopSidebar extends ConsumerWidget {
                         fontWeight: FontWeight.bold,
                         color: MFColors.textPrimary)),
               ),
-              // Pin-Button: Sidebar ausblenden/einblenden
-              Consumer(builder: (ctx, r, _) {
-                return IconButton(
-                  icon: const Icon(Icons.push_pin_outlined, size: 16),
-                  tooltip: 'Seitenleiste ausblenden',
-                  color: MFColors.textMuted,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () => r.read(desktopSidebarPinnedProvider.notifier).state = false,
-                );
-              }),
+              // Pin-Button: Toggle Sidebar anheften/ablösen
+              IconButton(
+                icon: Icon(
+                  pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  size: 16,
+                ),
+                tooltip: pinned ? 'Seitenleiste ausblenden' : 'Seitenleiste anheften',
+                color: pinned ? MFColors.teal : MFColors.textMuted,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: togglePin,
+              ),
             ]),
           ),
           const Divider(color: MFColors.border, height: 1),
-          const SizedBox(height: 8),
+
+          // ── Vault-Anzeige ──────────────────────────────────────────────────
+          InkWell(
+            onTap: () {
+              if (!pinned) Navigator.of(context).maybePop();
+              context.push(AppRoutes.vaultSwitcher);
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+              child: Row(children: [
+                const Icon(Icons.folder_outlined, size: 14, color: MFColors.textMuted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _vaultLabel(),
+                    style: const TextStyle(
+                        fontSize: 11, color: MFColors.textMuted,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const Icon(Icons.unfold_more, size: 13, color: MFColors.textMuted),
+              ]),
+            ),
+          ),
+          const Divider(color: MFColors.border, height: 1),
+          const SizedBox(height: 6),
 
           // Neu-Button (prominent, ersetzt den weit entfernten FAB)
           Padding(
@@ -299,14 +355,14 @@ class _DesktopSidebar extends ConsumerWidget {
             selectedIcon: Icons.dynamic_feed,
             label: 'Feed',
             selected: currentIndex == 0,
-            onTap: () => onDestinationSelected(0),
+            onTap: () { onDestinationSelected(0); if (!pinned) Navigator.of(context).maybePop(); },
           ),
           _SidebarNavItem(
             icon: Icons.search_outlined,
             selectedIcon: Icons.search,
             label: 'Suche',
             selected: currentIndex == 1,
-            onTap: () => onDestinationSelected(1),
+            onTap: () { onDestinationSelected(1); if (!pinned) Navigator.of(context).maybePop(); },
           ),
 
           const SizedBox(height: 8),
@@ -353,7 +409,7 @@ class _DesktopSidebar extends ConsumerWidget {
             selectedIcon: Icons.settings,
             label: 'Einstellungen',
             selected: currentIndex == 2,
-            onTap: () => onDestinationSelected(2),
+            onTap: () { onDestinationSelected(2); if (!pinned) Navigator.of(context).maybePop(); },
           ),
           const SizedBox(height: 8),
         ],

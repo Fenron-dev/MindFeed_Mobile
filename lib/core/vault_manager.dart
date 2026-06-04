@@ -24,6 +24,13 @@ class VaultManager {
     return _openAt(vaultPath, seedIfEmpty: false);
   }
 
+  /// Legt einen neuen Vault an und befüllt ihn mit Standard-Containern.
+  /// Stellt sicher, dass mindfeed.db auf Disk existiert (durch ersten Query).
+  static Future<void> createVault(String vaultPath) async {
+    final db = await _openAt(vaultPath, seedIfEmpty: true);
+    await db.close();
+  }
+
   /// Gibt true zurück, wenn [path] ein gültiger MindFeed-Vault ist
   /// (enthält mindfeed.db).
   static bool isVault(String path) =>

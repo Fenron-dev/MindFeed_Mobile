@@ -316,7 +316,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _createNewVault() async {
     final nameCtrl = TextEditingController(text: 'MindFeed');
-    String? chosenDir;
+    final dirCtrl = TextEditingController();
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -344,37 +344,43 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  try {
-                    final path = await FilePicker.platform.getDirectoryPath(
-                      dialogTitle: 'Speicherort wählen',
-                    );
-                    if (path != null) setS(() => chosenDir = path);
-                  } catch (_) {
-                    // Picker nicht verfügbar — Standard-Speicherort wird genutzt
-                  }
-                },
-                icon: const Icon(Icons.folder_outlined, size: 16),
-                label: Text(
-                  chosenDir != null
-                      ? p.basename(chosenDir!)
-                      : 'Speicherort wählen (optional)',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (chosenDir != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    chosenDir!,
+              // Ordner-Pfad — Textfeld + optionaler Picker
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: dirCtrl,
                     style: const TextStyle(
-                        fontSize: 10, color: MFColors.textMuted,
+                        color: MFColors.textPrimary, fontSize: 12,
                         fontFamily: 'monospace'),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
+                    decoration: const InputDecoration(
+                      labelText: 'Speicherort (leer = Standard)',
+                      labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+                      hintText: '/Users/…',
+                      hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: MFColors.border)),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: MFColors.teal)),
+                    ),
                   ),
                 ),
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: const Icon(Icons.folder_outlined,
+                      color: MFColors.teal, size: 20),
+                  tooltip: 'Ordner wählen',
+                  onPressed: () async {
+                    try {
+                      final path = await FilePicker.platform.getDirectoryPath(
+                        dialogTitle: 'Speicherort wählen',
+                      );
+                      if (path != null) setS(() => dirCtrl.text = path);
+                    } catch (_) {}
+                  },
+                ),
+              ]),
             ],
           ),
           actions: [
@@ -395,16 +401,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
 
     final vaultName = nameCtrl.text.trim().isEmpty ? 'MindFeed' : nameCtrl.text.trim();
+    final chosenDir = dirCtrl.text.trim().isEmpty ? null : dirCtrl.text.trim();
     nameCtrl.dispose();
+    dirCtrl.dispose();
     if (confirmed != true || !mounted) return;
 
     try {
       final dir = await getApplicationDocumentsDirectory();
       final base = chosenDir ?? p.join(dir.path, 'MindFeed');
       final vaultPath = p.join(base, vaultName);
-      await Directory(vaultPath).create(recursive: true);
-      final db = AppDatabase(p.join(vaultPath, 'mindfeed.db'));
-      await db.close();
+
+      // createVault legt Ordner an, erstellt mindfeed.db und seeded Basis-Container
+      await VaultManager.createVault(vaultPath);
       await VaultManager.saveVaultPath(vaultPath);
 
       if (!mounted) return;
@@ -435,13 +443,76 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  // ─── Vault-Ordner wählen (OracleVault-Ansatz) ─────────────────────────────
+  // ─── Vault-Ordner wählen (Pfad-Eingabe + optionaler Picker) ───────────────
 
   Future<void> _pickVaultFolder() async {
-    final path = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'MindFeed-Vault-Ordner wählen',
+    final pathCtrl = TextEditingController(
+        text: _activeVaultPath ?? '');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Vault öffnen',
+              style: TextStyle(color: MFColors.textPrimary)),
+          content: Row(children: [
+            Expanded(
+              child: TextField(
+                controller: pathCtrl,
+                autofocus: true,
+                style: const TextStyle(
+                    color: MFColors.textPrimary, fontSize: 12,
+                    fontFamily: 'monospace'),
+                decoration: const InputDecoration(
+                  labelText: 'Pfad zum Vault-Ordner',
+                  labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+                  hintText: '/Users/…/MindFeed',
+                  hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            IconButton(
+              icon: const Icon(Icons.folder_outlined,
+                  color: MFColors.teal, size: 20),
+              tooltip: 'Ordner wählen',
+              onPressed: () async {
+                try {
+                  final path = await FilePicker.platform.getDirectoryPath(
+                    dialogTitle: 'MindFeed-Vault-Ordner wählen',
+                  );
+                  if (path != null) setS(() => pathCtrl.text = path);
+                } catch (_) {}
+              },
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: MFColors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+              child: const Text('Öffnen'),
+            ),
+          ],
+        ),
+      ),
     );
-    if (path == null || !mounted) return;
+
+    final path = pathCtrl.text.trim();
+    pathCtrl.dispose();
+    if (confirmed != true || path.isEmpty || !mounted) return;
 
     if (!VaultManager.isVault(path)) {
       _showSnack(
@@ -453,12 +524,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     await VaultManager.saveVaultPath(path);
     setState(() => _activeVaultPath = path);
-
-    // App mit dem neuen Vault neu starten
     await onRestartApp?.call();
-    if (mounted) {
-      _showSnack('Vault geöffnet: $path', success: true);
-    }
   }
 
   Future<void> _resetToDefaultVault() async {

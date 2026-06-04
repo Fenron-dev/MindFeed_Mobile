@@ -11,6 +11,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart'
 import 'package:flutter/services.dart';
 import 'core/constants.dart';
 import 'core/router.dart';
+import 'features/vault/vault_switcher_screen.dart';
 import 'sync/sync_provider.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
@@ -81,6 +82,7 @@ class _AppRootState extends State<_AppRoot> {
 
       if (saved != null && VaultManager.isVault(saved)) {
         // Gespeicherten Custom-Vault öffnen
+        await AppSettings.addRecentVault(saved); // Eintrag in Verlauf aktualisieren
         final db = await VaultManager.openVaultFromPath(saved);
         if (mounted) setState(() { _db = db; _loading = false; });
       } else {
@@ -148,7 +150,7 @@ class _AppRootState extends State<_AppRoot> {
       return MaterialApp(
         theme: MFTheme.dark,
         debugShowCheckedModeBanner: false,
-        home: _VaultSetupScreen(onSetupDone: _finishSetup),
+        home: VaultSwitcherScreen(onFirstSetup: _finishSetup),
       );
     }
     return KeyedSubtree(

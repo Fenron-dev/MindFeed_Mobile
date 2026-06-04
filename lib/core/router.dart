@@ -9,6 +9,7 @@ import '../features/entry_detail/entry_detail_screen.dart';
 import '../features/capture/capture_screen.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_form_screen.dart';
+import '../features/vault/vault_switcher_screen.dart';
 import '../widgets/app_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -77,6 +78,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ContainerFormScreen(
           editId: state.pathParameters['id'],
         ),
+      ),
+      GoRoute(
+        path: AppRoutes.vaultSwitcher,
+        builder: (context, state) => const VaultSwitcherScreen(),
       ),
 
       // Haupt-Shell mit Bottom Nav
