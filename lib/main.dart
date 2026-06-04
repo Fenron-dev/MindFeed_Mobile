@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:window_manager/window_manager.dart';
+// receive_sharing_intent ist nur auf iOS/Android verfügbar
+import 'package:receive_sharing_intent/receive_sharing_intent.dart'
+    if (dart.library.html) 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
@@ -24,6 +27,24 @@ void main() async {
     FlutterError.presentError(details);
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
+
+  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+    await windowManager.waitUntilReadyToShow(
+      const WindowOptions(
+        size: Size(1200, 800),
+        minimumSize: Size(900, 600),
+        center: true,
+        title: 'MindFeed',
+        titleBarStyle: TitleBarStyle.normal,
+      ),
+      () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
+  }
+
   runApp(const _AppRoot());
 }
 
@@ -154,8 +175,11 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
   }
 
   void _initShareIntent() {
-    ReceiveSharingIntent.instance.getInitialMedia().then(_handleSharedMedia);
-    ReceiveSharingIntent.instance.getMediaStream().listen(_handleSharedMedia);
+    // receive_sharing_intent ist nur auf iOS/Android verfügbar
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      ReceiveSharingIntent.instance.getInitialMedia().then(_handleSharedMedia);
+      ReceiveSharingIntent.instance.getMediaStream().listen(_handleSharedMedia);
+    }
   }
 
   void _handleSharedMedia(List<SharedMediaFile> media) {

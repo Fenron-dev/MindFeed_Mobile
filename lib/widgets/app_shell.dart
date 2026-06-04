@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,9 @@ import '../core/constants.dart';
 import '../core/theme.dart';
 import '../data/repositories/container_repository.dart';
 import '../features/containers/container_provider.dart';
+
+bool get _isDesktop =>
+    Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 
 /// GlobalKey damit FeedScreen (verschachtelter Scaffold) den Drawer öffnen kann.
 final appScaffoldKey = GlobalKey<ScaffoldState>();
@@ -47,6 +51,8 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isDesktop) return _DesktopShell(shell: widget.shell);
+
     final bottomPad = MediaQuery.of(context).viewPadding.bottom;
     const navContentHeight = 80.0;
 
@@ -87,6 +93,206 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Desktop-Layout: permanente Sidebar + Content ──────────────────────────────
+
+class _DesktopShell extends StatelessWidget {
+  final StatefulNavigationShell shell;
+  const _DesktopShell({required this.shell});
+
+  void _go(int index) => shell.goBranch(index);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: appScaffoldKey,
+      body: Row(
+        children: [
+          // Linke Sidebar (feste Breite 240px)
+          SizedBox(
+            width: 240,
+            child: _DesktopSidebar(
+              currentIndex: shell.currentIndex,
+              onDestinationSelected: _go,
+            ),
+          ),
+          // Vertikaler Trennstrich
+          const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
+          // Hauptinhalt
+          Expanded(child: shell),
+        ],
+      ),
+    );
+  }
+}
+
+class _DesktopSidebar extends ConsumerWidget {
+  final int currentIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  const _DesktopSidebar({
+    required this.currentIndex,
+    required this.onDestinationSelected,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final projectsAsync = ref.watch(projectsProvider);
+    final areasAsync = ref.watch(areasProvider);
+    final hubsAsync = ref.watch(hubsProvider);
+
+    void navigate(String containerId) =>
+        context.push(AppRoutes.containerDetailPath(containerId));
+
+    return Container(
+      color: MFColors.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // App-Header
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(children: [
+              Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Icon(Icons.psychology_outlined,
+                    color: MFColors.teal, size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Text('MindFeed',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: MFColors.textPrimary)),
+            ]),
+          ),
+          const Divider(color: MFColors.border, height: 1),
+          const SizedBox(height: 6),
+
+          // Navigation
+          _SidebarNavItem(
+            icon: Icons.dynamic_feed_outlined,
+            selectedIcon: Icons.dynamic_feed,
+            label: 'Feed',
+            selected: currentIndex == 0,
+            onTap: () => onDestinationSelected(0),
+          ),
+          _SidebarNavItem(
+            icon: Icons.search_outlined,
+            selectedIcon: Icons.search,
+            label: 'Suche',
+            selected: currentIndex == 1,
+            onTap: () => onDestinationSelected(1),
+          ),
+
+          const SizedBox(height: 8),
+          const Divider(color: MFColors.border, height: 1),
+          const SizedBox(height: 4),
+
+          // Container-Baum
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              children: [
+                _SectionHeaderWithAdd('BEREICHE',
+                    onAdd: () => context.push('${AppRoutes.containerNew}?kind=area')),
+                areasAsync.when(
+                  loading: () => const _LoadingTile(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (tree) => _ContainerTree(tree: tree, onTap: navigate),
+                ),
+                _SectionHeaderWithAdd('PROJEKTE',
+                    onAdd: () => context.push('${AppRoutes.containerNew}?kind=project')),
+                projectsAsync.when(
+                  loading: () => const _LoadingTile(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (tree) => tree.isEmpty
+                      ? const _EmptyHint('Noch keine Projekte')
+                      : _ContainerTree(tree: tree, onTap: navigate),
+                ),
+                _SectionHeaderWithAdd('SMART HUBS',
+                    onAdd: () => context.push('${AppRoutes.containerNew}?kind=hub')),
+                hubsAsync.when(
+                  loading: () => const _LoadingTile(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (tree) => _ContainerTree(tree: tree, onTap: navigate),
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(color: MFColors.border, height: 1),
+
+          // Einstellungen unten
+          _SidebarNavItem(
+            icon: Icons.settings_outlined,
+            selectedIcon: Icons.settings,
+            label: 'Einstellungen',
+            selected: currentIndex == 2,
+            onTap: () => onDestinationSelected(2),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarNavItem extends StatelessWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SidebarNavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? MFColors.tealBg : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(
+              selected ? selectedIcon : icon,
+              size: 16,
+              color: selected ? MFColors.teal : MFColors.textSecondary,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                color: selected ? MFColors.teal : MFColors.textPrimary,
+              ),
+            ),
+          ]),
         ),
       ),
     );

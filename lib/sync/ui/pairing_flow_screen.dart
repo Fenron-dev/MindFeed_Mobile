@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -145,6 +146,13 @@ class _QrScanTabState extends ConsumerState<_QrScanTab> {
 
   @override
   Widget build(BuildContext context) {
+    // MobileScanner verwendet die Gerätekamera — auf Desktop via Webcam,
+    // aber mobile_scanner benötigt auf macOS ggf. spezifische Entitlements.
+    // Fallback: manuelles Code-Eingabe-Feld wenn Kamera nicht verfügbar.
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      return _DesktopQrFallback(onPair: _pairWith);
+    }
+
     return MobileScanner(
       onDetect: (capture) {
         if (_handled) return;
@@ -464,6 +472,93 @@ class _EnterCodeScreenState extends ConsumerState<_EnterCodeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Desktop-Fallback für QR-Scan (URL + Code manuell eingeben) ───────────────
+
+class _DesktopQrFallback extends StatefulWidget {
+  final Future<void> Function(String url, String code) onPair;
+  const _DesktopQrFallback({required this.onPair});
+
+  @override
+  State<_DesktopQrFallback> createState() => _DesktopQrFallbackState();
+}
+
+class _DesktopQrFallbackState extends State<_DesktopQrFallback> {
+  final _urlCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _urlCtrl.dispose();
+    _codeCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      await widget.onPair(_urlCtrl.text.trim(), _codeCtrl.text.trim());
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.qr_code_scanner, size: 48, color: Colors.grey),
+          const SizedBox(height: 12),
+          const Text(
+            'QR-Code-Scan ist auf dem Desktop nicht verfügbar.\nBitte gib die Server-URL und den Pairing-Code manuell ein.',
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          TextField(
+            controller: _urlCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Server-URL',
+              hintText: 'http://192.168.1.100:8766',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _codeCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Pairing-Code (6 Stellen)',
+              hintText: '123456',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(6),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: _loading ? null : _connect,
+            child: _loading
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Verbinden'),
+          ),
+        ],
       ),
     );
   }

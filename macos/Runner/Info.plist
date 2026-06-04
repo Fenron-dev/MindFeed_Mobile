@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MindFeed benötigt das Mikrofon für Audio-Notizen und Sprachaufnahmen.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>MindFeed benötigt die Kamera für QR-Code-Scanning und Bildaufnahmen.</string>
 </dict>
 </plist>
