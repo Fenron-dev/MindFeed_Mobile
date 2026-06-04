@@ -43,8 +43,15 @@ jobs:
             SYMROOT="$PWD/../build/macos/Build/Products" \
             OBJROOT="$PWD/../build/macos/Build/Intermediates"
 
-      - name: App zippen
+      - name: Ad-hoc Signierung (verhindert "beschädigt"-Fehler auf macOS)
         run: |
+          codesign --force --deep --sign - \
+            build/macos/Build/Products/Debug/mindfeed_mobile.app
+
+      - name: App zippen + Quarantine-Flag entfernen
+        run: |
+          APP="build/macos/Build/Products/Debug/mindfeed_mobile.app"
+          xattr -cr "$APP"
           cd build/macos/Build/Products/Debug
           zip -r --symlinks MindFeed-macOS.zip mindfeed_mobile.app
 
