@@ -24,6 +24,10 @@ const int _kBackupVersion = 2;
 
 class BackupService {
   static Future<String> _vaultRoot() async {
+    // Custom-Vault hat Vorrang — der Unterordner attachments/ liegt IMMER
+    // direkt im Vault-Root, egal wo der Vault sich befindet.
+    final customPath = AppSettings.getVaultPath();
+    if (customPath != null && customPath.isNotEmpty) return customPath;
     final dir = await getApplicationDocumentsDirectory();
     return p.join(dir.path, 'MindFeed', 'default');
   }

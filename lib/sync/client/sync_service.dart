@@ -136,16 +136,12 @@ class SyncService {
         return SyncResult.failed('Push fehlgeschlagen: ${e.message}');
       }
 
-      // ── Anhänge hochladen (falls Sync-Anhänge aktiviert) ─────────────────
-      if (AppSettings.getSyncAttachments()) {
-        await _uploadAttachments(client, dirtyEntries);
-      }
+      // ── Anhänge hochladen (immer wenn Anhänge vorhanden) ─────────────────
+      await _uploadAttachments(client, dirtyEntries);
     }
 
     // ── Anhänge herunterladen die beim Pull fehlten ───────────────────────────
-    if (AppSettings.getSyncAttachments()) {
-      await _downloadMissingAttachments(client, pullResp);
-    }
+    await _downloadMissingAttachments(client, pullResp);
 
     // ── Finalize ─────────────────────────────────────────────────────────────
 
@@ -172,6 +168,9 @@ class SyncService {
   // ── Apply pull response to local DB ───────────────────────────────────────
 
   Future<void> _applyPull(SyncPullResponse pull) async {
+    // Vault-Anhangspfad vor der Transaktion ermitteln (async nicht sicher darin)
+    final vaultAttsPath = await VaultManager.getAttachmentsPath();
+
     await db.transaction(() async {
       // 1. Apply tombstones first
       for (final t in pull.tombstones) {
@@ -249,6 +248,31 @@ class SyncService {
           );
           await db.into(db.entryTags).insertOnConflictUpdate(
             EntryTagsCompanion(entryId: Value(se.id), tagId: Value(tagId)),
+          );
+        }
+
+        // Sync attachment metadata — Datei-Download passiert danach in _downloadMissingAttachments
+        for (final attMap in se.attachments) {
+          final attId = attMap['id'] as String? ?? '';
+          if (attId.isEmpty) continue;
+          final fileName = attMap['fileName'] as String? ?? attId;
+          final ext = p.extension(fileName);
+          final localPath = p.join(vaultAttsPath, '$attId$ext');
+          await db.into(db.attachments).insertOnConflictUpdate(
+            AttachmentsCompanion(
+              id: Value(attId),
+              entryId: Value(se.id),
+              type: Value(attMap['type'] as String? ?? 'file'),
+              mimeType: Value(attMap['mimeType'] as String? ?? 'application/octet-stream'),
+              localPath: Value(localPath),
+              fileName: Value(fileName),
+              fileSize: Value(attMap['fileSize'] as int? ?? 0),
+              durationMs: Value(attMap['durationMs'] as int?),
+              transcription: Value(attMap['transcription'] as String?),
+              createdAt: Value(DateTime.tryParse(
+                      attMap['createdAt'] as String? ?? '') ??
+                  DateTime.now().toUtc()),
+            ),
           );
         }
       }
