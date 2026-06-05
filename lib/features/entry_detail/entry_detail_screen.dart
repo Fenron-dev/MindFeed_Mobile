@@ -19,7 +19,7 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
-import '../../widgets/app_shell.dart' show navigateToEntry;
+import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
@@ -2612,8 +2612,8 @@ class _SubNotesSection extends ConsumerWidget {
             ],
             const Spacer(),
             GestureDetector(
-              onTap: () => context.push(
-                  '${AppRoutes.capture}?parentEntryId=$parentEntryId'),
+              onTap: () => navigateToCapture(
+                  context, ref, parentEntryId: parentEntryId),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

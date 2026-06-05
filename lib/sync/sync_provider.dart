@@ -20,6 +20,11 @@ class SyncStateNotifier extends Notifier<SyncState> {
 
   Future<SyncResult> triggerSync() async {
     state = state.copyWith(status: SyncStatus.syncing, message: null);
+
+    // mDNS: Wenn gespeicherte Server-URL nicht mehr stimmt (Netzwerkwechsel),
+    // aktuelle IP via mDNS-Discovery nachschlagen und URL aktualisieren.
+    await _refreshServerUrlViaMdns();
+
     final service = ref.read(syncServiceProvider);
     final result = await service.sync();
     if (result.success) {
@@ -35,6 +40,36 @@ class SyncStateNotifier extends Notifier<SyncState> {
       state = state.copyWith(status: SyncStatus.error, message: result.error);
     }
     return result;
+  }
+
+  /// Versucht via mDNS-Discovery die aktuelle Server-IP zu ermitteln.
+  /// Aktualisiert AppSettings.syncServerUrl, wenn ein bekannter Server
+  /// mit neuer IP entdeckt wurde (z.B. nach Netzwerkwechsel).
+  Future<void> _refreshServerUrlViaMdns() async {
+    final storedUrl = AppSettings.getSyncServerUrl();
+    if (storedUrl == null) return;
+
+    try {
+      final mdns = ref.read(mdnsServiceProvider);
+      await mdns.startDiscovery();
+      // Kurz warten, damit mDNS-Antworten eingehen können
+      await Future.delayed(const Duration(milliseconds: 800));
+      final peers = mdns.currentPeers;
+      if (peers.isEmpty) return;
+
+      // Gespeicherten Port aus URL extrahieren
+      final storedUri = Uri.tryParse(storedUrl);
+      if (storedUri == null) return;
+
+      // Erster gefundener Peer → URL aktualisieren falls IP anders
+      final peer = peers.first;
+      final newUrl = 'http://${peer.host}:${peer.port}';
+      if (newUrl != storedUrl) {
+        await AppSettings.saveSyncServerUrl(newUrl);
+      }
+    } catch (_) {
+      // mDNS-Fehler ignorieren — sync läuft mit gespeicherter URL weiter
+    }
   }
 
   void setEnabled(bool enabled) {

@@ -10,7 +10,7 @@ import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/sync_provider.dart';
-import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToEntry;
+import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
 
@@ -231,7 +231,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               if (entries.isEmpty) {
                 return SliverFillRemaining(
                   child: _EmptyFeed(
-                      onCapture: () => context.push(AppRoutes.capture)),
+                      onCapture: () => navigateToCapture(context, ref)),
                 );
               }
               if (_viewMode == 'view_grid') {
@@ -333,7 +333,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       ),
 
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push(AppRoutes.capture),
+        onPressed: () => navigateToCapture(context, ref),
         tooltip: 'Neuer Eintrag',
         child: const Icon(Icons.edit_outlined),
       ),

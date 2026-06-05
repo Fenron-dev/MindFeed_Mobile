@@ -7,7 +7,7 @@ import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../data/repositories/container_repository.dart';
 import '../../features/feed/feed_provider.dart';
-import '../../widgets/app_shell.dart' show navigateToEntry;
+import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
 import 'container_provider.dart';
 
@@ -175,8 +175,8 @@ class _ContainerDetailScreenState
       ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Notiz hinzufügen',
-        onPressed: () => context.push(
-            '${AppRoutes.capture}?containerId=${widget.containerId}'),
+        onPressed: () => navigateToCapture(
+            context, ref, initialContainerId: widget.containerId),
         child: const Icon(Icons.edit_outlined),
       ),
       body: rawFeedAsync.when(

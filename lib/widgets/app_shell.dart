@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,7 @@ import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/vault_manager.dart';
 import '../data/repositories/container_repository.dart';
+import '../features/capture/capture_screen.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_provider.dart';
 import '../features/entry_detail/entry_detail_screen.dart';
@@ -112,6 +114,22 @@ final desktopSelectedContainerProvider = StateProvider<String?>((ref) => null);
 final desktopSelectedEntryProvider = StateProvider<String?>((ref) => null);
 // Provider für Sidebar-Pin (true = permanent sichtbar)
 final desktopSidebarPinnedProvider = StateProvider<bool>((ref) => true);
+// Provider für inline Capture (Desktop)
+final desktopCaptureProvider = StateProvider<_CaptureArgs?>((ref) => null);
+
+/// Argumente für den inline Desktop-Capture.
+class _CaptureArgs {
+  final String? initialText;
+  final List<String>? sharedFilePaths;
+  final String? initialContainerId;
+  final String? parentEntryId;
+  const _CaptureArgs({
+    this.initialText,
+    this.sharedFilePaths,
+    this.initialContainerId,
+    this.parentEntryId,
+  });
+}
 
 /// Navigiert zu einem Eintrag: auf Desktop inline, auf Mobile per Route.
 void navigateToEntry(BuildContext context, WidgetRef ref, String entryId) {
@@ -119,6 +137,35 @@ void navigateToEntry(BuildContext context, WidgetRef ref, String entryId) {
     ref.read(desktopSelectedEntryProvider.notifier).state = entryId;
   } else {
     context.push(AppRoutes.entryDetailPath(entryId));
+  }
+}
+
+/// Öffnet den Capture-Screen: auf Desktop inline (mit Sidebar), auf Mobile als Route.
+void navigateToCapture(
+  BuildContext context,
+  WidgetRef ref, {
+  String? initialText,
+  String? initialContainerId,
+  String? parentEntryId,
+}) {
+  if (_isDesktop) {
+    ref.read(desktopCaptureProvider.notifier).state = _CaptureArgs(
+      initialText: initialText,
+      initialContainerId: initialContainerId,
+      parentEntryId: parentEntryId,
+    );
+  } else {
+    final sb = StringBuffer(AppRoutes.capture);
+    var first = true;
+    void add(String k, String v) {
+      sb.write(first ? '?' : '&');
+      sb.write('$k=${Uri.encodeComponent(v)}');
+      first = false;
+    }
+    if (initialText != null) add('sharedText', initialText);
+    if (initialContainerId != null) add('containerId', initialContainerId);
+    if (parentEntryId != null) add('parentEntryId', parentEntryId);
+    context.push(sb.toString());
   }
 }
 
@@ -131,10 +178,49 @@ class _DesktopShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopShellState extends ConsumerState<_DesktopShell> {
+  // Trackpad-Swipe-Akkumulator für Zwei-Finger-Zurück-Geste
+  double _swipeAccX = 0;
+  DateTime? _lastSwipeEvent;
+
   void _go(int index) {
-    // Beim Tab-Wechsel Container-Selektion aufheben
     ref.read(desktopSelectedContainerProvider.notifier).state = null;
     widget.shell.goBranch(index);
+  }
+
+  void _handleSwipeBack() {
+    // Capture → Entry → Container → Router-Pop
+    if (ref.read(desktopCaptureProvider) != null) {
+      ref.read(desktopCaptureProvider.notifier).state = null;
+    } else if (ref.read(desktopSelectedEntryProvider) != null) {
+      ref.read(desktopSelectedEntryProvider.notifier).state = null;
+    } else if (ref.read(desktopSelectedContainerProvider) != null) {
+      ref.read(desktopSelectedContainerProvider.notifier).state = null;
+    } else if (context.canPop()) {
+      context.pop();
+    }
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final dx = event.scrollDelta.dx;
+    final dy = event.scrollDelta.dy.abs();
+    // Nur horizontale Bewegung berücksichtigen
+    if (dx.abs() < dy) return;
+
+    final now = DateTime.now();
+    if (_lastSwipeEvent != null &&
+        now.difference(_lastSwipeEvent!) > const Duration(milliseconds: 300)) {
+      _swipeAccX = 0; // Reset bei Pause
+    }
+    _swipeAccX += dx;
+    _lastSwipeEvent = now;
+
+    // Threshold: 120px akkumuliert → Swipe erkannt
+    if (_swipeAccX.abs() > 120) {
+      // dx > 0: Finger von rechts nach links (natural scroll) → zurück
+      if (_swipeAccX > 0) _handleSwipeBack();
+      _swipeAccX = 0;
+    }
   }
 
   @override
@@ -142,6 +228,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
     final pinned = ref.watch(desktopSidebarPinnedProvider);
     final selectedContainer = ref.watch(desktopSelectedContainerProvider);
     final selectedEntry = ref.watch(desktopSelectedEntryProvider);
+    final captureArgs = ref.watch(desktopCaptureProvider);
 
     final sidebar = AnimatedContainer(
       duration: const Duration(milliseconds: 220),
@@ -156,9 +243,14 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
           : null,
     );
 
-    // Hauptinhalt: Eintrag > Container > Shell (Priorität)
+    // Hauptinhalt: Capture > Eintrag > Container > Shell
     Widget mainContent;
-    if (selectedEntry != null) {
+    if (captureArgs != null) {
+      mainContent = _DesktopCaptureView(
+        args: captureArgs,
+        onClose: () => ref.read(desktopCaptureProvider.notifier).state = null,
+      );
+    } else if (selectedEntry != null) {
       mainContent = _DesktopEntryView(
         entryId: selectedEntry,
         onClose: () => ref.read(desktopSelectedEntryProvider.notifier).state = null,
@@ -190,26 +282,29 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
             const VerticalDivider(width: 1, thickness: 1, color: MFColors.border),
           ],
           Expanded(
-            child: Stack(
-              children: [
-                mainContent,
-                // Hamburger-Button rechts oben wenn Sidebar ausgeblendet
-                // (rechts → kein Konflikt mit AppBar-Zurück-Button links)
-                if (!pinned)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Material(
-                      color: MFColors.surface.withAlpha(220),
-                      borderRadius: BorderRadius.circular(8),
-                      child: IconButton(
-                        icon: const Icon(Icons.menu, color: MFColors.textSecondary, size: 20),
-                        tooltip: 'Seitenleiste anzeigen',
-                        onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerSignal: _onPointerSignal,
+              child: Stack(
+                children: [
+                  mainContent,
+                  // Hamburger-Button rechts oben wenn Sidebar ausgeblendet
+                  if (!pinned)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Material(
+                        color: MFColors.surface.withAlpha(220),
+                        borderRadius: BorderRadius.circular(8),
+                        child: IconButton(
+                          icon: const Icon(Icons.menu, color: MFColors.textSecondary, size: 20),
+                          tooltip: 'Seitenleiste anzeigen',
+                          onPressed: () => appScaffoldKey.currentState?.openDrawer(),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -342,7 +437,7 @@ class _DesktopSidebar extends ConsumerWidget {
             child: SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.capture),
+                onPressed: () => navigateToCapture(context, ref),
                 icon: const Icon(Icons.add_rounded, size: 16),
                 label: const Text('Neuer Eintrag'),
                 style: FilledButton.styleFrom(
@@ -771,6 +866,29 @@ class _EmptyHint extends StatelessWidget {
                 fontSize: 12, color: MFColors.textMuted,
                 fontStyle: FontStyle.italic)),
       );
+}
+
+// ── Desktop: Neuer Eintrag inline ─────────────────────────────────────────────
+
+class _DesktopCaptureView extends StatelessWidget {
+  final _CaptureArgs args;
+  final VoidCallback onClose;
+
+  const _DesktopCaptureView({
+    required this.args,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CaptureScreen(
+      initialText: args.initialText,
+      sharedFilePaths: args.sharedFilePaths,
+      initialContainerId: args.initialContainerId,
+      parentEntryId: args.parentEntryId,
+      onBack: onClose,
+    );
+  }
 }
 
 // ── Desktop: Container-Inhalt inline anzeigen (Explorer-Stil) ─────────────────

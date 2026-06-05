@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:file_picker/file_picker.dart';
@@ -18,6 +19,7 @@ import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
+import '../../sync/sync_provider.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
@@ -28,12 +30,15 @@ class CaptureScreen extends ConsumerStatefulWidget {
   final List<String>? sharedFilePaths;
   final String? initialContainerId;
   final String? parentEntryId; // für Sub-Notizen
+  /// Desktop inline: Callback statt Navigator.pop() beim Schließen/Speichern.
+  final VoidCallback? onBack;
   const CaptureScreen({
     super.key,
     this.initialText,
     this.sharedFilePaths,
     this.initialContainerId,
     this.parentEntryId,
+    this.onBack,
   });
 
   @override
@@ -81,12 +86,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   void initState() {
     super.initState();
     _bodyCtrl.addListener(_onBodyChanged);
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.addHandler(_onKeyEvent);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.initialText != null && widget.initialText!.isNotEmpty) {
         _bodyCtrl.text = widget.initialText!;
         _onBodyChanged();
       }
-      // Geteilte Dateien aus anderen Apps übernehmen
       if (widget.sharedFilePaths != null) {
         _importSharedFiles(widget.sharedFilePaths!);
       }
@@ -94,10 +101,32 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     });
   }
 
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final modifier = Platform.isMacOS
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (!modifier) return false;
+    if (event.logicalKey == LogicalKeyboardKey.enter) {
+      final canSave = (_bodyCtrl.text.trim().isNotEmpty ||
+              _pendingImages.isNotEmpty ||
+              _recordedAudioPath != null) &&
+          !_isSaving;
+      if (canSave) {
+        _save();
+        return true;
+      }
+    }
+    return false;
+  }
+
   Timer? _autoSaveDebounce;
 
   @override
   void dispose() {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    }
     _urlDebounce?.cancel();
     _wikilinkDebounce?.cancel();
     _autoSaveDebounce?.cancel();
@@ -727,7 +756,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         }
       }
 
-      if (mounted) Navigator.pop(context);
+      // Auto-Sync wenn Sync aktiviert ist
+      if (AppSettings.getSyncEnabled()) {
+        ref.read(syncStateProvider.notifier).triggerSync();
+      }
+
+      if (mounted) {
+        if (widget.onBack != null) {
+          widget.onBack!();
+        } else {
+          Navigator.pop(context);
+        }
+      }
     } catch (e) {
       setState(() => _isSaving = false);
       if (mounted) {
@@ -751,7 +791,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         backgroundColor: MFColors.bg,
         leading: IconButton(
           icon: const Icon(Icons.close, color: MFColors.textSecondary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (widget.onBack != null) widget.onBack!();
+            else Navigator.pop(context);
+          },
         ),
         title: const Text(
           'Neuer Eintrag',
