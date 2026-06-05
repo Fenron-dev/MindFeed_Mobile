@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
@@ -136,12 +137,12 @@ class SyncService {
         return SyncResult.failed('Push fehlgeschlagen: ${e.message}');
       }
 
-      // ── Anhänge hochladen (immer wenn Anhänge vorhanden) ─────────────────
-      await _uploadAttachments(client, dirtyEntries);
+      // ── Anhänge hochladen (fire-and-forget — blockiert Sync nicht) ──────
+      unawaited(_uploadAttachments(client, dirtyEntries));
     }
 
-    // ── Anhänge herunterladen die beim Pull fehlten ───────────────────────────
-    await _downloadMissingAttachments(client, pullResp);
+    // ── Anhänge herunterladen (fire-and-forget — Einträge sofort sichtbar) ───
+    unawaited(_downloadMissingAttachments(client, pullResp));
 
     // ── Finalize ─────────────────────────────────────────────────────────────
 
@@ -251,26 +252,32 @@ class SyncService {
           );
         }
 
-        // Sync attachment metadata — Datei-Download passiert danach in _downloadMissingAttachments
+        // Sync attachment metadata — Datei-Download passiert in _downloadMissingAttachments
         for (final attMap in se.attachments) {
-          final attId = attMap['id'] as String? ?? '';
+          final attId = _attStr(attMap, 'id');
           if (attId.isEmpty) continue;
-          final fileName = attMap['fileName'] as String? ?? attId;
+          final fileName = _attStr(attMap, 'fileName', 'file_name').isNotEmpty
+              ? _attStr(attMap, 'fileName', 'file_name')
+              : attId;
           final ext = p.extension(fileName);
           final localPath = p.join(vaultAttsPath, '$attId$ext');
+          final mimeType = _attStr(attMap, 'mimeType', 'mime_type').isNotEmpty
+              ? _attStr(attMap, 'mimeType', 'mime_type')
+              : 'application/octet-stream';
           await db.into(db.attachments).insertOnConflictUpdate(
             AttachmentsCompanion(
               id: Value(attId),
               entryId: Value(se.id),
-              type: Value(attMap['type'] as String? ?? 'file'),
-              mimeType: Value(attMap['mimeType'] as String? ?? 'application/octet-stream'),
+              type: Value(_attStr(attMap, 'type').isNotEmpty
+                  ? _attStr(attMap, 'type') : 'file'),
+              mimeType: Value(mimeType),
               localPath: Value(localPath),
               fileName: Value(fileName),
-              fileSize: Value(attMap['fileSize'] as int? ?? 0),
-              durationMs: Value(attMap['durationMs'] as int?),
+              fileSize: Value(_attInt(attMap, 'fileSize', 'size') ?? 0),
+              durationMs: Value(_attInt(attMap, 'durationMs', 'duration_ms')),
               transcription: Value(attMap['transcription'] as String?),
               createdAt: Value(DateTime.tryParse(
-                      attMap['createdAt'] as String? ?? '') ??
+                      _attStr(attMap, 'createdAt', 'created_at'))?.toUtc() ??
                   DateTime.now().toUtc()),
             ),
           );
@@ -433,18 +440,34 @@ class SyncService {
     }
   }
 
+  // ── Hilfsfunktionen für camelCase/snake_case Normierung ─────────────────────
+
+  static String _attStr(Map<String, dynamic> m, String camel, [String? snake]) =>
+      (m[camel] as String?) ?? (snake != null ? m[snake] as String? : null) ?? '';
+
+  static int? _attInt(Map<String, dynamic> m, String camel, [String? snake]) =>
+      (m[camel] as int?) ?? (snake != null ? m[snake] as int? : null);
+
   // ── Fehlende Anhänge nach Pull herunterladen ──────────────────────────────
 
   Future<void> _downloadMissingAttachments(
       SyncApiClient client, SyncPullResponse pullResp) async {
     for (final syncEntry in pullResp.entries) {
       for (final attMap in syncEntry.attachments) {
-        final id = attMap['id'] as String? ?? '';
-        final fileName = attMap['fileName'] as String? ?? id;
-        final mimeType = attMap['mimeType'] as String? ?? 'application/octet-stream';
-        final durationMs = attMap['durationMs'] as int?;
-        final type = attMap['type'] as String? ?? 'file';
-        final fileSize = attMap['fileSize'] as int? ?? 0;
+        // Normiert: Node.js sendet nach server.ts-Fix bereits camelCase.
+        // Fallback auf snake_case für Altdaten / Flutter-Shelf-Server.
+        final id = _attStr(attMap, 'id');
+        final fileName = _attStr(attMap, 'fileName', 'file_name').isNotEmpty
+            ? _attStr(attMap, 'fileName', 'file_name')
+            : id;
+        final mimeType = _attStr(attMap, 'mimeType', 'mime_type').isNotEmpty
+            ? _attStr(attMap, 'mimeType', 'mime_type')
+            : 'application/octet-stream';
+        final durationMs = _attInt(attMap, 'durationMs', 'duration_ms');
+        final type = _attStr(attMap, 'type').isNotEmpty
+            ? _attStr(attMap, 'type')
+            : 'file';
+        final fileSize = _attInt(attMap, 'fileSize', 'size') ?? 0;
         if (id.isEmpty) continue;
 
         // Prüfen ob Anhang lokal schon existiert
