@@ -9,6 +9,7 @@ import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../data/db/app_database.dart' hide Container;
+import '../../sync/ui/pairing_flow_screen.dart';
 
 /// Vault-Übersichtsseite: zuletzt geöffnete Vaults, Erstellen, Öffnen, Server-Sync.
 /// Wird beim ersten Start angezeigt UND ist über die Seitenleiste erreichbar.
@@ -276,94 +277,23 @@ class _VaultSwitcherScreenState extends State<VaultSwitcherScreen> {
   // ── Von Server verbinden (Sync-Vault klonen) ───────────────────────────────
 
   Future<void> _connectServer() async {
-    final urlCtrl = TextEditingController();
-    final codeCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: MFColors.surface,
-        title: const Text('Von Server synchronisieren',
-            style: TextStyle(color: MFColors.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Verbinde zuerst deinen Vault über Einstellungen → Sync & Geräte, '
-              'nachdem du einen lokalen Vault erstellt hast.',
-              style: TextStyle(fontSize: 12, color: MFColors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: urlCtrl,
-              style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
-              decoration: const InputDecoration(
-                labelText: 'Server-URL',
-                labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-                hintText: 'http://192.168.x.x:8766',
-                hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-                border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.border)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.teal)),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: codeCtrl,
-              style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              decoration: const InputDecoration(
-                labelText: 'Pairing-Code (6 Stellen)',
-                labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-                hintText: '123456',
-                hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
-                border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.border)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: MFColors.teal)),
-                counterText: '',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen',
-                style: TextStyle(color: MFColors.textMuted)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-                backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
-            child: const Text('Verbinden'),
-          ),
-        ],
-      ),
+    // PairingFlowScreen übernimmt Gerätename, QR-Scan, mDNS-Discovery und
+    // manuelle Eingabe. Nach erfolgreichem Pairing sind URL + JWT-Token
+    // bereits in AppSettings gespeichert.
+    final paired = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const PairingFlowScreen()),
     );
+    if (paired != true || !mounted) return;
 
-    final url = urlCtrl.text.trim();
-    final code = codeCtrl.text.trim();
-    urlCtrl.dispose();
-    codeCtrl.dispose();
-    if (confirmed != true || !mounted) return;
-    if (url.isEmpty || code.length != 6) {
-      _showSnack('URL und 6-stelliger Code erforderlich.', ok: false);
-      return;
-    }
-
-    // Erst lokalen Vault erstellen, dann Sync-Verbindung herstellen
     setState(() => _loading = true);
     try {
       final dir = await getApplicationDocumentsDirectory();
       final vaultPath = p.join(dir.path, 'MindFeed', 'synced');
       await VaultManager.createVault(vaultPath);
       await VaultManager.saveVaultPath(vaultPath);
-      await AppSettings.saveSyncServerUrl(url);
+      // Client-Rolle setzen damit der Sync-Scheduler korrekt startet
+      await AppSettings.saveSyncRole(SyncRole.client);
       await AppSettings.saveSyncEnabled(true);
 
       if (!mounted) return;
