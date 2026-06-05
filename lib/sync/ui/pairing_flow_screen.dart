@@ -20,22 +20,28 @@ class PairingFlowScreen extends ConsumerStatefulWidget {
 class _PairingFlowScreenState extends ConsumerState<PairingFlowScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  late final TextEditingController _deviceNameCtrl;
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    // Default zu QR-Scan (Tab 1) – die häufigste Client-Aktion auf Mobile
+    _tabs = TabController(length: 4, vsync: this, initialIndex: 1);
+    _deviceNameCtrl = TextEditingController(text: AppSettings.getDeviceName());
   }
 
   @override
   void dispose() {
     _tabs.dispose();
+    _deviceNameCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Keyboard-Handling erfolgt manuell in den Tabs
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Gerät koppeln'),
         bottom: TabBar(
@@ -48,13 +54,39 @@ class _PairingFlowScreenState extends ConsumerState<PairingFlowScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabs,
-        children: const [
-          _DiscoveryTab(),
-          _QrScanTab(),
-          _QrDisplayTab(),
-          _ManualTab(),
+      body: Column(
+        children: [
+          // ── Gerätename-Eingabe (für alle Tabs sichtbar) ───────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _deviceNameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Mein Gerätename',
+                hintText: 'z.B. Dennis iPhone',
+                border: OutlineInputBorder(),
+                isDense: true,
+                prefixIcon: Icon(Icons.phone_android, size: 18),
+              ),
+              onChanged: (v) {
+                if (v.trim().isNotEmpty) {
+                  AppSettings.saveDeviceName(v.trim()); // fire-and-forget
+                }
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: const [
+                _DiscoveryTab(),
+                _QrScanTab(),
+                _QrDisplayTab(),
+                _ManualTab(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -80,8 +112,10 @@ class _DiscoveryTabState extends ConsumerState<_DiscoveryTab> {
   }
 
   Future<void> _startScan() async {
+    if (!mounted) return;
     setState(() => _scanning = true);
     await ref.read(mdnsServiceProvider).startDiscovery();
+    if (!mounted) return;
     setState(() => _scanning = false);
   }
 
@@ -126,30 +160,26 @@ class _DiscoveryTabState extends ConsumerState<_DiscoveryTab> {
   Future<void> _connectToPeer(SyncPeer peer) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => _EnterCodeScreen(peer: peer),
-      ),
+      MaterialPageRoute(builder: (_) => _EnterCodeScreen(peer: peer)),
     );
   }
 }
 
 // ── Tab 2: QR scan ───────────────────────────────────────────────────────────
 
-class _QrScanTab extends ConsumerStatefulWidget {
+// Kein Riverpod nötig — nutzt nur AppSettings
+class _QrScanTab extends StatefulWidget {
   const _QrScanTab();
 
   @override
-  ConsumerState<_QrScanTab> createState() => _QrScanTabState();
+  State<_QrScanTab> createState() => _QrScanTabState();
 }
 
-class _QrScanTabState extends ConsumerState<_QrScanTab> {
+class _QrScanTabState extends State<_QrScanTab> {
   bool _handled = false;
 
   @override
   Widget build(BuildContext context) {
-    // MobileScanner verwendet die Gerätekamera — auf Desktop via Webcam,
-    // aber mobile_scanner benötigt auf macOS ggf. spezifische Entitlements.
-    // Fallback: manuelles Code-Eingabe-Feld wenn Kamera nicht verfügbar.
     if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
       return _DesktopQrFallback(onPair: _pairWith);
     }
@@ -263,6 +293,7 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   }
 
   void _generate() {
+    if (!mounted) return;
     final server = ref.read(syncServerProvider);
     setState(() => _code = server.generatePairingCode());
   }
@@ -310,12 +341,11 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
       );
     }
 
-    // QR-Daten: eigene IP:Port + Pairing-Code
     final ip = _localIp ?? '127.0.0.1';
     final qrData = 'mindfeed://pair?url=http://$ip:8766&code=$code';
 
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -331,7 +361,6 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
               style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: 'monospace'),
             ),
             const SizedBox(height: 16),
-            // Weißer Hintergrund damit QR-Code in Dark Mode sichtbar ist
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -359,9 +388,7 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
                   Text(
                     code,
                     style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 8),
+                        fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 8),
                   ),
                 ],
               ),
@@ -386,14 +413,15 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
 
 // ── Tab 4: Manual entry ───────────────────────────────────────────────────────
 
-class _ManualTab extends ConsumerStatefulWidget {
+// Kein Riverpod nötig — nutzt nur AppSettings
+class _ManualTab extends StatefulWidget {
   const _ManualTab();
 
   @override
-  ConsumerState<_ManualTab> createState() => _ManualTabState();
+  State<_ManualTab> createState() => _ManualTabState();
 }
 
-class _ManualTabState extends ConsumerState<_ManualTab> {
+class _ManualTabState extends State<_ManualTab> {
   final _urlCtrl = TextEditingController();
   final _codeCtrl = TextEditingController();
   bool _loading = false;
@@ -414,6 +442,7 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
   }
 
   Future<void> _connect() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       final client = SyncApiClient(_urlCtrl.text.trim());
@@ -428,12 +457,14 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
         Navigator.pop(context, true);
       }
     } on TimeoutException {
-      setState(() => _error =
-          'Server nicht erreichbar (Timeout). Prüfe IP-Adresse, Port und ob die Firewall Port 8766 zulässt.');
+      if (mounted) {
+        setState(() => _error =
+            'Server nicht erreichbar (Timeout). Prüfe IP-Adresse, Port und ob die Firewall Port 8766 zulässt.');
+      }
     } on SyncException catch (e) {
-      setState(() => _error = e.message);
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -441,10 +472,13 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Keyboard-Inset manuell addieren, da resizeToAvoidBottomInset: false
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Text('Server-URL', style: TextStyle(fontWeight: FontWeight.w500)),
           const SizedBox(height: 8),
@@ -515,6 +549,7 @@ class _EnterCodeScreenState extends ConsumerState<_EnterCodeScreen> {
   }
 
   Future<void> _connect() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       final client = SyncApiClient(widget.peer.baseUrl);
@@ -530,10 +565,12 @@ class _EnterCodeScreenState extends ConsumerState<_EnterCodeScreen> {
         Navigator.pop(context, true);
       }
     } on TimeoutException {
-      setState(() => _error =
-          'Server nicht erreichbar (Timeout). Prüfe Netzwerk und Firewall (Port 8766).');
+      if (mounted) {
+        setState(() => _error =
+            'Server nicht erreichbar (Timeout). Prüfe Netzwerk und Firewall (Port 8766).');
+      }
     } on SyncException catch (e) {
-      setState(() => _error = e.message);
+      if (mounted) setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -541,12 +578,15 @@ class _EnterCodeScreenState extends ConsumerState<_EnterCodeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(title: Text(widget.peer.deviceName)),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text('Verbinde mit: ${widget.peer.baseUrl}',
                 style: const TextStyle(color: Colors.grey)),
@@ -611,11 +651,12 @@ class _DesktopQrFallbackState extends State<_DesktopQrFallback> {
   }
 
   Future<void> _connect() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       await widget.onPair(_urlCtrl.text.trim(), _codeCtrl.text.trim());
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -623,10 +664,12 @@ class _DesktopQrFallbackState extends State<_DesktopQrFallback> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
+      padding: EdgeInsets.fromLTRB(32, 32, 32, 32 + bottomInset),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.qr_code_scanner, size: 48, color: Colors.grey),
           const SizedBox(height: 12),
