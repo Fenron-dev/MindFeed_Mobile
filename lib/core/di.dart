@@ -5,6 +5,7 @@ import '../data/db/daos/tag_dao.dart';
 import '../data/db/daos/container_dao.dart';
 import '../data/db/daos/attachment_dao.dart';
 import '../data/db/daos/property_dao.dart';
+import '../data/db/daos/change_log_dao.dart';
 import '../data/repositories/entry_repository.dart';
 import '../domain/feed_filter.dart';
 import '../services/app_settings.dart';
@@ -27,6 +28,13 @@ final attachmentDaoProvider =
     Provider<AttachmentDao>((ref) => ref.watch(databaseProvider).attachmentDao);
 final propertyDaoProvider =
     Provider<PropertyDao>((ref) => ref.watch(databaseProvider).propertyDao);
+final changeLogDaoProvider =
+    Provider<ChangeLogDao>((ref) => ref.watch(databaseProvider).changeLogDao);
+
+/// Reaktiver Verlauf der letzten Änderungen (für Undo).
+final changeLogProvider = StreamProvider((ref) {
+  return ref.watch(changeLogDaoProvider).watchRecent();
+});
 
 // ─── Repositories ─────────────────────────────────────────────────────────────
 final entryRepositoryProvider = Provider<EntryRepository>((ref) {

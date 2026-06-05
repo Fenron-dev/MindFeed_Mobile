@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../db/app_database.dart';
@@ -280,6 +281,17 @@ class EntryRepository {
     final existing = await entryDao.getById(id);
     if (existing == null) throw StateError('Entry $id nicht gefunden');
 
+    // Journal: Snapshot VOR der Änderung für Undo (nur bei inhaltlichen
+    // Änderungen — Pin/Reminder sind trivial und werden nicht protokolliert).
+    if (body != null || title != null || status != null) {
+      final desc = status != null
+          ? 'Status geändert → ${_statusLabel(status)}'
+          : (title != null && body == null
+              ? 'Titel geändert'
+              : 'Text geändert');
+      await _logChange(id, status != null ? 'status' : 'edit', desc);
+    }
+
     await entryDao.upsert(EntriesCompanion(
       id: Value(id),
       body: body != null ? Value(body) : Value(existing.body),
@@ -313,7 +325,150 @@ class EntryRepository {
   }
 
   /// Verschiebt Eintrag in den Papierkorb (Soft-Delete, Tombstone für Sync).
-  Future<void> deleteEntry(String id) => entryDao.softDelete(id);
+  Future<void> deleteEntry(String id) async {
+    await _logChange(id, 'delete', 'In den Papierkorb verschoben');
+    await entryDao.softDelete(id);
+  }
+
+  // ── Änderungs-Journal & Undo ────────────────────────────────────────────────
+
+  static String _statusLabel(String s) => switch (s) {
+        'done' => 'Erledigt',
+        'archived' => 'Archiviert',
+        'inbox' => 'Inbox',
+        _ => s,
+      };
+
+  /// Serialisiert den aktuellen Zustand eines Eintrags inkl. Relationen.
+  Future<String?> _snapshotJson(String id) async {
+    final e = await entryDao.getById(id);
+    if (e == null) return null;
+    final containerIds = await entryDao.getContainerIds(id);
+    final props = await (db.select(db.entryProperties)
+          ..where((p) => p.entryId.equals(id)))
+        .get();
+    final tagRows = await (db.select(db.entryTags)
+          ..where((t) => t.entryId.equals(id)))
+        .get();
+    final tagNames = <String>[];
+    for (final tr in tagRows) {
+      final tag = await (db.select(db.tags)..where((t) => t.id.equals(tr.tagId)))
+          .getSingleOrNull();
+      if (tag != null) tagNames.add(tag.name);
+    }
+    return jsonEncode({
+      'id': e.id,
+      'createdAt': e.createdAt.toIso8601String(),
+      'updatedAt': e.updatedAt.toIso8601String(),
+      'type': e.type,
+      'title': e.title,
+      'body': e.body,
+      'status': e.status,
+      'pinned': e.pinned,
+      'reminderAt': e.reminderAt?.toIso8601String(),
+      'sourceUrl': e.sourceUrl,
+      'sourceApp': e.sourceApp,
+      'lang': e.lang,
+      'deletedAt': e.deletedAt?.toIso8601String(),
+      'tags': tagNames,
+      'containers': containerIds,
+      'properties': props
+          .map((p) => {'key': p.key, 'value': p.value, 'type': p.type})
+          .toList(),
+    });
+  }
+
+  /// Protokolliert eine Konflikt-Entscheidung (für Undo). Nur für Einträge —
+  /// speichert den lokalen Zustand VOR dem Anwenden der Entscheidung.
+  Future<void> logConflictChoice(String entityId, bool serverWins) =>
+      _logChange(
+        entityId,
+        serverWins ? 'conflict_server' : 'conflict_mine',
+        serverWins
+            ? 'Konflikt: Server-Version übernommen'
+            : 'Konflikt: eigene Version behalten',
+      );
+
+  Future<void> _logChange(String entityId, String action, String description) async {
+    try {
+      final snap = await _snapshotJson(entityId);
+      await db.changeLogDao.add(ChangeLogCompanion(
+        id: Value('cl-${_uuid.v4()}'),
+        entityType: const Value('entry'),
+        entityId: Value(entityId),
+        action: Value(action),
+        description: Value(description),
+        beforeJson: Value(snap),
+      ));
+    } catch (e) {
+      debugPrint('[Journal] Logging fehlgeschlagen: $e');
+    }
+  }
+
+  /// Macht eine protokollierte Änderung rückgängig: stellt den Snapshot wieder her.
+  Future<void> undoChange(String logId) async {
+    final log = await db.changeLogDao.getById(logId);
+    if (log == null || log.undone || log.beforeJson == null) return;
+    final data = jsonDecode(log.beforeJson!) as Map<String, dynamic>;
+    await _restoreSnapshot(data);
+    await db.changeLogDao.markUndone(logId);
+  }
+
+  Future<void> _restoreSnapshot(Map<String, dynamic> data) async {
+    final id = data['id'] as String;
+    await db.transaction(() async {
+      await entryDao.upsert(EntriesCompanion(
+        id: Value(id),
+        createdAt: Value(DateTime.tryParse(data['createdAt'] as String? ?? '')
+                ?.toUtc() ??
+            DateTime.now().toUtc()),
+        // updatedAt auf jetzt → gilt als neueste Version (gewinnt beim Sync)
+        updatedAt: Value(DateTime.now().toUtc()),
+        type: Value(data['type'] as String? ?? 'text'),
+        title: Value(data['title'] as String?),
+        body: Value(data['body'] as String? ?? ''),
+        status: Value(data['status'] as String? ?? 'inbox'),
+        pinned: Value(data['pinned'] as bool? ?? false),
+        reminderAt: Value(data['reminderAt'] != null
+            ? DateTime.tryParse(data['reminderAt'] as String)
+            : null),
+        sourceUrl: Value(data['sourceUrl'] as String?),
+        sourceApp: Value(data['sourceApp'] as String?),
+        lang: Value(data['lang'] as String?),
+        // deletedAt aus Snapshot wiederherstellen (Undo eines Löschens → null)
+        deletedAt: Value(data['deletedAt'] != null
+            ? DateTime.tryParse(data['deletedAt'] as String)
+            : null),
+      ));
+
+      // Tags wiederherstellen
+      final tags = (data['tags'] as List<dynamic>?)?.cast<String>() ?? [];
+      await tagDao.setEntryTags(id, tags);
+
+      // Container-Zuordnungen
+      final containers =
+          (data['containers'] as List<dynamic>?)?.cast<String>() ?? [];
+      await entryDao.setContainers(id, containers);
+
+      // Properties
+      await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(id))).go();
+      final props = (data['properties'] as List<dynamic>?) ?? [];
+      for (final pr in props) {
+        final m = pr as Map<String, dynamic>;
+        final key = m['key'] as String? ?? '';
+        if (key.isEmpty) continue;
+        await db.into(db.entryProperties).insertOnConflictUpdate(
+          EntryPropertiesCompanion(
+            id: Value('prop-$id-$key'),
+            entryId: Value(id),
+            key: Value(key),
+            value: Value(m['value'] as String?),
+            type: Value(m['type'] as String? ?? 'text'),
+          ),
+        );
+      }
+    });
+  }
 
   /// Stellt einen Eintrag aus dem Papierkorb wieder her.
   Future<void> restoreEntry(String id) => entryDao.restore(id);

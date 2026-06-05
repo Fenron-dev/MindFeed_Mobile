@@ -6,11 +6,13 @@ import 'tables/tags.dart';
 import 'tables/containers.dart';
 import 'tables/attachments.dart';
 import 'tables/properties.dart';
+import 'tables/change_log.dart';
 import 'daos/entry_dao.dart';
 import 'daos/tag_dao.dart';
 import 'daos/container_dao.dart';
 import 'daos/attachment_dao.dart';
 import 'daos/property_dao.dart';
+import 'daos/change_log_dao.dart';
 
 part 'app_database.g.dart';
 
@@ -24,6 +26,7 @@ part 'app_database.g.dart';
     Attachments,
     EntryProperties,
     EntryLinks,
+    ChangeLog,
   ],
   daos: [
     EntryDao,
@@ -31,6 +34,7 @@ part 'app_database.g.dart';
     ContainerDao,
     AttachmentDao,
     PropertyDao,
+    ChangeLogDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -48,7 +52,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -75,6 +79,9 @@ class AppDatabase extends _$AppDatabase {
             await customStatement(
                 'UPDATE entries SET sync_updated_at = updated_at '
                 'WHERE sync_updated_at IS NULL AND deleted_at IS NULL');
+          }
+          if (from < 4) {
+            await m.createTable(changeLog);
           }
         },
         beforeOpen: (details) async {

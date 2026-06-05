@@ -11,6 +11,7 @@ import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_form_screen.dart';
 import '../features/vault/vault_switcher_screen.dart';
 import '../features/trash/trash_screen.dart';
+import '../features/history/history_screen.dart';
 import '../widgets/app_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -87,6 +88,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.trash,
         builder: (context, state) => const TrashScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.history,
+        builder: (context, state) => const HistoryScreen(),
       ),
 
       // Haupt-Shell mit Bottom Nav

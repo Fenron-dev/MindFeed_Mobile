@@ -10,6 +10,7 @@ abstract class AppRoutes {
   static const vaultSetup = '/vault-setup';
   static const vaultSwitcher = '/vault-switcher';
   static const trash = '/trash';
+  static const history = '/history';
 
   static String entryDetailPath(String id) => '/entry/$id';
   static String containerDetailPath(String id) => '/container/$id';

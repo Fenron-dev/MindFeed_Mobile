@@ -3971,6 +3971,523 @@ class EntryLinksCompanion extends UpdateCompanion<EntryLink> {
   }
 }
 
+class $ChangeLogTable extends ChangeLog
+    with TableInfo<$ChangeLogTable, ChangeLogData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ChangeLogTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _entityTypeMeta = const VerificationMeta(
+    'entityType',
+  );
+  @override
+  late final GeneratedColumn<String> entityType = GeneratedColumn<String>(
+    'entity_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _entityIdMeta = const VerificationMeta(
+    'entityId',
+  );
+  @override
+  late final GeneratedColumn<String> entityId = GeneratedColumn<String>(
+    'entity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _actionMeta = const VerificationMeta('action');
+  @override
+  late final GeneratedColumn<String> action = GeneratedColumn<String>(
+    'action',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _beforeJsonMeta = const VerificationMeta(
+    'beforeJson',
+  );
+  @override
+  late final GeneratedColumn<String> beforeJson = GeneratedColumn<String>(
+    'before_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: () => DateTime.now().toUtc(),
+  );
+  static const VerificationMeta _undoneMeta = const VerificationMeta('undone');
+  @override
+  late final GeneratedColumn<bool> undone = GeneratedColumn<bool>(
+    'undone',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("undone" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    entityType,
+    entityId,
+    action,
+    description,
+    beforeJson,
+    createdAt,
+    undone,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'change_log';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ChangeLogData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('entity_type')) {
+      context.handle(
+        _entityTypeMeta,
+        entityType.isAcceptableOrUnknown(data['entity_type']!, _entityTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityTypeMeta);
+    }
+    if (data.containsKey('entity_id')) {
+      context.handle(
+        _entityIdMeta,
+        entityId.isAcceptableOrUnknown(data['entity_id']!, _entityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityIdMeta);
+    }
+    if (data.containsKey('action')) {
+      context.handle(
+        _actionMeta,
+        action.isAcceptableOrUnknown(data['action']!, _actionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_actionMeta);
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_descriptionMeta);
+    }
+    if (data.containsKey('before_json')) {
+      context.handle(
+        _beforeJsonMeta,
+        beforeJson.isAcceptableOrUnknown(data['before_json']!, _beforeJsonMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('undone')) {
+      context.handle(
+        _undoneMeta,
+        undone.isAcceptableOrUnknown(data['undone']!, _undoneMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ChangeLogData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ChangeLogData(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      entityType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_type'],
+      )!,
+      entityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_id'],
+      )!,
+      action: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}action'],
+      )!,
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      )!,
+      beforeJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}before_json'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      undone: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}undone'],
+      )!,
+    );
+  }
+
+  @override
+  $ChangeLogTable createAlias(String alias) {
+    return $ChangeLogTable(attachedDatabase, alias);
+  }
+}
+
+class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
+  final String id;
+  final String entityType;
+  final String entityId;
+  final String action;
+  final String description;
+  final String? beforeJson;
+  final DateTime createdAt;
+  final bool undone;
+  const ChangeLogData({
+    required this.id,
+    required this.entityType,
+    required this.entityId,
+    required this.action,
+    required this.description,
+    this.beforeJson,
+    required this.createdAt,
+    required this.undone,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['entity_type'] = Variable<String>(entityType);
+    map['entity_id'] = Variable<String>(entityId);
+    map['action'] = Variable<String>(action);
+    map['description'] = Variable<String>(description);
+    if (!nullToAbsent || beforeJson != null) {
+      map['before_json'] = Variable<String>(beforeJson);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['undone'] = Variable<bool>(undone);
+    return map;
+  }
+
+  ChangeLogCompanion toCompanion(bool nullToAbsent) {
+    return ChangeLogCompanion(
+      id: Value(id),
+      entityType: Value(entityType),
+      entityId: Value(entityId),
+      action: Value(action),
+      description: Value(description),
+      beforeJson: beforeJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(beforeJson),
+      createdAt: Value(createdAt),
+      undone: Value(undone),
+    );
+  }
+
+  factory ChangeLogData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ChangeLogData(
+      id: serializer.fromJson<String>(json['id']),
+      entityType: serializer.fromJson<String>(json['entityType']),
+      entityId: serializer.fromJson<String>(json['entityId']),
+      action: serializer.fromJson<String>(json['action']),
+      description: serializer.fromJson<String>(json['description']),
+      beforeJson: serializer.fromJson<String?>(json['beforeJson']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      undone: serializer.fromJson<bool>(json['undone']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'entityType': serializer.toJson<String>(entityType),
+      'entityId': serializer.toJson<String>(entityId),
+      'action': serializer.toJson<String>(action),
+      'description': serializer.toJson<String>(description),
+      'beforeJson': serializer.toJson<String?>(beforeJson),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'undone': serializer.toJson<bool>(undone),
+    };
+  }
+
+  ChangeLogData copyWith({
+    String? id,
+    String? entityType,
+    String? entityId,
+    String? action,
+    String? description,
+    Value<String?> beforeJson = const Value.absent(),
+    DateTime? createdAt,
+    bool? undone,
+  }) => ChangeLogData(
+    id: id ?? this.id,
+    entityType: entityType ?? this.entityType,
+    entityId: entityId ?? this.entityId,
+    action: action ?? this.action,
+    description: description ?? this.description,
+    beforeJson: beforeJson.present ? beforeJson.value : this.beforeJson,
+    createdAt: createdAt ?? this.createdAt,
+    undone: undone ?? this.undone,
+  );
+  ChangeLogData copyWithCompanion(ChangeLogCompanion data) {
+    return ChangeLogData(
+      id: data.id.present ? data.id.value : this.id,
+      entityType: data.entityType.present
+          ? data.entityType.value
+          : this.entityType,
+      entityId: data.entityId.present ? data.entityId.value : this.entityId,
+      action: data.action.present ? data.action.value : this.action,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
+      beforeJson: data.beforeJson.present
+          ? data.beforeJson.value
+          : this.beforeJson,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      undone: data.undone.present ? data.undone.value : this.undone,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ChangeLogData(')
+          ..write('id: $id, ')
+          ..write('entityType: $entityType, ')
+          ..write('entityId: $entityId, ')
+          ..write('action: $action, ')
+          ..write('description: $description, ')
+          ..write('beforeJson: $beforeJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('undone: $undone')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    entityType,
+    entityId,
+    action,
+    description,
+    beforeJson,
+    createdAt,
+    undone,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ChangeLogData &&
+          other.id == this.id &&
+          other.entityType == this.entityType &&
+          other.entityId == this.entityId &&
+          other.action == this.action &&
+          other.description == this.description &&
+          other.beforeJson == this.beforeJson &&
+          other.createdAt == this.createdAt &&
+          other.undone == this.undone);
+}
+
+class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
+  final Value<String> id;
+  final Value<String> entityType;
+  final Value<String> entityId;
+  final Value<String> action;
+  final Value<String> description;
+  final Value<String?> beforeJson;
+  final Value<DateTime> createdAt;
+  final Value<bool> undone;
+  final Value<int> rowid;
+  const ChangeLogCompanion({
+    this.id = const Value.absent(),
+    this.entityType = const Value.absent(),
+    this.entityId = const Value.absent(),
+    this.action = const Value.absent(),
+    this.description = const Value.absent(),
+    this.beforeJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.undone = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ChangeLogCompanion.insert({
+    required String id,
+    required String entityType,
+    required String entityId,
+    required String action,
+    required String description,
+    this.beforeJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.undone = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       entityType = Value(entityType),
+       entityId = Value(entityId),
+       action = Value(action),
+       description = Value(description);
+  static Insertable<ChangeLogData> custom({
+    Expression<String>? id,
+    Expression<String>? entityType,
+    Expression<String>? entityId,
+    Expression<String>? action,
+    Expression<String>? description,
+    Expression<String>? beforeJson,
+    Expression<DateTime>? createdAt,
+    Expression<bool>? undone,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (entityType != null) 'entity_type': entityType,
+      if (entityId != null) 'entity_id': entityId,
+      if (action != null) 'action': action,
+      if (description != null) 'description': description,
+      if (beforeJson != null) 'before_json': beforeJson,
+      if (createdAt != null) 'created_at': createdAt,
+      if (undone != null) 'undone': undone,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ChangeLogCompanion copyWith({
+    Value<String>? id,
+    Value<String>? entityType,
+    Value<String>? entityId,
+    Value<String>? action,
+    Value<String>? description,
+    Value<String?>? beforeJson,
+    Value<DateTime>? createdAt,
+    Value<bool>? undone,
+    Value<int>? rowid,
+  }) {
+    return ChangeLogCompanion(
+      id: id ?? this.id,
+      entityType: entityType ?? this.entityType,
+      entityId: entityId ?? this.entityId,
+      action: action ?? this.action,
+      description: description ?? this.description,
+      beforeJson: beforeJson ?? this.beforeJson,
+      createdAt: createdAt ?? this.createdAt,
+      undone: undone ?? this.undone,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (entityType.present) {
+      map['entity_type'] = Variable<String>(entityType.value);
+    }
+    if (entityId.present) {
+      map['entity_id'] = Variable<String>(entityId.value);
+    }
+    if (action.present) {
+      map['action'] = Variable<String>(action.value);
+    }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
+    if (beforeJson.present) {
+      map['before_json'] = Variable<String>(beforeJson.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (undone.present) {
+      map['undone'] = Variable<bool>(undone.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ChangeLogCompanion(')
+          ..write('id: $id, ')
+          ..write('entityType: $entityType, ')
+          ..write('entityId: $entityId, ')
+          ..write('action: $action, ')
+          ..write('description: $description, ')
+          ..write('beforeJson: $beforeJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('undone: $undone, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3986,11 +4503,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $EntryLinksTable entryLinks = $EntryLinksTable(this);
+  late final $ChangeLogTable changeLog = $ChangeLogTable(this);
   late final EntryDao entryDao = EntryDao(this as AppDatabase);
   late final TagDao tagDao = TagDao(this as AppDatabase);
   late final ContainerDao containerDao = ContainerDao(this as AppDatabase);
   late final AttachmentDao attachmentDao = AttachmentDao(this as AppDatabase);
   late final PropertyDao propertyDao = PropertyDao(this as AppDatabase);
+  late final ChangeLogDao changeLogDao = ChangeLogDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4004,6 +4523,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     attachments,
     entryProperties,
     entryLinks,
+    changeLog,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -7750,6 +8270,269 @@ typedef $$EntryLinksTableProcessedTableManager =
       EntryLink,
       PrefetchHooks Function({bool fromId, bool toId})
     >;
+typedef $$ChangeLogTableCreateCompanionBuilder =
+    ChangeLogCompanion Function({
+      required String id,
+      required String entityType,
+      required String entityId,
+      required String action,
+      required String description,
+      Value<String?> beforeJson,
+      Value<DateTime> createdAt,
+      Value<bool> undone,
+      Value<int> rowid,
+    });
+typedef $$ChangeLogTableUpdateCompanionBuilder =
+    ChangeLogCompanion Function({
+      Value<String> id,
+      Value<String> entityType,
+      Value<String> entityId,
+      Value<String> action,
+      Value<String> description,
+      Value<String?> beforeJson,
+      Value<DateTime> createdAt,
+      Value<bool> undone,
+      Value<int> rowid,
+    });
+
+class $$ChangeLogTableFilterComposer
+    extends Composer<_$AppDatabase, $ChangeLogTable> {
+  $$ChangeLogTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get action => $composableBuilder(
+    column: $table.action,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get beforeJson => $composableBuilder(
+    column: $table.beforeJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get undone => $composableBuilder(
+    column: $table.undone,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ChangeLogTableOrderingComposer
+    extends Composer<_$AppDatabase, $ChangeLogTable> {
+  $$ChangeLogTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get action => $composableBuilder(
+    column: $table.action,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get beforeJson => $composableBuilder(
+    column: $table.beforeJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get undone => $composableBuilder(
+    column: $table.undone,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ChangeLogTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ChangeLogTable> {
+  $$ChangeLogTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get entityId =>
+      $composableBuilder(column: $table.entityId, builder: (column) => column);
+
+  GeneratedColumn<String> get action =>
+      $composableBuilder(column: $table.action, builder: (column) => column);
+
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get beforeJson => $composableBuilder(
+    column: $table.beforeJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get undone =>
+      $composableBuilder(column: $table.undone, builder: (column) => column);
+}
+
+class $$ChangeLogTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ChangeLogTable,
+          ChangeLogData,
+          $$ChangeLogTableFilterComposer,
+          $$ChangeLogTableOrderingComposer,
+          $$ChangeLogTableAnnotationComposer,
+          $$ChangeLogTableCreateCompanionBuilder,
+          $$ChangeLogTableUpdateCompanionBuilder,
+          (
+            ChangeLogData,
+            BaseReferences<_$AppDatabase, $ChangeLogTable, ChangeLogData>,
+          ),
+          ChangeLogData,
+          PrefetchHooks Function()
+        > {
+  $$ChangeLogTableTableManager(_$AppDatabase db, $ChangeLogTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ChangeLogTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ChangeLogTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ChangeLogTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> entityType = const Value.absent(),
+                Value<String> entityId = const Value.absent(),
+                Value<String> action = const Value.absent(),
+                Value<String> description = const Value.absent(),
+                Value<String?> beforeJson = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<bool> undone = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ChangeLogCompanion(
+                id: id,
+                entityType: entityType,
+                entityId: entityId,
+                action: action,
+                description: description,
+                beforeJson: beforeJson,
+                createdAt: createdAt,
+                undone: undone,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String entityType,
+                required String entityId,
+                required String action,
+                required String description,
+                Value<String?> beforeJson = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<bool> undone = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ChangeLogCompanion.insert(
+                id: id,
+                entityType: entityType,
+                entityId: entityId,
+                action: action,
+                description: description,
+                beforeJson: beforeJson,
+                createdAt: createdAt,
+                undone: undone,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ChangeLogTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ChangeLogTable,
+      ChangeLogData,
+      $$ChangeLogTableFilterComposer,
+      $$ChangeLogTableOrderingComposer,
+      $$ChangeLogTableAnnotationComposer,
+      $$ChangeLogTableCreateCompanionBuilder,
+      $$ChangeLogTableUpdateCompanionBuilder,
+      (
+        ChangeLogData,
+        BaseReferences<_$AppDatabase, $ChangeLogTable, ChangeLogData>,
+      ),
+      ChangeLogData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7769,4 +8552,6 @@ class $AppDatabaseManager {
       $$EntryPropertiesTableTableManager(_db, _db.entryProperties);
   $$EntryLinksTableTableManager get entryLinks =>
       $$EntryLinksTableTableManager(_db, _db.entryLinks);
+  $$ChangeLogTableTableManager get changeLog =>
+      $$ChangeLogTableTableManager(_db, _db.changeLog);
 }

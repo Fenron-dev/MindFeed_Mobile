@@ -116,6 +116,15 @@ class SyncStateNotifier extends Notifier<SyncState> {
       ConflictResolution resolution, List<SyncConflict> conflicts) async {
     if (conflicts.isEmpty) return;
     final service = ref.read(syncServiceProvider);
+    final repo = ref.read(entryRepositoryProvider);
+
+    // Journal: lokalen Zustand vor der Entscheidung sichern → Undo möglich,
+    // falls man sich später anders entscheidet.
+    for (final c in conflicts.where((c) => c.entityType == 'entry')) {
+      await repo.logConflictChoice(
+          c.entityId, resolution == ConflictResolution.server);
+    }
+
     if (resolution == ConflictResolution.mine) {
       await service.resolveConflictsMine(conflicts);
     } else {

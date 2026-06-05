@@ -1166,8 +1166,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ─── Info ──────────────────────────────────────────────────────────
           const SizedBox(height: 28),
-          // ── Papierkorb ────────────────────────────────────────────────────
-          _SectionHeader('PAPIERKORB'),
+          // ── Verlauf & Papierkorb ──────────────────────────────────────────
+          _SectionHeader('VERLAUF & PAPIERKORB'),
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.history,
+            iconColor: const Color(0xFF6366F1),
+            title: 'Änderungsverlauf',
+            subtitle: 'Bearbeitungen & Konflikt-Entscheidungen rückgängig machen',
+            onTap: () => context.push(AppRoutes.history),
+          ),
           const SizedBox(height: 8),
           _TrashSection(),
 

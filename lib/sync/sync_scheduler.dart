@@ -53,8 +53,11 @@ class SyncScheduler with WidgetsBindingObserver {
 
   void _cleanTrashIfNeeded() {
     final days = AppSettings.getTrashRetentionDays();
-    if (days <= 0) return; // 0 = nie
-    _ref.read(entryDaoProvider).cleanTrashOlderThan(days);
+    if (days > 0) {
+      _ref.read(entryDaoProvider).cleanTrashOlderThan(days);
+    }
+    // Änderungsverlauf schlank halten: Einträge älter als 30 Tage entfernen
+    _ref.read(changeLogDaoProvider).pruneOlderThan(30);
   }
 
   void _setupBackupTimer() {
