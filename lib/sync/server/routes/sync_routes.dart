@@ -366,6 +366,42 @@ Router syncRouter(AppDatabase db, SyncServer server) {
               ),
             );
           }
+
+          // Attachment-Metadaten speichern (Binärdaten kommen separat via
+          // POST /sync/attachments/:id). Ohne diesen Schritt schlägt der
+          // anschließende Datei-Upload mit 404 fehl.
+          for (final attMap in incoming.attachments) {
+            final attId = attMap['id'] as String? ?? '';
+            if (attId.isEmpty) continue;
+
+            // Existierenden Server-localPath behalten (zeigt auf bereits
+            // hochgeladene Datei); sonst Platzhalter im Vault-Anhangsordner.
+            final existingAtt = await (db.select(db.attachments)
+                  ..where((a) => a.id.equals(attId)))
+                .getSingleOrNull();
+            final fileName = (attMap['fileName'] as String?) ?? attId;
+            final ext = p.extension(fileName);
+            final placeholderPath = existingAtt?.localPath ??
+                p.join(await VaultManager.getAttachmentsPath(), '$attId$ext');
+
+            await db.into(db.attachments).insertOnConflictUpdate(
+              AttachmentsCompanion(
+                id: Value(attId),
+                entryId: Value(incoming.id),
+                type: Value(attMap['type'] as String? ?? 'file'),
+                mimeType: Value(attMap['mimeType'] as String? ??
+                    'application/octet-stream'),
+                localPath: Value(placeholderPath),
+                fileName: Value(fileName),
+                fileSize: Value(attMap['fileSize'] as int? ?? 0),
+                durationMs: Value(attMap['durationMs'] as int?),
+                transcription: Value(attMap['transcription'] as String?),
+                createdAt: Value(DateTime.tryParse(
+                        attMap['createdAt'] as String? ?? '')?.toUtc() ??
+                    DateTime.now().toUtc()),
+              ),
+            );
+          }
         }
       });
     } catch (e) {

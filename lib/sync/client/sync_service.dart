@@ -1,18 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:uuid/uuid.dart';
 import '../dto/sync_dto.dart';
 import '../client/sync_api_client.dart';
 import '../../data/db/app_database.dart';
 import '../../data/db/daos/entry_dao.dart';
 import '../../data/db/daos/container_dao.dart';
-import '../../data/db/tables/tags.dart';
 import '../../core/vault_manager.dart';
 import '../../services/app_settings.dart';
-
-const _uuid = Uuid();
 
 class SyncResult {
   final bool success;
@@ -143,13 +140,19 @@ class SyncService {
       } catch (e) {
         return SyncResult.failed('Push fehlgeschlagen: $e');
       }
-
-      // ── Anhänge hochladen (fire-and-forget — blockiert Sync nicht) ──────
-      unawaited(_uploadAttachments(client, dirtyEntries));
     }
 
-    // ── Anhänge herunterladen (fire-and-forget — Einträge sofort sichtbar) ───
-    unawaited(_downloadMissingAttachments(client, pullResp));
+    // ── Anhänge übertragen (best-effort, blockiert den Sync-Erfolg nicht) ────
+    // Erst hochladen (Metadaten wurden im Push gespeichert → Server kennt die
+    // Anhänge jetzt), dann fehlende herunterladen. Beide laufen über ALLE
+    // Anhänge, sodass frühere Fehlschläge bei jedem Sync neu versucht werden.
+    // Einträge selbst sind durch _applyPull bereits sichtbar.
+    try {
+      await _uploadAttachments(client);
+      await _downloadMissingAttachments(client);
+    } catch (e) {
+      debugPrint('[Sync] Anhang-Übertragung mit Fehler beendet: $e');
+    }
 
     // ── Finalize ─────────────────────────────────────────────────────────────
 
@@ -434,22 +437,29 @@ class SyncService {
 
   // ── Anhänge hochladen ─────────────────────────────────────────────────────
 
-  Future<void> _uploadAttachments(SyncApiClient client, List<Entry> entries) async {
-    for (final e in entries) {
-      final atts = await (db.select(db.attachments)
-            ..where((a) => a.entryId.equals(e.id)))
-          .get();
-      for (final att in atts) {
-        try {
-          final file = File(att.localPath);
-          if (!file.existsSync()) continue;
-          final bytes = await file.readAsBytes();
-          await client.uploadAttachment(att.id, bytes, att.mimeType);
-        } catch (_) {
-          // Upload-Fehler ignorieren — nächster Sync versucht es erneut
+  /// Lädt alle lokalen Anhang-Dateien hoch, deren Datei vorhanden ist.
+  /// Läuft über ALLE Anhänge (nicht nur dirty entries), damit ein einmal
+  /// fehlgeschlagener Upload beim nächsten Sync erneut versucht wird.
+  Future<int> _uploadAttachments(SyncApiClient client) async {
+    final atts = await db.select(db.attachments).get();
+    var uploaded = 0;
+    for (final att in atts) {
+      try {
+        final file = File(att.localPath);
+        if (!file.existsSync()) {
+          debugPrint('[Sync] Upload übersprungen (Datei fehlt lokal): '
+              '${att.id} → ${att.localPath}');
+          continue;
         }
+        final bytes = await file.readAsBytes();
+        await client.uploadAttachment(att.id, bytes, att.mimeType);
+        uploaded++;
+      } catch (e) {
+        debugPrint('[Sync] Upload fehlgeschlagen für ${att.id}: $e');
       }
     }
+    if (uploaded > 0) debugPrint('[Sync] $uploaded Anhang/Anhänge hochgeladen');
+    return uploaded;
   }
 
   // ── Hilfsfunktionen für camelCase/snake_case Normierung ─────────────────────
@@ -460,73 +470,55 @@ class SyncService {
   static int? _attInt(Map<String, dynamic> m, String camel, [String? snake]) =>
       (m[camel] as int?) ?? (snake != null ? m[snake] as int? : null);
 
-  // ── Fehlende Anhänge nach Pull herunterladen ──────────────────────────────
+  // ── Fehlende Anhänge herunterladen ────────────────────────────────────────
 
-  Future<void> _downloadMissingAttachments(
-      SyncApiClient client, SyncPullResponse pullResp) async {
-    for (final syncEntry in pullResp.entries) {
-      for (final attMap in syncEntry.attachments) {
-        // Normiert: Node.js sendet nach server.ts-Fix bereits camelCase.
-        // Fallback auf snake_case für Altdaten / Flutter-Shelf-Server.
-        final id = _attStr(attMap, 'id');
-        final fileName = _attStr(attMap, 'fileName', 'file_name').isNotEmpty
-            ? _attStr(attMap, 'fileName', 'file_name')
-            : id;
-        final mimeType = _attStr(attMap, 'mimeType', 'mime_type').isNotEmpty
-            ? _attStr(attMap, 'mimeType', 'mime_type')
-            : 'application/octet-stream';
-        final durationMs = _attInt(attMap, 'durationMs', 'duration_ms');
-        final type = _attStr(attMap, 'type').isNotEmpty
-            ? _attStr(attMap, 'type')
-            : 'file';
-        final fileSize = _attInt(attMap, 'fileSize', 'size') ?? 0;
-        if (id.isEmpty) continue;
+  /// Lädt alle Anhang-Dateien herunter, die lokal in der DB stehen, deren
+  /// Datei aber (noch) nicht auf der Platte liegt. Läuft über ALLE Anhänge,
+  /// nicht nur über den aktuellen Pull-Delta — so wird ein einmal
+  /// fehlgeschlagener Download bei jedem Sync erneut versucht.
+  Future<int> _downloadMissingAttachments(SyncApiClient client) async {
+    final vaultAttsPath = await VaultManager.getAttachmentsPath();
+    await Directory(vaultAttsPath).create(recursive: true);
 
-        // Prüfen ob Anhang lokal schon existiert
-        final existing = await (db.select(db.attachments)
-              ..where((a) => a.id.equals(id)))
-            .getSingleOrNull();
+    final atts = await db.select(db.attachments).get();
+    var downloaded = 0;
 
-        final vaultAttsPath = await _vaultAttachmentsPath();
-        final ext = p.extension(fileName).isEmpty ? '' : p.extension(fileName);
-        final localPath = p.join(vaultAttsPath, '$id$ext');
+    for (final att in atts) {
+      // Schon vorhanden? Überspringen.
+      if (att.localPath.isNotEmpty && File(att.localPath).existsSync()) continue;
 
-        if (existing != null && File(existing.localPath).existsSync()) continue;
+      // Zielpfad im lokalen Vault festlegen
+      final ext = p.extension(att.fileName.isNotEmpty ? att.fileName : att.id);
+      final localPath = p.join(vaultAttsPath, '${att.id}$ext');
 
-        try {
-          final bytes = await client.downloadAttachment(id);
-          await Directory(vaultAttsPath).create(recursive: true);
-          await File(localPath).writeAsBytes(bytes);
-
-          if (existing == null) {
-            // Neuen Anhang in DB eintragen
-            await db.into(db.attachments).insertOnConflictUpdate(
-              AttachmentsCompanion(
-                id: Value(id),
-                entryId: Value(syncEntry.id),
-                type: Value(type),
-                mimeType: Value(mimeType),
-                localPath: Value(localPath),
-                fileName: Value(fileName),
-                fileSize: Value(fileSize),
-                durationMs: Value(durationMs),
-                createdAt: Value(DateTime.now().toUtc()),
-              ),
-            );
-          } else {
-            // Pfad aktualisieren
-            await (db.update(db.attachments)..where((a) => a.id.equals(id)))
-                .write(AttachmentsCompanion(localPath: Value(localPath)));
-          }
-        } catch (_) {
-          // Download-Fehler ignorieren
+      if (File(localPath).existsSync()) {
+        // Datei liegt schon da, nur DB-Pfad korrigieren
+        if (att.localPath != localPath) {
+          await (db.update(db.attachments)..where((a) => a.id.equals(att.id)))
+              .write(AttachmentsCompanion(localPath: Value(localPath)));
         }
+        continue;
+      }
+
+      try {
+        final bytes = await client.downloadAttachment(att.id);
+        if (bytes.isEmpty) {
+          debugPrint('[Sync] Download leer für ${att.id} — übersprungen');
+          continue;
+        }
+        await File(localPath).writeAsBytes(bytes);
+        // localPath aktualisieren → triggert watchByEntry → UI rendert Datei
+        await (db.update(db.attachments)..where((a) => a.id.equals(att.id)))
+            .write(AttachmentsCompanion(localPath: Value(localPath)));
+        downloaded++;
+      } catch (e) {
+        debugPrint('[Sync] Download fehlgeschlagen für ${att.id}: $e');
       }
     }
-  }
-
-  Future<String> _vaultAttachmentsPath() async {
-    return VaultManager.getAttachmentsPath();
+    if (downloaded > 0) {
+      debugPrint('[Sync] $downloaded Anhang/Anhänge heruntergeladen');
+    }
+    return downloaded;
   }
 
   List<SyncContainer> _toSyncContainers(List<Container> containers) =>
