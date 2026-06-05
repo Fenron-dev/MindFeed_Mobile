@@ -79,7 +79,7 @@ class SyncApiClient {
       uri,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'pairingCode': code, 'deviceName': myDeviceName}),
-    ).timeout(const Duration(seconds: 10));
+    ).timeout(const Duration(seconds: 30));
     _checkStatus(resp);
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     await SyncAuth.saveClientTokens(

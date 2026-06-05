@@ -206,6 +206,14 @@ class SyncServer {
     _persistClients(); // fire-and-forget
   }
 
+  void removeClient(String deviceId) {
+    connectedClients.removeWhere((c) => c.deviceId == deviceId);
+    refreshTokens.remove(deviceId);
+    clientLastSeen.remove(deviceId);
+    _persistRefreshTokens();
+    _persistClients();
+  }
+
   // ── Pairing-Code Verwaltung ────────────────────────────────────────────────
 
   String generatePairingCode() {

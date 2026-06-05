@@ -119,7 +119,7 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
           const SizedBox(height: 8),
           if (_role == SyncRole.server) ...[
             // Server: verbundene Clients + Sync-Trigger
-            _ConnectedClientsWidget(),
+            const _ConnectedClientsWidget(),
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: () async {
@@ -481,11 +481,18 @@ class _IpTile extends StatelessWidget {
 
 // ── Verbundene Clients Widget ─────────────────────────────────────────────────
 
-class _ConnectedClientsWidget extends ConsumerWidget {
+class _ConnectedClientsWidget extends ConsumerStatefulWidget {
+  const _ConnectedClientsWidget();
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ConnectedClientsWidget> createState() => _ConnectedClientsWidgetState();
+}
+
+class _ConnectedClientsWidgetState extends ConsumerState<_ConnectedClientsWidget> {
+  @override
+  Widget build(BuildContext context) {
     final server = ref.watch(syncServerProvider);
-    final clients = server.connectedClients;
+    final clients = List.of(server.connectedClients);
     final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
 
     if (clients.isEmpty) {
@@ -565,11 +572,41 @@ class _ConnectedClientsWidget extends ConsumerWidget {
                   Text(_timeAgo(server.clientLastSeen[c.deviceId]!),
                       style: const TextStyle(fontSize: 10, color: MFColors.textMuted)),
               ]),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18, color: MFColors.textMuted),
+                tooltip: 'Gerät entfernen',
+                onPressed: () => _confirmRemove(context, server, c.deviceId, c.deviceName),
+              ),
             ]),
           );
         }),
       ],
     );
+  }
+
+  Future<void> _confirmRemove(BuildContext context, SyncServer server, String deviceId, String deviceName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gerät entfernen?'),
+        content: Text(
+          '"${deviceName.isNotEmpty ? deviceName : 'Unbekanntes Gerät'}" wird getrennt und muss sich neu koppeln.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Abbrechen')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Entfernen'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      server.removeClient(deviceId);
+      setState(() {});
+    }
   }
 
   String _timeAgo(DateTime dt) {

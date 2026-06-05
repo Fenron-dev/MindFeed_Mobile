@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -188,8 +189,11 @@ class _QrScanTabState extends ConsumerState<_QrScanTab> {
       // _handled nicht zurücksetzen — verhindert Endlos-Retry wenn Scanner
       // den QR erneut erkennt. "Erneut"-Button gibt Kontrolle zurück.
       if (mounted) {
+        final msg = e is TimeoutException
+            ? 'Server nicht erreichbar (Timeout). Prüfe Netzwerk und Firewall (Port 8766).'
+            : 'Fehler: $e';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Fehler: $e'),
+          content: Text(msg),
           duration: const Duration(seconds: 8),
           action: SnackBarAction(
             label: 'Erneut',
@@ -225,18 +229,25 @@ class _QrDisplayTabState extends ConsumerState<_QrDisplayTab> {
   Future<void> _startServerAndGenerate() async {
     if (mounted) setState(() { _serverStarting = true; _startError = null; });
     try {
-      // Eigene IP ermitteln
+      // LAN-IP ermitteln (192.168.x, 10.x, 172.16-31.x bevorzugen)
       try {
         final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+        String? anyNonLoopback;
+        outer:
         for (final iface in interfaces) {
           for (final addr in iface.addresses) {
-            if (!addr.isLoopback) {
-              _localIp = addr.address;
-              break;
+            if (addr.isLoopback) continue;
+            final h = addr.address;
+            anyNonLoopback ??= h;
+            if (h.startsWith('192.168.') ||
+                h.startsWith('10.') ||
+                RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(h)) {
+              _localIp = h;
+              break outer;
             }
           }
-          if (_localIp != null) break;
         }
+        _localIp ??= anyNonLoopback;
       } catch (_) {}
 
       // Server starten (falls noch nicht läuft)
@@ -416,6 +427,9 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
         ));
         Navigator.pop(context, true);
       }
+    } on TimeoutException {
+      setState(() => _error =
+          'Server nicht erreichbar (Timeout). Prüfe IP-Adresse, Port und ob die Firewall Port 8766 zulässt.');
     } on SyncException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -515,6 +529,9 @@ class _EnterCodeScreenState extends ConsumerState<_EnterCodeScreen> {
         Navigator.pop(context, true);
         Navigator.pop(context, true);
       }
+    } on TimeoutException {
+      setState(() => _error =
+          'Server nicht erreichbar (Timeout). Prüfe Netzwerk und Firewall (Port 8766).');
     } on SyncException catch (e) {
       setState(() => _error = e.message);
     } finally {
