@@ -10,6 +10,7 @@ import '../features/capture/capture_screen.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_form_screen.dart';
 import '../features/vault/vault_switcher_screen.dart';
+import '../features/trash/trash_screen.dart';
 import '../widgets/app_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -82,6 +83,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.vaultSwitcher,
         builder: (context, state) => const VaultSwitcherScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.trash,
+        builder: (context, state) => const TrashScreen(),
       ),
 
       // Haupt-Shell mit Bottom Nav

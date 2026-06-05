@@ -606,6 +606,15 @@ class AppSettings {
   static Future<void> saveLastSyncAt(DateTime dt) async =>
       _prefs?.setString('sync_last_sync_at', dt.toIso8601String());
 
+  // ── Papierkorb ──────────────────────────────────────────────────────────────
+
+  /// Aufbewahrungsdauer in Tagen; 0 = nie automatisch löschen.
+  static int getTrashRetentionDays() =>
+      _prefs?.getInt('trash_retention_days') ?? 30;
+
+  static Future<void> saveTrashRetentionDays(int days) async =>
+      _prefs?.setInt('trash_retention_days', days);
+
   static String _randomHex(int bytes) {
     final rng = Random.secure();
     final buf = List<int>.generate(bytes, (_) => rng.nextInt(256));

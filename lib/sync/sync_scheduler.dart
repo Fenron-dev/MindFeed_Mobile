@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/app_settings.dart';
+import '../core/di.dart';
 import 'client/sync_api_client.dart';
 import 'sync_provider.dart';
 
@@ -28,18 +29,26 @@ class SyncScheduler with WidgetsBindingObserver {
         AppSettings.getDeviceName(),
       );
     }
+
+    // Papierkorb: veraltete Einträge automatisch löschen
+    _cleanTrashIfNeeded();
+
     if (!AppSettings.getSyncEnabled()) return;
 
-    // Erstmaligen Sync automatisch auslösen: noch nie synchronisiert aber
-    // Sync ist aktiviert (z.B. direkt nach Ersteinrichtung via Server)
+    // Erstmaligen Sync automatisch auslösen
     if (AppSettings.getLastSyncAt() == null) {
       await _doSync();
       return;
     }
-    // Sync beim App-Start ausführen (falls konfiguriert)
     if (AppSettings.getSyncOnAppStart()) {
       await _doSync();
     }
+  }
+
+  void _cleanTrashIfNeeded() {
+    final days = AppSettings.getTrashRetentionDays();
+    if (days <= 0) return; // 0 = nie
+    _ref.read(entryDaoProvider).cleanTrashOlderThan(days);
   }
 
   void _setupTimer() {

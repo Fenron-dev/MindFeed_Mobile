@@ -17,6 +17,8 @@ import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
 import '../settings/sync_settings_screen.dart';
+import '../../core/constants.dart';
+import 'package:go_router/go_router.dart';
 
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
@@ -1160,6 +1162,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ─── Info ──────────────────────────────────────────────────────────
           const SizedBox(height: 28),
+          // ── Papierkorb ────────────────────────────────────────────────────
+          _SectionHeader('PAPIERKORB'),
+          const SizedBox(height: 8),
+          _TrashSection(),
+
+          const SizedBox(height: 24),
+
           _SectionHeader('APP'),
           const SizedBox(height: 8),
           _SettingsTile(
@@ -2134,6 +2143,87 @@ class _BackupTile extends StatelessWidget {
           visualDensity: VisualDensity.compact,
         ),
       ]),
+    );
+  }
+}
+
+// ── Papierkorb-Einstellungen ──────────────────────────────────────────────────
+
+class _TrashSection extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_TrashSection> createState() => _TrashSectionState();
+}
+
+class _TrashSectionState extends ConsumerState<_TrashSection> {
+  late int _retentionDays;
+
+  @override
+  void initState() {
+    super.initState();
+    _retentionDays = AppSettings.getTrashRetentionDays();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final trashed = ref.watch(trashedEntriesProvider);
+    final count = trashed.maybeWhen(data: (l) => l.length, orElse: () => 0);
+
+    return Column(
+      children: [
+        _SettingsTile(
+          icon: Icons.delete_outline,
+          iconColor: Colors.redAccent,
+          title: 'Papierkorb öffnen',
+          subtitle: count > 0
+              ? '$count Eintrag${count != 1 ? 'e' : ''} im Papierkorb'
+              : 'Papierkorb ist leer',
+          onTap: () => context.push(AppRoutes.trash),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: MFColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Aufbewahrungsdauer',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                      color: MFColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text(
+                _retentionDays == 0
+                    ? 'Einträge werden nie automatisch gelöscht'
+                    : 'Einträge werden nach $_retentionDays Tagen gelöscht',
+                style: const TextStyle(fontSize: 12, color: MFColors.textMuted),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int>(
+                value: _retentionDays,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 7, child: Text('7 Tage')),
+                  DropdownMenuItem(value: 30, child: Text('30 Tage')),
+                  DropdownMenuItem(value: 90, child: Text('90 Tage')),
+                  DropdownMenuItem(value: 0, child: Text('Nie')),
+                ],
+                onChanged: (v) async {
+                  if (v == null) return;
+                  setState(() => _retentionDays = v);
+                  await AppSettings.saveTrashRetentionDays(v);
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

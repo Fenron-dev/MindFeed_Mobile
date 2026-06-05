@@ -40,6 +40,9 @@ class _AppShellState extends State<AppShell> {
   }
 
   bool _handleScroll(ScrollNotification notification) {
+    // Auf dem Settings-Tab (Index 2) immer sichtbar lassen
+    if (widget.shell.currentIndex == 2) return false;
+
     if (notification is ScrollUpdateNotification) {
       final delta = notification.scrollDelta ?? 0;
       if (delta > 3.0 && _showNavBar) {
@@ -48,12 +51,11 @@ class _AppShellState extends State<AppShell> {
         setState(() => _showNavBar = true);
       }
     } else if (notification is ScrollEndNotification) {
-      // Am oberen Rand → Nav immer zeigen
       if (notification.metrics.pixels <= 0) {
         setState(() => _showNavBar = true);
       }
     }
-    return false; // Notification nicht konsumieren
+    return false;
   }
 
   @override

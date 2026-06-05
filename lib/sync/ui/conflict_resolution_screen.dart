@@ -6,6 +6,7 @@ import '../dto/sync_dto.dart';
 import '../sync_provider.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
+import '../../data/db/app_database.dart' as appdb;
 import '../../widgets/app_shell.dart' show navigateToEntry;
 
 class ConflictResolutionScreen extends ConsumerWidget {
@@ -197,30 +198,13 @@ class _ConflictCard extends ConsumerWidget {
                   },
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (entry.title != null && entry.title!.isNotEmpty)
-                          Text(entry.title!,
-                              style: const TextStyle(fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: MFColors.textPrimary)),
-                        if (entry.body.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(entry.body,
-                              style: const TextStyle(fontSize: 12,
-                                  color: MFColors.textSecondary, height: 1.45)),
-                        ],
-                        if (conflict.entityType == 'entry') ...[
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            const Icon(Icons.open_in_new, size: 12, color: MFColors.teal),
-                            const SizedBox(width: 4),
-                            const Text('Zum Detail-Eintrag',
-                                style: TextStyle(fontSize: 11, color: MFColors.teal)),
-                          ]),
-                        ],
-                      ],
+                    child: _ConflictEntityDetail(
+                      entityType: conflict.entityType,
+                      entity: entry,
+                      serverModifiedAt: serverTs,
+                      localModifiedAt: conflict.entityType == 'entry'
+                          ? (entry.updatedAt as DateTime?)
+                          : (entry.updatedAt as DateTime?),
                     ),
                   ),
                 ),
@@ -282,15 +266,19 @@ class _ConflictCard extends ConsumerWidget {
   }
 
   Future<dynamic> _loadEntry(WidgetRef ref) async {
-    if (conflict.entityType != 'entry') return null;
     final db = ref.read(databaseProvider);
     try {
-      return await (db.select(db.entries)
-            ..where((e) => e.id.equals(conflict.entityId)))
-          .getSingleOrNull();
-    } catch (_) {
-      return null;
-    }
+      if (conflict.entityType == 'entry') {
+        return await (db.select(db.entries)
+              ..where((e) => e.id.equals(conflict.entityId)))
+            .getSingleOrNull();
+      } else if (conflict.entityType == 'container') {
+        return await (db.select(db.containers)
+              ..where((c) => c.id.equals(conflict.entityId)))
+            .getSingleOrNull();
+      }
+    } catch (_) {}
+    return null;
   }
 
   void _resolveOne(WidgetRef ref, BuildContext context, ConflictResolution resolution) {
@@ -310,5 +298,160 @@ class _ConflictCard extends ConsumerWidget {
     if (remaining.isEmpty && context.mounted) {
       Navigator.pop(context);
     }
+  }
+}
+
+// ── Detail-Widget: Entry oder Container ───────────────────────────────────────
+
+class _ConflictEntityDetail extends StatelessWidget {
+  final String entityType;
+  final dynamic entity;
+  final DateTime? serverModifiedAt;
+  final DateTime? localModifiedAt;
+
+  const _ConflictEntityDetail({
+    required this.entityType,
+    required this.entity,
+    this.serverModifiedAt,
+    this.localModifiedAt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (entityType == 'entry') {
+      final e = entity as appdb.Entry;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (e.title != null && e.title!.isNotEmpty)
+            Text(e.title!,
+                style: const TextStyle(fontSize: 14,
+                    fontWeight: FontWeight.w600, color: MFColors.textPrimary)),
+          if (e.body.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              e.body.length > 200 ? '${e.body.substring(0, 200)}…' : e.body,
+              style: const TextStyle(fontSize: 12,
+                  color: MFColors.textSecondary, height: 1.45),
+            ),
+          ],
+          const SizedBox(height: 8),
+          _TwoVersionRow(
+            localTs: localModifiedAt,
+            serverTs: serverModifiedAt,
+          ),
+          const SizedBox(height: 6),
+          Row(children: [
+            const Icon(Icons.open_in_new, size: 12, color: MFColors.teal),
+            const SizedBox(width: 4),
+            const Text('Tippe zum Öffnen des Eintrags',
+                style: TextStyle(fontSize: 11, color: MFColors.teal)),
+          ]),
+        ],
+      );
+    } else {
+      // Container
+      final c = entity as appdb.Container;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(_kindIcon(c.kind), size: 16, color: MFColors.teal),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(c.name,
+                  style: const TextStyle(fontSize: 14,
+                      fontWeight: FontWeight.w600, color: MFColors.textPrimary)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(_kindLabel(c.kind),
+              style: const TextStyle(fontSize: 11, color: MFColors.textMuted)),
+          if (c.description != null && c.description!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(c.description!,
+                style: const TextStyle(fontSize: 12, color: MFColors.textSecondary)),
+          ],
+          const SizedBox(height: 8),
+          _TwoVersionRow(localTs: localModifiedAt, serverTs: serverModifiedAt),
+          const SizedBox(height: 4),
+          const Text(
+            'Der Container (Projekt/Bereich/Hub) wurde auf beiden Seiten geändert.',
+            style: TextStyle(fontSize: 11, color: MFColors.textMuted, height: 1.3),
+          ),
+        ],
+      );
+    }
+  }
+
+  IconData _kindIcon(String kind) => switch (kind) {
+        'area' => Icons.explore_outlined,
+        'hub' => Icons.layers_outlined,
+        _ => Icons.folder_outlined,
+      };
+
+  String _kindLabel(String kind) => switch (kind) {
+        'area' => 'Bereich',
+        'hub' => 'Smart Hub',
+        _ => 'Projekt',
+      };
+}
+
+class _TwoVersionRow extends StatelessWidget {
+  final DateTime? localTs;
+  final DateTime? serverTs;
+  const _TwoVersionRow({this.localTs, this.serverTs});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('dd.MM.yy HH:mm');
+    return Row(children: [
+      _VersionChip(
+        icon: Icons.smartphone_outlined,
+        label: 'Lokal',
+        ts: localTs != null ? fmt.format(localTs!.toLocal()) : '–',
+        color: MFColors.teal,
+      ),
+      const SizedBox(width: 6),
+      const Icon(Icons.compare_arrows, size: 14, color: MFColors.textMuted),
+      const SizedBox(width: 6),
+      _VersionChip(
+        icon: Icons.cloud_outlined,
+        label: 'Server',
+        ts: serverTs != null ? fmt.format(serverTs!.toLocal()) : '–',
+        color: const Color(0xFF6366F1),
+      ),
+    ]);
+  }
+}
+
+class _VersionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String ts;
+  final Color color;
+  const _VersionChip({required this.icon, required this.label,
+      required this.ts, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(18),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(60)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 11, color: color),
+        const SizedBox(width: 4),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(fontSize: 9, color: color,
+              fontWeight: FontWeight.bold)),
+          Text(ts, style: TextStyle(fontSize: 10, color: color,
+              fontFamily: 'monospace')),
+        ]),
+      ]),
+    );
   }
 }

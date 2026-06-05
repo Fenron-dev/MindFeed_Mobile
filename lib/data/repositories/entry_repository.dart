@@ -296,7 +296,17 @@ class EntryRepository {
     return (await getById(id))!;
   }
 
-  Future<void> deleteEntry(String id) => entryDao.deleteById(id);
+  /// Verschiebt Eintrag in den Papierkorb (Soft-Delete, Tombstone für Sync).
+  Future<void> deleteEntry(String id) => entryDao.softDelete(id);
+
+  /// Stellt einen Eintrag aus dem Papierkorb wieder her.
+  Future<void> restoreEntry(String id) => entryDao.restore(id);
+
+  /// Löscht einen Eintrag endgültig (nur aus dem Papierkorb heraus).
+  Future<void> permanentlyDeleteEntry(String id) => entryDao.permanentlyDelete(id);
+
+  /// Leert den kompletten Papierkorb.
+  Future<void> emptyTrash() => entryDao.emptyTrash();
 
   Future<List<EntryWithDetails>> search(String query) async {
     final entries = await db.searchFts(query);

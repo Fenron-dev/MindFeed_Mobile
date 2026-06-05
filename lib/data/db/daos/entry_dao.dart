@@ -12,8 +12,9 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
 
   Stream<List<Entry>> watchAll({String sortOrder = 'desc'}) {
     return (select(entries)
+          ..where((e) => e.deletedAt.isNull())
           ..orderBy([
-            (e) => OrderingTerm.desc(e.pinned),   // Angeheftete immer oben
+            (e) => OrderingTerm.desc(e.pinned),
             (e) => sortOrder == 'desc'
                 ? OrderingTerm.desc(e.createdAt)
                 : OrderingTerm.asc(e.createdAt),
@@ -40,7 +41,8 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
         entryContainers.entryId.equalsExp(entries.id),
       ),
     ])
-      ..where(entryContainers.containerId.equals(containerId))
+      ..where(entryContainers.containerId.equals(containerId) &
+          entries.deletedAt.isNull())
       ..orderBy([OrderingTerm.desc(entries.createdAt)]);
     return q.watch().map((rows) => rows.map((r) => r.readTable(entries)).toList());
   }
@@ -115,5 +117,37 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
       await (update(entries)..where((e) => e.id.equals(id)))
           .write(EntriesCompanion(syncUpdatedAt: Value(syncedAt)));
     }
+  }
+
+  // ── Papierkorb ──────────────────────────────────────────────────────────────
+
+  /// Alle soft-gelöschten Einträge (Papierkorb), neueste zuerst.
+  Stream<List<Entry>> watchTrashed() =>
+      (select(entries)
+            ..where((e) => e.deletedAt.isNotNull())
+            ..orderBy([(e) => OrderingTerm.desc(e.deletedAt)]))
+          .watch();
+
+  /// Stellt einen Eintrag aus dem Papierkorb wieder her.
+  Future<void> restore(String id) =>
+      (update(entries)..where((e) => e.id.equals(id)))
+          .write(const EntriesCompanion(deletedAt: Value(null)));
+
+  /// Löscht einen Eintrag endgültig aus der Datenbank.
+  Future<void> permanentlyDelete(String id) =>
+      (delete(entries)..where((e) => e.id.equals(id))).go();
+
+  /// Leert den Papierkorb vollständig (endgültige Löschung aller soft-deleted).
+  Future<void> emptyTrash() =>
+      (delete(entries)..where((e) => e.deletedAt.isNotNull())).go();
+
+  /// Löscht Einträge im Papierkorb die älter als [days] Tage sind.
+  Future<void> cleanTrashOlderThan(int days) {
+    final cutoff = DateTime.now().toUtc().subtract(Duration(days: days));
+    return (delete(entries)
+          ..where((e) =>
+              e.deletedAt.isNotNull() &
+              e.deletedAt.isSmallerThanValue(cutoff)))
+        .go();
   }
 }

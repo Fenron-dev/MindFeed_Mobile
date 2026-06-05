@@ -39,6 +39,12 @@ final entryRepositoryProvider = Provider<EntryRepository>((ref) {
   );
 });
 
+/// Reaktiver Stream aller soft-gelöschten Einträge (Papierkorb).
+final trashedEntriesProvider = StreamProvider((ref) {
+  final dao = ref.watch(entryDaoProvider);
+  return dao.watchTrashed();
+});
+
 // ─── App-weite Einstellungen (reaktiv) ────────────────────────────────────────
 final tagStyleProvider =
     StateProvider<TagStyle>((ref) => AppSettings.loadTagStyle());
