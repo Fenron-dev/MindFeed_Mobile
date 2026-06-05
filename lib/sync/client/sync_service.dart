@@ -189,7 +189,37 @@ class SyncService {
         }
       }
 
-      // 2. Upsert entries (LWW: accept if server is newer or local doesn't exist)
+      // 2. Upsert containers VOR entries — FK-Constraint: entry_containers → containers
+      for (final sc in pull.containers) {
+        final existing = await (db.select(db.containers)
+              ..where((c) => c.id.equals(sc.id)))
+            .getSingleOrNull();
+        final serverTs = DateTime.tryParse(sc.updatedAt)?.toUtc();
+        if (existing != null && serverTs != null) {
+          if (!serverTs.isAfter(existing.updatedAt)) continue;
+        }
+        if (existing?.deletedAt != null) continue;
+
+        await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
+          id: Value(sc.id),
+          kind: Value(sc.kind),
+          name: Value(sc.name),
+          description: Value(sc.description),
+          icon: Value(sc.icon),
+          color: Value(sc.color),
+          createdAt: Value(DateTime.tryParse(sc.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
+          updatedAt: Value(serverTs ?? DateTime.now().toUtc()),
+          archived: Value(sc.archived),
+          filterTag: Value(sc.filterTag),
+          filterStatus: Value(sc.filterStatus),
+          filterType: Value(sc.filterType),
+          sortOrder: Value(sc.sortOrder),
+          viewMode: Value(sc.viewMode),
+          parentId: Value(sc.parentId),
+        ));
+      }
+
+      // 3. Upsert entries — Container existieren jetzt, FK-Constraints erfüllt
       for (final se in pull.entries) {
         final existing = await entryDao.getById(se.id);
         final serverTs = DateTime.tryParse(se.updatedAt)?.toUtc();
@@ -217,11 +247,16 @@ class SyncService {
           syncUpdatedAt: Value(DateTime.now().toUtc()),
         ));
 
-        // Sync relations: containers
+        // entry_containers — Container sind bereits in DB (Schritt 2)
         await (db.delete(db.entryContainers)
               ..where((ec) => ec.entryId.equals(se.id)))
             .go();
         for (final cid in se.containers) {
+          // Nur einfügen wenn Container tatsächlich existiert
+          final containerExists = await (db.select(db.containers)
+                ..where((c) => c.id.equals(cid) & c.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (containerExists == null) continue;
           await db.into(db.entryContainers).insertOnConflictUpdate(
             EntryContainersCompanion(
               entryId: Value(se.id),
@@ -230,7 +265,7 @@ class SyncService {
           );
         }
 
-        // Sync properties
+        // Properties
         await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(se.id))).go();
         for (final prop in se.properties) {
           final key = prop['key'] as String? ?? '';
@@ -246,7 +281,7 @@ class SyncService {
           );
         }
 
-        // Sync tags
+        // Tags
         await (db.delete(db.entryTags)..where((t) => t.entryId.equals(se.id))).go();
         for (final tagName in se.tags) {
           if (tagName.isEmpty) continue;
@@ -259,7 +294,7 @@ class SyncService {
           );
         }
 
-        // Sync attachment metadata — Datei-Download passiert in _downloadMissingAttachments
+        // Anhang-Metadaten
         for (final attMap in se.attachments) {
           final attId = _attStr(attMap, 'id');
           if (attId.isEmpty) continue;
@@ -289,36 +324,6 @@ class SyncService {
             ),
           );
         }
-      }
-
-      // 3. Upsert containers (LWW)
-      for (final sc in pull.containers) {
-        final existing = await (db.select(db.containers)
-              ..where((c) => c.id.equals(sc.id)))
-            .getSingleOrNull();
-        final serverTs = DateTime.tryParse(sc.updatedAt)?.toUtc();
-        if (existing != null && serverTs != null) {
-          if (!serverTs.isAfter(existing.updatedAt)) continue;
-        }
-        if (existing?.deletedAt != null) continue;
-
-        await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
-          id: Value(sc.id),
-          kind: Value(sc.kind),
-          name: Value(sc.name),
-          description: Value(sc.description),
-          icon: Value(sc.icon),
-          color: Value(sc.color),
-          createdAt: Value(DateTime.tryParse(sc.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
-          updatedAt: Value(serverTs ?? DateTime.now().toUtc()),
-          archived: Value(sc.archived),
-          filterTag: Value(sc.filterTag),
-          filterStatus: Value(sc.filterStatus),
-          filterType: Value(sc.filterType),
-          sortOrder: Value(sc.sortOrder),
-          viewMode: Value(sc.viewMode),
-          parentId: Value(sc.parentId),
-        ));
       }
     });
   }
