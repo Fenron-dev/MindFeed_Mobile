@@ -182,8 +182,14 @@ class SyncService {
     // Vault-Anhangspfad vor der Transaktion ermitteln (async nicht sicher darin)
     final vaultAttsPath = await VaultManager.getAttachmentsPath();
 
+    if (pull.tombstones.isNotEmpty) {
+      debugPrint('[Sync] ${pull.tombstones.length} Tombstone(s) empfangen '
+          '→ werden in den Papierkorb verschoben');
+    }
+
     await db.transaction(() async {
-      // 1. Apply tombstones first
+      // 1. Apply tombstones first — gelöschte Einträge landen via softDelete
+      //    im Papierkorb (deletedAt gesetzt), nicht endgültig gelöscht.
       for (final t in pull.tombstones) {
         if (t.entityType == 'entry') {
           await entryDao.softDelete(t.entityId);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +13,7 @@ import '../../services/app_settings.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/server/sync_server.dart';
 import '../../sync/sync_provider.dart';
+import '../../sync/ui/conflict_resolution_screen.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
@@ -940,9 +942,86 @@ class _EmptyFeed extends StatelessWidget {
 
 // ── Sync-Status-Button in der AppBar ──────────────────────────────────────────
 
-class _SyncStatusButton extends ConsumerWidget {
+class _SyncStatusButton extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SyncStatusButton> createState() => _SyncStatusButtonState();
+}
+
+class _SyncStatusButtonState extends ConsumerState<_SyncStatusButton> {
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Im Server-Modus die verbundenen Clients live aktualisieren
+    if (AppSettings.getSyncRole() == SyncRole.server) {
+      _refreshTimer = Timer.periodic(
+          const Duration(seconds: 5), (_) { if (mounted) setState(() {}); });
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isServer = AppSettings.getSyncRole() == SyncRole.server;
+    return isServer ? _buildServerCloud(context) : _buildClientCloud(context);
+  }
+
+  // ── Server-Modus: zeigt verbundene Clients (kein aktiver Sync-Status) ──────
+  Widget _buildServerCloud(BuildContext context) {
+    if (!AppSettings.getSyncEnabled()) return const SizedBox.shrink();
+
+    final count = SyncServer.instance?.onlineClientCount ?? 0;
+    final hasClients = count > 0;
+    final color = hasClients ? const Color(0xFF10B981) : MFColors.textSecondary;
+
+    final cloud = Stack(clipBehavior: Clip.none, children: [
+      Icon(hasClients ? Icons.cloud_done : Icons.cloud_outlined,
+          color: color, size: 24),
+      Positioned(
+        right: -7, top: -7,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          constraints: const BoxConstraints(minWidth: 16),
+          decoration: BoxDecoration(
+            color: hasClients ? const Color(0xFF10B981) : MFColors.textMuted,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: MFColors.bg, width: 1.5),
+          ),
+          child: Text('$count',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: Colors.white,
+                  fontWeight: FontWeight.bold, height: 1.1)),
+        ),
+      ),
+    ]);
+
+    return IconButton(
+      icon: cloud,
+      tooltip: hasClients
+          ? '$count ${count == 1 ? 'Gerät' : 'Geräte'} verbunden · '
+              'tippen für Sync-Ping'
+          : 'Keine Geräte verbunden',
+      onPressed: () {
+        // Server stößt einen Sync bei allen Clients an
+        SyncServer.instance?.syncNotifyRequestedAt = DateTime.now().toUtc();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(hasClients
+              ? 'Sync-Ping an $count ${count == 1 ? 'Gerät' : 'Geräte'} gesendet'
+              : 'Keine verbundenen Geräte'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      },
+    );
+  }
+
+  // ── Client-Modus: zeigt den eigenen Sync-Status ────────────────────────────
+  Widget _buildClientCloud(BuildContext context) {
     final state = ref.watch(syncStateProvider);
 
     if (state.status == SyncStatus.disabled ||
@@ -957,46 +1036,18 @@ class _SyncStatusButton extends ConsumerWidget {
       _ => (Icons.cloud_outlined, MFColors.textSecondary),
     };
 
-    // Verbundene Clients (nur im Server-Modus sichtbar)
-    final onlineCount = AppSettings.getSyncRole() == SyncRole.server
-        ? SyncServer.instance?.onlineClientCount ?? 0
-        : 0;
-
-    Widget cloudIcon = state.status == SyncStatus.syncing
+    final cloudIcon = state.status == SyncStatus.syncing
         ? const SizedBox(width: 18, height: 18,
             child: CircularProgressIndicator(strokeWidth: 2, color: MFColors.teal))
         : Icon(icon, color: color, size: 22);
-
-    if (onlineCount > 0) {
-      cloudIcon = Stack(clipBehavior: Clip.none, children: [
-        cloudIcon,
-        Positioned(
-          right: -4, top: -4,
-          child: Container(
-            padding: const EdgeInsets.all(3),
-            decoration: const BoxDecoration(
-              color: Color(0xFF10B981),
-              shape: BoxShape.circle,
-            ),
-            child: Text('$onlineCount',
-                style: const TextStyle(fontSize: 8, color: Colors.white,
-                    fontWeight: FontWeight.bold)),
-          ),
-        ),
-      ]);
-    }
 
     return IconButton(
       icon: cloudIcon,
       tooltip: switch (state.status) {
         SyncStatus.syncing => 'Synchronisiert…',
-        SyncStatus.success => onlineCount > 0
-            ? '$onlineCount Client${onlineCount != 1 ? 's' : ''} verbunden'
-            : 'Synchronisiert',
+        SyncStatus.success => 'Synchronisiert',
         SyncStatus.error => state.message ?? 'Sync-Fehler',
-        _ => onlineCount > 0
-            ? '$onlineCount Client${onlineCount != 1 ? 's' : ''} verbunden'
-            : 'Jetzt synchronisieren',
+        _ => 'Jetzt synchronisieren',
       },
       onPressed: state.status == SyncStatus.syncing
           ? null
@@ -1043,13 +1094,24 @@ class _ConflictDialog extends ConsumerWidget {
         ],
       ),
       actions: [
-        // Server-Version behalten (Standardverhalten bisher)
+        // Detailübersicht: einzeln entscheiden
+        TextButton.icon(
+          onPressed: () {
+            Navigator.pop(context);
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ConflictResolutionScreen(conflicts: conflicts),
+            ));
+          },
+          icon: const Icon(Icons.list_alt_outlined, size: 16),
+          label: const Text('Details ansehen'),
+        ),
+        // Server-Version behalten
         TextButton(
           onPressed: () {
             ref.read(syncStateProvider.notifier).resolveConflicts(ConflictResolution.server);
             Navigator.pop(context);
           },
-          child: const Text('Server-Version'),
+          child: const Text('Server (alle)'),
         ),
         // Meine Version erzwingen
         TextButton(
@@ -1060,14 +1122,7 @@ class _ConflictDialog extends ConsumerWidget {
               const SnackBar(content: Text('Lokale Versionen werden übertragen…')),
             );
           },
-          child: const Text('Meine Version'),
-        ),
-        // Überspringen: Konflikte später entscheiden
-        FilledButton(
-          onPressed: () {
-            Navigator.pop(context);
-          },
-          child: const Text('Überspringen'),
+          child: const Text('Meine (alle)'),
         ),
       ],
     );

@@ -2802,6 +2802,31 @@ class _MediaHeader extends StatelessWidget {
   }
 }
 
+// ─── Platzhalter für noch nicht synchronisierte Anhänge ───────────────────────
+
+class _MissingAttachmentHint extends StatelessWidget {
+  const _MissingAttachmentHint();
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_sync_outlined, color: Colors.white54, size: 56),
+            SizedBox(height: 16),
+            Text('Anhang noch nicht synchronisiert',
+                style: TextStyle(color: Colors.white70, fontSize: 15),
+                textAlign: TextAlign.center),
+            SizedBox(height: 6),
+            Text('Die Datei liegt noch auf dem anderen Gerät. '
+                'Starte dort einen Sync, damit sie übertragen wird.',
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+                textAlign: TextAlign.center),
+          ],
+        ),
+      );
+}
+
 // ─── Fullscreen-Bild-Viewer ───────────────────────────────────────────────────
 
 class _FullscreenImageViewer extends StatelessWidget {
@@ -2822,7 +2847,10 @@ class _FullscreenImageViewer extends StatelessWidget {
           maxScale: 5.0,
           child: Center(
             child: isLocal
-                ? Image.file(File(path))
+                ? Image.file(
+                    File(path),
+                    errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
+                  )
                 : Image.network(
                     path,
                     loadingBuilder: (_, child, progress) => progress == null
@@ -2830,10 +2858,7 @@ class _FullscreenImageViewer extends StatelessWidget {
                         : const Center(
                             child: CircularProgressIndicator(
                                 color: Colors.white)),
-                    errorBuilder: (_, __, ___) => const Icon(
-                        Icons.broken_image_outlined,
-                        color: Colors.white54,
-                        size: 48),
+                    errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
                   ),
           ),
         ),
