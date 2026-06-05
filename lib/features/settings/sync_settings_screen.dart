@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../core/theme.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/sync_provider.dart';
 import '../../sync/server/sync_server.dart';
@@ -117,13 +118,24 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
             ),
           const SizedBox(height: 8),
           if (_role == SyncRole.server) ...[
-            // Server: zeigt verbundene Clients statt Sync-Button
+            // Server: verbundene Clients + Sync-Trigger
             _ConnectedClientsWidget(),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.info_outline, size: 16),
-              label: const Text('Als Server synchronisieren Clients automatisch'),
+            FilledButton.icon(
+              onPressed: () async {
+                final server = ref.read(syncServerProvider);
+                server.syncNotifyRequestedAt = DateTime.now().toUtc();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Sync-Ping an alle Clients gesendet'),
+                  behavior: SnackBarBehavior.floating,
+                ));
+              },
+              icon: const Icon(Icons.broadcast_on_personal, size: 16),
+              label: const Text('Sync bei allen Clients auslösen'),
+              style: FilledButton.styleFrom(
+                backgroundColor: MFColors.teal,
+                foregroundColor: MFColors.bg,
+              ),
             ),
           ] else ...[
             FilledButton.icon(
@@ -474,34 +486,88 @@ class _ConnectedClientsWidget extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final server = ref.watch(syncServerProvider);
     final clients = server.connectedClients;
+    final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
 
     if (clients.isEmpty) {
       return const ListTile(
         contentPadding: EdgeInsets.zero,
         leading: Icon(Icons.devices_other, color: Colors.grey),
-        title: Text('Noch keine Clients verbunden'),
+        title: Text('Noch keine Clients gekoppelt'),
         subtitle: Text('Clients müssen sich einmalig über den QR-Code koppeln'),
       );
     }
 
+    final onlineCount = server.onlineClientCount;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('${clients.length} verbundene${clients.length == 1 ? 'r' : ''} Client${clients.length == 1 ? '' : 's'}',
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 4),
-        ...clients.map((c) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: const Icon(Icons.phone_android, size: 18),
-              title: Text(c.deviceName, style: const TextStyle(fontSize: 13)),
-              subtitle: Text(c.remoteIp,
-                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-              trailing: Text(
-                _timeAgo(c.connectedAt),
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
+        Row(children: [
+          Text('${clients.length} gekoppelte${clients.length != 1 ? '' : 'r'} Client${clients.length != 1 ? 's' : ''}',
+              style: const TextStyle(fontSize: 12, color: MFColors.textMuted)),
+          if (onlineCount > 0) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withAlpha(25),
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(color: const Color(0xFF10B981).withAlpha(80)),
               ),
-            )),
+              child: Text('$onlineCount online',
+                  style: const TextStyle(fontSize: 10, color: Color(0xFF10B981),
+                      fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 6),
+        ...clients.map((c) {
+          final isOnline = (server.clientLastSeen[c.deviceId] ?? DateTime(2000))
+              .isAfter(cutoff);
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isOnline
+                    ? const Color(0xFF10B981).withAlpha(60)
+                    : MFColors.border,
+              ),
+            ),
+            child: Row(children: [
+              // Online-Indikator
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isOnline ? const Color(0xFF10B981) : MFColors.border,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(c.deviceName.isNotEmpty ? c.deviceName : 'Unbekanntes Gerät',
+                      style: const TextStyle(fontSize: 13, color: MFColors.textPrimary,
+                          fontWeight: FontWeight.w500)),
+                  Text(c.remoteIp,
+                      style: const TextStyle(fontSize: 10, fontFamily: 'monospace',
+                          color: MFColors.textMuted)),
+                ]),
+              ),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text(isOnline ? 'Online' : 'Offline',
+                    style: TextStyle(fontSize: 11,
+                        color: isOnline ? const Color(0xFF10B981) : MFColors.textMuted,
+                        fontWeight: FontWeight.w500)),
+                if (server.clientLastSeen[c.deviceId] != null)
+                  Text(_timeAgo(server.clientLastSeen[c.deviceId]!),
+                      style: const TextStyle(fontSize: 10, color: MFColors.textMuted)),
+              ]),
+            ]),
+          );
+        }),
       ],
     );
   }

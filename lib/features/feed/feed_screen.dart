@@ -8,7 +8,9 @@ import '../../core/theme.dart';
 import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
+import '../../services/app_settings.dart';
 import '../../sync/dto/sync_dto.dart';
+import '../../sync/server/sync_server.dart';
 import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
@@ -147,7 +149,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final filter   = ref.watch(feedFilterProvider);
 
     return Scaffold(
-      body: CustomScrollView(
+      body: RefreshIndicator(
+        onRefresh: Platform.isMacOS || Platform.isWindows || Platform.isLinux
+            ? () async {} // Desktop: kein Pull-to-Refresh (kein Touch)
+            : () async {
+                if (AppSettings.getSyncEnabled()) {
+                  await ref.read(syncStateProvider.notifier).triggerSync();
+                }
+              },
+        color: MFColors.teal,
+        child: CustomScrollView(
         controller: _scrollController,
         slivers: [
           SliverAppBar(
@@ -331,6 +342,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           ),
         ],
       ),
+      ), // RefreshIndicator
 
       floatingActionButton: FloatingActionButton(
         onPressed: () => navigateToCapture(context, ref),
@@ -945,20 +957,46 @@ class _SyncStatusButton extends ConsumerWidget {
       _ => (Icons.cloud_outlined, MFColors.textSecondary),
     };
 
+    // Verbundene Clients (nur im Server-Modus sichtbar)
+    final onlineCount = AppSettings.getSyncRole() == SyncRole.server
+        ? SyncServer.instance?.onlineClientCount ?? 0
+        : 0;
+
+    Widget cloudIcon = state.status == SyncStatus.syncing
+        ? const SizedBox(width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: MFColors.teal))
+        : Icon(icon, color: color, size: 22);
+
+    if (onlineCount > 0) {
+      cloudIcon = Stack(clipBehavior: Clip.none, children: [
+        cloudIcon,
+        Positioned(
+          right: -4, top: -4,
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: const BoxDecoration(
+              color: Color(0xFF10B981),
+              shape: BoxShape.circle,
+            ),
+            child: Text('$onlineCount',
+                style: const TextStyle(fontSize: 8, color: Colors.white,
+                    fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ]);
+    }
+
     return IconButton(
-      icon: state.status == SyncStatus.syncing
-          ? SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: MFColors.teal),
-            )
-          : Icon(icon, color: color, size: 22),
+      icon: cloudIcon,
       tooltip: switch (state.status) {
         SyncStatus.syncing => 'Synchronisiert…',
-        SyncStatus.success => 'Synchronisiert',
+        SyncStatus.success => onlineCount > 0
+            ? '$onlineCount Client${onlineCount != 1 ? 's' : ''} verbunden'
+            : 'Synchronisiert',
         SyncStatus.error => state.message ?? 'Sync-Fehler',
-        _ => 'Jetzt synchronisieren',
+        _ => onlineCount > 0
+            ? '$onlineCount Client${onlineCount != 1 ? 's' : ''} verbunden'
+            : 'Jetzt synchronisieren',
       },
       onPressed: state.status == SyncStatus.syncing
           ? null

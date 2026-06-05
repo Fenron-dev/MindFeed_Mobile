@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../dto/sync_dto.dart';
 import '../client/sync_api_client.dart';
@@ -6,6 +8,7 @@ import '../../data/db/app_database.dart';
 import '../../data/db/daos/entry_dao.dart';
 import '../../data/db/daos/container_dao.dart';
 import '../../data/db/tables/tags.dart';
+import '../../core/vault_manager.dart';
 import '../../services/app_settings.dart';
 
 const _uuid = Uuid();
@@ -132,6 +135,16 @@ class SyncService {
       } on SyncException catch (e) {
         return SyncResult.failed('Push fehlgeschlagen: ${e.message}');
       }
+
+      // ── Anhänge hochladen (falls Sync-Anhänge aktiviert) ─────────────────
+      if (AppSettings.getSyncAttachments()) {
+        await _uploadAttachments(client, dirtyEntries);
+      }
+    }
+
+    // ── Anhänge herunterladen die beim Pull fehlten ───────────────────────────
+    if (AppSettings.getSyncAttachments()) {
+      await _downloadMissingAttachments(client, pullResp);
     }
 
     // ── Finalize ─────────────────────────────────────────────────────────────
@@ -312,7 +325,21 @@ class SyncService {
         properties: props
             .map((p) => {'key': p.key, 'value': p.value, 'type': p.type})
             .toList(),
-        attachments: [],
+        attachments: await (db.select(db.attachments)
+              ..where((a) => a.entryId.equals(e.id)))
+            .get()
+            .then((list) => list.map((a) => {
+                  'id': a.id,
+                  'entryId': a.entryId,
+                  'type': a.type,
+                  'mimeType': a.mimeType,
+                  'fileName': a.fileName,
+                  'fileSize': a.fileSize,
+                  'durationMs': a.durationMs,
+                  'localPath': a.localPath,
+                  'transcription': a.transcription,
+                  'createdAt': a.createdAt.toIso8601String(),
+                }).toList()),
       ));
     }
     return result;
@@ -360,6 +387,87 @@ class SyncService {
         tombstones: [],
       ));
     } catch (_) {}
+  }
+
+  // ── Anhänge hochladen ─────────────────────────────────────────────────────
+
+  Future<void> _uploadAttachments(SyncApiClient client, List<Entry> entries) async {
+    for (final e in entries) {
+      final atts = await (db.select(db.attachments)
+            ..where((a) => a.entryId.equals(e.id)))
+          .get();
+      for (final att in atts) {
+        try {
+          final file = File(att.localPath);
+          if (!file.existsSync()) continue;
+          final bytes = await file.readAsBytes();
+          await client.uploadAttachment(att.id, bytes, att.mimeType);
+        } catch (_) {
+          // Upload-Fehler ignorieren — nächster Sync versucht es erneut
+        }
+      }
+    }
+  }
+
+  // ── Fehlende Anhänge nach Pull herunterladen ──────────────────────────────
+
+  Future<void> _downloadMissingAttachments(
+      SyncApiClient client, SyncPullResponse pullResp) async {
+    for (final syncEntry in pullResp.entries) {
+      for (final attMap in syncEntry.attachments) {
+        final id = attMap['id'] as String? ?? '';
+        final fileName = attMap['fileName'] as String? ?? id;
+        final mimeType = attMap['mimeType'] as String? ?? 'application/octet-stream';
+        final durationMs = attMap['durationMs'] as int?;
+        final type = attMap['type'] as String? ?? 'file';
+        final fileSize = attMap['fileSize'] as int? ?? 0;
+        if (id.isEmpty) continue;
+
+        // Prüfen ob Anhang lokal schon existiert
+        final existing = await (db.select(db.attachments)
+              ..where((a) => a.id.equals(id)))
+            .getSingleOrNull();
+
+        final vaultAttsPath = await _vaultAttachmentsPath();
+        final ext = p.extension(fileName).isEmpty ? '' : p.extension(fileName);
+        final localPath = p.join(vaultAttsPath, '$id$ext');
+
+        if (existing != null && File(existing.localPath).existsSync()) continue;
+
+        try {
+          final bytes = await client.downloadAttachment(id);
+          await Directory(vaultAttsPath).create(recursive: true);
+          await File(localPath).writeAsBytes(bytes);
+
+          if (existing == null) {
+            // Neuen Anhang in DB eintragen
+            await db.into(db.attachments).insertOnConflictUpdate(
+              AttachmentsCompanion(
+                id: Value(id),
+                entryId: Value(syncEntry.id),
+                type: Value(type),
+                mimeType: Value(mimeType),
+                localPath: Value(localPath),
+                fileName: Value(fileName),
+                fileSize: Value(fileSize),
+                durationMs: Value(durationMs),
+                createdAt: Value(DateTime.now().toUtc()),
+              ),
+            );
+          } else {
+            // Pfad aktualisieren
+            await (db.update(db.attachments)..where((a) => a.id.equals(id)))
+                .write(AttachmentsCompanion(localPath: Value(localPath)));
+          }
+        } catch (_) {
+          // Download-Fehler ignorieren
+        }
+      }
+    }
+  }
+
+  Future<String> _vaultAttachmentsPath() async {
+    return VaultManager.getAttachmentsPath();
   }
 
   List<SyncContainer> _toSyncContainers(List<Container> containers) =>

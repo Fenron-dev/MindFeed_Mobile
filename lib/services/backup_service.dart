@@ -249,12 +249,26 @@ class BackupService {
         final raw = utf8.decode(jsonEntry.content as List<int>);
         final result = await _importJsonString(db, raw);
         if (!result.isSuccess) return result;
+
+        // Anhänge extrahieren und localPath in DB auf neuen Pfad setzen
         for (final f in archive) {
           if (!f.isFile || f.name == 'data.json') continue;
           final target = File(p.join(root, f.name));
           await target.parent.create(recursive: true);
           await target.writeAsBytes(f.content as List<int>);
         }
+
+        // localPath aller Anhänge auf den aktuellen Vault-Pfad korrigieren
+        final atts = await db.select(db.attachments).get();
+        for (final att in atts) {
+          final fileName = p.basename(att.localPath);
+          final newPath = p.join(root, 'attachments', fileName);
+          if (newPath != att.localPath) {
+            await (db.update(db.attachments)..where((a) => a.id.equals(att.id)))
+                .write(AttachmentsCompanion(localPath: Value(newPath)));
+          }
+        }
+
         return result;
       }
 

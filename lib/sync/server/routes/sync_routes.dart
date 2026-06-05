@@ -1,16 +1,26 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import '../../dto/sync_dto.dart';
 import '../../../data/db/app_database.dart';
 import '../../../data/db/tables/tags.dart';
+import '../../../services/app_settings.dart';
+import '../../../core/vault_manager.dart';
 import '../sync_server.dart';
-import 'package:drift/drift.dart';
 
 Router syncRouter(AppDatabase db, SyncServer server) {
   final router = Router();
 
   // ── Auth helper (in-memory, kein Platform-Channel) ────────────────────────
+
+  String? _requireAuthDevice(Request req) {
+    final auth = req.headers['authorization'] ?? '';
+    if (!auth.startsWith('Bearer ')) return null;
+    return server.verifyAccessToken(auth.substring(7));
+  }
 
   Response? _requireAuth(Request req) {
     final auth = req.headers['authorization'] ?? '';
@@ -25,6 +35,7 @@ Router syncRouter(AppDatabase db, SyncServer server) {
           body: jsonEncode({'error': 'invalid_token'}),
           headers: {'content-type': 'application/json'});
     }
+    server.updateClientLastSeen(deviceId);
     return null;
   }
 
@@ -142,7 +153,21 @@ Router syncRouter(AppDatabase db, SyncServer server) {
                   'type': p.type,
                 })
             .toList(),
-        'attachments': [],
+        'attachments': await (db.select(db.attachments)
+              ..where((a) => a.entryId.equals(e.id)))
+            .get()
+            .then((list) => list.map((a) => {
+                  'id': a.id,
+                  'entryId': a.entryId,
+                  'type': a.type,
+                  'mimeType': a.mimeType,
+                  'fileName': a.fileName,
+                  'fileSize': a.fileSize,
+                  'durationMs': a.durationMs,
+                  'localPath': a.localPath,
+                  'transcription': a.transcription,
+                  'createdAt': a.createdAt.toIso8601String(),
+                }).toList()),
       });
     }
 
@@ -358,6 +383,97 @@ Router syncRouter(AppDatabase db, SyncServer server) {
       }).toList()}),
       headers: {'content-type': 'application/json'},
     );
+  });
+
+  // ── GET /sync/notification — Client pollt ob Server Sync auslösen möchte ──
+
+  router.get('/sync/notification', (Request req) async {
+    final deviceId = _requireAuthDevice(req);
+    if (deviceId != null) server.updateClientLastSeen(deviceId);
+    return Response.ok(
+      jsonEncode({'requestedAt': server.syncNotifyRequestedAt?.toIso8601String()}),
+      headers: {'content-type': 'application/json'},
+    );
+  });
+
+  // ── POST /sync/notify — Server löst Sync bei allen Clients aus ─────────────
+
+  router.post('/sync/notify', (Request req) async {
+    server.syncNotifyRequestedAt = DateTime.now().toUtc();
+    return Response.ok(
+      jsonEncode({'requestedAt': server.syncNotifyRequestedAt!.toIso8601String()}),
+      headers: {'content-type': 'application/json'},
+    );
+  });
+
+  // ── GET /sync/clients — Liste verbundener Clients (Server-Info) ────────────
+
+  router.get('/sync/clients', (Request req) async {
+    final authErr = _requireAuth(req);
+    if (authErr != null) return authErr;
+    final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
+    final clientList = server.connectedClients.map((c) => {
+      ...c.toJson(),
+      'online': (server.clientLastSeen[c.deviceId] ?? DateTime(2000)).isAfter(cutoff),
+      'lastSeen': server.clientLastSeen[c.deviceId]?.toIso8601String(),
+    }).toList();
+    return Response.ok(
+      jsonEncode({'clients': clientList}),
+      headers: {'content-type': 'application/json'},
+    );
+  });
+
+  // ── GET /sync/attachments/:id — Anhang-Datei vom Server herunterladen ──────
+
+  router.get('/sync/attachments/<id>', (Request req, String id) async {
+    final authErr = _requireAuth(req);
+    if (authErr != null) return authErr;
+
+    final att = await (db.select(db.attachments)
+          ..where((a) => a.id.equals(id)))
+        .getSingleOrNull();
+    if (att == null) {
+      return Response.notFound(jsonEncode({'error': 'not_found'}),
+          headers: {'content-type': 'application/json'});
+    }
+    final file = File(att.localPath);
+    if (!file.existsSync()) {
+      return Response.notFound(jsonEncode({'error': 'file_not_found'}),
+          headers: {'content-type': 'application/json'});
+    }
+    return Response.ok(
+      await file.readAsBytes(),
+      headers: {'content-type': att.mimeType},
+    );
+  });
+
+  // ── POST /sync/attachments/:id — Anhang-Datei auf Server hochladen ─────────
+
+  router.post('/sync/attachments/<id>', (Request req, String id) async {
+    final authErr = _requireAuth(req);
+    if (authErr != null) return authErr;
+
+    final att = await (db.select(db.attachments)
+          ..where((a) => a.id.equals(id)))
+        .getSingleOrNull();
+    if (att == null) {
+      return Response.notFound(jsonEncode({'error': 'not_found'}),
+          headers: {'content-type': 'application/json'});
+    }
+
+    // Speichern in Vault-Attachments-Verzeichnis
+    final attDir = await VaultManager.getAttachmentsPath();
+    final ext = p.extension(att.fileName);
+    final targetPath = p.join(attDir, '${att.id}$ext');
+    final bytes = await req.read().expand((c) => c).toList();
+    await File(targetPath).writeAsBytes(bytes);
+
+    // localPath in DB aktualisieren
+    await (db.update(db.attachments)..where((a) => a.id.equals(id)))
+        .write(AttachmentsCompanion(localPath: Value(targetPath)));
+
+    return Response.ok(jsonEncode({'path': targetPath}),
+        headers: {'content-type': 'application/json'});
   });
 
   return router;

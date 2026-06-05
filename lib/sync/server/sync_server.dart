@@ -50,6 +50,9 @@ class SyncServer {
   // immer in derselben Instanz liegen wie der HTTP-Handler.
   static SyncServer? _singleton;
 
+  /// Liefert die aktuelle Singleton-Instanz (null wenn noch nicht erstellt).
+  static SyncServer? get instance => _singleton;
+
   static SyncServer getInstance({
     required AppDatabase db,
     required String deviceId,
@@ -77,6 +80,20 @@ class SyncServer {
   final pairingCodes  = <PairingCode>[];
   final refreshTokens = <String, String>{};
   final connectedClients = <SyncClientInfo>[];
+  // Zeitstempel letzter Sync/Health-Request je Client-DeviceId
+  final clientLastSeen = <String, DateTime>{};
+  // Zeitstempel wenn Server-seitiger Sync-Ping ausgelöst wurde
+  DateTime? syncNotifyRequestedAt;
+
+  /// Anzahl Clients die in den letzten 5 Minuten aktiv waren.
+  int get onlineClientCount {
+    final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
+    return clientLastSeen.values.where((t) => t.isAfter(cutoff)).length;
+  }
+
+  void updateClientLastSeen(String deviceId) {
+    clientLastSeen[deviceId] = DateTime.now();
+  }
 
   SyncServer._({
     required AppDatabase db,

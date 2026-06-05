@@ -2,15 +2,19 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/app_settings.dart';
+import 'client/sync_api_client.dart';
 import 'sync_provider.dart';
 
 class SyncScheduler with WidgetsBindingObserver {
   final Ref _ref;
   Timer? _timer;
+  Timer? _notifyTimer; // Poll ob Server Sync auslösen möchte
+  DateTime? _lastNotifyCheck;
 
   SyncScheduler(this._ref) {
     WidgetsBinding.instance.addObserver(this);
     _setupTimer();
+    _setupNotifyPoll();
     Future.microtask(_onAppStart);
   }
 
@@ -37,7 +41,32 @@ class SyncScheduler with WidgetsBindingObserver {
     _timer = Timer.periodic(Duration(minutes: minutes), (_) => _doSync());
   }
 
-  void reconfigure() => _setupTimer();
+  void reconfigure() {
+    _setupTimer();
+    _setupNotifyPoll();
+  }
+
+  void _setupNotifyPoll() {
+    _notifyTimer?.cancel();
+    // Nur als Client und wenn Sync aktiviert → alle 30s Server-Notification pollen
+    if (AppSettings.getSyncRole() != SyncRole.client) return;
+    if (!AppSettings.getSyncEnabled()) return;
+    _notifyTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkServerNotify());
+  }
+
+  Future<void> _checkServerNotify() async {
+    final serverUrl = AppSettings.getSyncServerUrl();
+    if (serverUrl == null) return;
+    try {
+      final client = SyncApiClient(serverUrl);
+      final requestedAt = await client.getServerSyncNotification();
+      if (requestedAt == null) return;
+      if (_lastNotifyCheck == null || requestedAt.isAfter(_lastNotifyCheck!)) {
+        _lastNotifyCheck = DateTime.now();
+        await _doSync();
+      }
+    } catch (_) {}
+  }
 
   Future<void> _doSync() async {
     if (!AppSettings.getSyncEnabled()) return;
@@ -55,6 +84,7 @@ class SyncScheduler with WidgetsBindingObserver {
 
   void dispose() {
     _timer?.cancel();
+    _notifyTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
   }
 }

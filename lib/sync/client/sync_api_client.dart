@@ -125,6 +125,31 @@ class SyncApiClient {
     return resp.bodyBytes;
   }
 
+  Future<void> uploadAttachment(String attachmentId, List<int> bytes, String mimeType) async {
+    final tokenHeaders = await _authHeaders();
+    final uploadHeaders = {...tokenHeaders, 'Content-Type': mimeType};
+    final uri = Uri.parse('$baseUrl/sync/attachments/$attachmentId');
+    final resp = await http.post(uri, headers: uploadHeaders, body: bytes)
+        .timeout(const Duration(minutes: 10));
+    _checkStatus(resp);
+  }
+
+  /// Pollt ob der Server einen Sync ausgelöst hat.
+  Future<DateTime?> getServerSyncNotification() async {
+    try {
+      final headers = await _authHeaders();
+      final uri = Uri.parse('$baseUrl/sync/notification');
+      final resp = await http.get(uri, headers: headers)
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final ts = data['requestedAt'] as String?;
+        return ts != null ? DateTime.tryParse(ts) : null;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   void _checkStatus(http.Response resp) {
     if (resp.statusCode >= 400) {
       String msg;

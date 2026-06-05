@@ -80,6 +80,13 @@ class SyncStateNotifier extends Notifier<SyncState> {
 
   void clearConflicts() => state = state.copyWith(pendingConflicts: []);
 
+  void clearSingleConflict(String entityId) {
+    final remaining = state.pendingConflicts
+        .where((c) => c.entityId != entityId)
+        .toList();
+    state = state.copyWith(pendingConflicts: remaining);
+  }
+
   /// Konflikte auflösen: 'mine' = lokale Version pushen, 'server' = nichts tun
   Future<void> resolveConflicts(ConflictResolution resolution) async {
     if (resolution == ConflictResolution.server) {

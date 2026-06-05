@@ -103,6 +103,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   bool _onKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+    // ESC: Schließen ohne Speichern
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (widget.onBack != null) { widget.onBack!(); return true; }
+      if (mounted) { Navigator.maybePop(context); return true; }
+    }
     final modifier = Platform.isMacOS
         ? HardwareKeyboard.instance.isMetaPressed
         : HardwareKeyboard.instance.isControlPressed;
@@ -112,10 +117,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               _pendingImages.isNotEmpty ||
               _recordedAudioPath != null) &&
           !_isSaving;
-      if (canSave) {
-        _save();
-        return true;
-      }
+      if (canSave) { _save(); return true; }
     }
     return false;
   }
