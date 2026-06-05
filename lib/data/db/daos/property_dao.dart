@@ -18,6 +18,11 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
     for (final p in props) {
       await into(entryProperties).insertOnConflictUpdate(p);
     }
+    // Eltern-Eintrag als geändert markieren, damit die Property-Änderung beim
+    // nächsten Sync als "dirty" erkannt und übertragen wird (Shadow-Modell).
+    final mainDb = attachedDatabase;
+    await (mainDb.update(mainDb.entries)..where((e) => e.id.equals(entryId)))
+        .write(EntriesCompanion(updatedAt: Value(DateTime.now().toUtc())));
   }
 
   Future<void> upsertLink(String fromId, String toId) =>

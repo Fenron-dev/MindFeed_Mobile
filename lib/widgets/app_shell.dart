@@ -185,7 +185,10 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
   DateTime? _lastSwipeEvent;
 
   void _go(int index) {
+    // Alle Detail-Overlays schließen, damit der Tab-Wechsel sofort sichtbar ist
     ref.read(desktopSelectedContainerProvider.notifier).state = null;
+    ref.read(desktopSelectedEntryProvider.notifier).state = null;
+    ref.read(desktopCaptureProvider.notifier).state = null;
     widget.shell.goBranch(index);
   }
 
@@ -340,6 +343,9 @@ class _DesktopSidebar extends ConsumerWidget {
     final hubsAsync = ref.watch(hubsProvider);
 
     void navigate(String containerId) {
+      // Offenen Eintrag/Capture schließen, damit der Container direkt erscheint
+      ref.read(desktopSelectedEntryProvider.notifier).state = null;
+      ref.read(desktopCaptureProvider.notifier).state = null;
       ref.read(desktopSelectedContainerProvider.notifier).state = containerId;
       // Drawer schließen wenn nicht gepinnt
       if (!pinned) Navigator.of(context).pop();
