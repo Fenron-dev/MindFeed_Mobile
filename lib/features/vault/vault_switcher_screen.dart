@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import '../../core/folder_picker.dart';
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../main.dart' show onRestartApp;
@@ -117,8 +117,7 @@ class _VaultSwitcherScreenState extends State<VaultSwitcherScreen> {
                       color: MFColors.teal, size: 20),
                   onPressed: () async {
                     try {
-                      final path = await FilePicker.platform.getDirectoryPath(
-                          dialogTitle: 'Speicherort wählen');
+                      final path = await pickFolder(prompt: 'Speicherort wählen');
                       if (path != null) setS(() => dirCtrl.text = path);
                     } catch (_) {}
                   },
@@ -210,8 +209,7 @@ class _VaultSwitcherScreenState extends State<VaultSwitcherScreen> {
                   color: MFColors.teal, size: 20),
               onPressed: () async {
                 try {
-                  final path = await FilePicker.platform.getDirectoryPath(
-                      dialogTitle: 'Vault-Ordner wählen');
+                  final path = await pickFolder(prompt: 'Vault-Ordner wählen');
                   if (path != null) setS(() => pathCtrl.text = path);
                 } catch (_) {}
               },

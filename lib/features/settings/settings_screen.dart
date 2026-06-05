@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import '../../core/folder_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
@@ -373,9 +374,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   tooltip: 'Ordner wählen',
                   onPressed: () async {
                     try {
-                      final path = await FilePicker.platform.getDirectoryPath(
-                        dialogTitle: 'Speicherort wählen',
-                      );
+                      final path = await pickFolder(prompt: 'Speicherort wählen');
                       if (path != null) setS(() => dirCtrl.text = path);
                     } catch (_) {}
                   },
@@ -485,9 +484,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               tooltip: 'Ordner wählen',
               onPressed: () async {
                 try {
-                  final path = await FilePicker.platform.getDirectoryPath(
-                    dialogTitle: 'MindFeed-Vault-Ordner wählen',
-                  );
+                  final path = await pickFolder(prompt: 'MindFeed-Vault-Ordner wählen');
                   if (path != null) setS(() => pathCtrl.text = path);
                 } catch (_) {}
               },

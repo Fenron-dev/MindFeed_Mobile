@@ -45,7 +45,27 @@ class PairingCode {
 }
 
 class SyncServer {
-  final AppDatabase db;
+  // ── Singleton — überlebt ProviderScope-Rebuilds nach onRestartApp ────────
+  // Verhindert doppeltes Port-Binding und stellt sicher, dass pairingCodes
+  // immer in derselben Instanz liegen wie der HTTP-Handler.
+  static SyncServer? _singleton;
+
+  static SyncServer getInstance({
+    required AppDatabase db,
+    required String deviceId,
+    required String deviceName,
+  }) {
+    if (_singleton == null) {
+      _singleton = SyncServer._(db: db, deviceId: deviceId, deviceName: deviceName);
+    } else {
+      // DB-Referenz nach Vault-Wechsel aktualisieren
+      _singleton!._db = db;
+    }
+    return _singleton!;
+  }
+
+  AppDatabase _db;
+  AppDatabase get db => _db;
   final String deviceId;
   final String deviceName;
 
@@ -58,11 +78,11 @@ class SyncServer {
   final refreshTokens = <String, String>{};
   final connectedClients = <SyncClientInfo>[];
 
-  SyncServer({
-    required this.db,
+  SyncServer._({
+    required AppDatabase db,
     required this.deviceId,
     required this.deviceName,
-  });
+  }) : _db = db;
 
   bool get isRunning => _server != null;
 
@@ -195,10 +215,7 @@ class SyncServer {
         .addMiddleware(_corsMiddleware())
         .addHandler(router.call);
 
-    _server = await shelf_io.serve(
-      handler, InternetAddress.anyIPv4, kSyncPort,
-      shared: true, // erlaube re-bind nach Hot-Restart / Provider-Rebuild
-    );
+    _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, kSyncPort);
   }
 
   Future<void> stop() async {

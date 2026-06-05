@@ -307,20 +307,29 @@ class _DesktopSidebar extends ConsumerWidget {
               if (!pinned) Navigator.of(context).maybePop();
               context.push(AppRoutes.vaultSwitcher);
             },
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: MFColors.tealBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: MFColors.teal.withAlpha(60)),
+              ),
               child: Row(children: [
-                const Icon(Icons.folder_outlined, size: 14, color: MFColors.textMuted),
-                const SizedBox(width: 6),
+                const Icon(Icons.folder_rounded, size: 15, color: MFColors.teal),
+                const SizedBox(width: 7),
                 Expanded(
                   child: Text(
                     _vaultLabel(),
                     style: const TextStyle(
-                        fontSize: 11, color: MFColors.textMuted,
-                        overflow: TextOverflow.ellipsis),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: MFColors.teal,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
-                const Icon(Icons.unfold_more, size: 13, color: MFColors.textMuted),
+                const Icon(Icons.unfold_more, size: 14, color: MFColors.teal),
               ]),
             ),
           ),

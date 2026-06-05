@@ -79,7 +79,8 @@ final syncServiceProvider = Provider<SyncService>((ref) {
 
 final syncServerProvider = Provider<SyncServer>((ref) {
   final db = ref.watch(databaseProvider);
-  return SyncServer(
+  // getInstance() gibt immer dieselbe Instanz zurück → pairingCodes bleiben erhalten
+  return SyncServer.getInstance(
     db: db,
     deviceId: AppSettings.getDeviceId(),
     deviceName: AppSettings.getDeviceName(),
