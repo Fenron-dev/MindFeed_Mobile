@@ -246,6 +246,8 @@ Router syncRouter(AppDatabase db, SyncServer server) {
         }
 
         // 2. Containers VOR Entries (FK-Constraint: entry_containers → containers)
+        // Reines Last-Write-Wins: neuere Version gewinnt. Konflikt-Erkennung
+        // passiert clientseitig beim Pull (Shadow-Modell), nicht hier.
         for (final incoming in clientContainers) {
           final existing = await (db.select(db.containers)
                 ..where((c) => c.id.equals(incoming.id)))
@@ -255,14 +257,8 @@ Router syncRouter(AppDatabase db, SyncServer server) {
 
           final incomingTs = DateTime.tryParse(incoming.updatedAt);
           if (existing != null && incomingTs != null) {
-            if (!incomingTs.isAfter(existing.updatedAt)) {
-              conflicts.add(SyncConflict(
-                entityType: 'container',
-                entityId: incoming.id,
-                serverModifiedAt: existing.updatedAt.toIso8601String(),
-              ));
-              continue;
-            }
+            // Server-Version ist neuer → eingehende verwerfen (kein Konflikt)
+            if (incomingTs.isBefore(existing.updatedAt)) continue;
           }
 
           await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
@@ -285,6 +281,7 @@ Router syncRouter(AppDatabase db, SyncServer server) {
         }
 
         // 3. Entries (nach Containers, damit FK-Referenzen existieren)
+        // Reines Last-Write-Wins; Konflikte erkennt der Client beim Pull.
         for (final incoming in clientEntries) {
           final existing = await (db.select(db.entries)
                 ..where((e) => e.id.equals(incoming.id)))
@@ -294,14 +291,8 @@ Router syncRouter(AppDatabase db, SyncServer server) {
 
           final incomingTs = DateTime.tryParse(incoming.updatedAt);
           if (existing != null && incomingTs != null) {
-            if (!incomingTs.isAfter(existing.updatedAt)) {
-              conflicts.add(SyncConflict(
-                entityType: 'entry',
-                entityId: incoming.id,
-                serverModifiedAt: existing.updatedAt.toIso8601String(),
-              ));
-              continue;
-            }
+            // Server-Version ist neuer → eingehende verwerfen (kein Konflikt)
+            if (incomingTs.isBefore(existing.updatedAt)) continue;
           }
 
           await db.into(db.entries).insertOnConflictUpdate(EntriesCompanion(

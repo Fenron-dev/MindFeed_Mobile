@@ -1731,6 +1731,18 @@ class $ContainersTable extends Containers
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _syncUpdatedAtMeta = const VerificationMeta(
+    'syncUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> syncUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'sync_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _deletedAtMeta = const VerificationMeta(
     'deletedAt',
   );
@@ -1759,6 +1771,7 @@ class $ContainersTable extends Containers
     sortOrder,
     viewMode,
     parentId,
+    syncUpdatedAt,
     deletedAt,
   ];
   @override
@@ -1870,6 +1883,15 @@ class $ContainersTable extends Containers
         parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta),
       );
     }
+    if (data.containsKey('sync_updated_at')) {
+      context.handle(
+        _syncUpdatedAtMeta,
+        syncUpdatedAt.isAcceptableOrUnknown(
+          data['sync_updated_at']!,
+          _syncUpdatedAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('deleted_at')) {
       context.handle(
         _deletedAtMeta,
@@ -1945,6 +1967,10 @@ class $ContainersTable extends Containers
         DriftSqlType.string,
         data['${effectivePrefix}parent_id'],
       ),
+      syncUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}sync_updated_at'],
+      ),
       deletedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}deleted_at'],
@@ -1974,6 +2000,7 @@ class Container extends DataClass implements Insertable<Container> {
   final String sortOrder;
   final String viewMode;
   final String? parentId;
+  final DateTime? syncUpdatedAt;
   final DateTime? deletedAt;
   const Container({
     required this.id,
@@ -1991,6 +2018,7 @@ class Container extends DataClass implements Insertable<Container> {
     required this.sortOrder,
     required this.viewMode,
     this.parentId,
+    this.syncUpdatedAt,
     this.deletedAt,
   });
   @override
@@ -2020,6 +2048,9 @@ class Container extends DataClass implements Insertable<Container> {
     map['view_mode'] = Variable<String>(viewMode);
     if (!nullToAbsent || parentId != null) {
       map['parent_id'] = Variable<String>(parentId);
+    }
+    if (!nullToAbsent || syncUpdatedAt != null) {
+      map['sync_updated_at'] = Variable<DateTime>(syncUpdatedAt);
     }
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<DateTime>(deletedAt);
@@ -2054,6 +2085,9 @@ class Container extends DataClass implements Insertable<Container> {
       parentId: parentId == null && nullToAbsent
           ? const Value.absent()
           : Value(parentId),
+      syncUpdatedAt: syncUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncUpdatedAt),
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
@@ -2081,6 +2115,7 @@ class Container extends DataClass implements Insertable<Container> {
       sortOrder: serializer.fromJson<String>(json['sortOrder']),
       viewMode: serializer.fromJson<String>(json['viewMode']),
       parentId: serializer.fromJson<String?>(json['parentId']),
+      syncUpdatedAt: serializer.fromJson<DateTime?>(json['syncUpdatedAt']),
       deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
     );
   }
@@ -2103,6 +2138,7 @@ class Container extends DataClass implements Insertable<Container> {
       'sortOrder': serializer.toJson<String>(sortOrder),
       'viewMode': serializer.toJson<String>(viewMode),
       'parentId': serializer.toJson<String?>(parentId),
+      'syncUpdatedAt': serializer.toJson<DateTime?>(syncUpdatedAt),
       'deletedAt': serializer.toJson<DateTime?>(deletedAt),
     };
   }
@@ -2123,6 +2159,7 @@ class Container extends DataClass implements Insertable<Container> {
     String? sortOrder,
     String? viewMode,
     Value<String?> parentId = const Value.absent(),
+    Value<DateTime?> syncUpdatedAt = const Value.absent(),
     Value<DateTime?> deletedAt = const Value.absent(),
   }) => Container(
     id: id ?? this.id,
@@ -2140,6 +2177,9 @@ class Container extends DataClass implements Insertable<Container> {
     sortOrder: sortOrder ?? this.sortOrder,
     viewMode: viewMode ?? this.viewMode,
     parentId: parentId.present ? parentId.value : this.parentId,
+    syncUpdatedAt: syncUpdatedAt.present
+        ? syncUpdatedAt.value
+        : this.syncUpdatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
   );
   Container copyWithCompanion(ContainersCompanion data) {
@@ -2165,6 +2205,9 @@ class Container extends DataClass implements Insertable<Container> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       viewMode: data.viewMode.present ? data.viewMode.value : this.viewMode,
       parentId: data.parentId.present ? data.parentId.value : this.parentId,
+      syncUpdatedAt: data.syncUpdatedAt.present
+          ? data.syncUpdatedAt.value
+          : this.syncUpdatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
     );
   }
@@ -2187,6 +2230,7 @@ class Container extends DataClass implements Insertable<Container> {
           ..write('sortOrder: $sortOrder, ')
           ..write('viewMode: $viewMode, ')
           ..write('parentId: $parentId, ')
+          ..write('syncUpdatedAt: $syncUpdatedAt, ')
           ..write('deletedAt: $deletedAt')
           ..write(')'))
         .toString();
@@ -2209,6 +2253,7 @@ class Container extends DataClass implements Insertable<Container> {
     sortOrder,
     viewMode,
     parentId,
+    syncUpdatedAt,
     deletedAt,
   );
   @override
@@ -2230,6 +2275,7 @@ class Container extends DataClass implements Insertable<Container> {
           other.sortOrder == this.sortOrder &&
           other.viewMode == this.viewMode &&
           other.parentId == this.parentId &&
+          other.syncUpdatedAt == this.syncUpdatedAt &&
           other.deletedAt == this.deletedAt);
 }
 
@@ -2249,6 +2295,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
   final Value<String> sortOrder;
   final Value<String> viewMode;
   final Value<String?> parentId;
+  final Value<DateTime?> syncUpdatedAt;
   final Value<DateTime?> deletedAt;
   final Value<int> rowid;
   const ContainersCompanion({
@@ -2267,6 +2314,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.sortOrder = const Value.absent(),
     this.viewMode = const Value.absent(),
     this.parentId = const Value.absent(),
+    this.syncUpdatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -2286,6 +2334,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     this.sortOrder = const Value.absent(),
     this.viewMode = const Value.absent(),
     this.parentId = const Value.absent(),
+    this.syncUpdatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -2306,6 +2355,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Expression<String>? sortOrder,
     Expression<String>? viewMode,
     Expression<String>? parentId,
+    Expression<DateTime>? syncUpdatedAt,
     Expression<DateTime>? deletedAt,
     Expression<int>? rowid,
   }) {
@@ -2325,6 +2375,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (viewMode != null) 'view_mode': viewMode,
       if (parentId != null) 'parent_id': parentId,
+      if (syncUpdatedAt != null) 'sync_updated_at': syncUpdatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -2346,6 +2397,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     Value<String>? sortOrder,
     Value<String>? viewMode,
     Value<String?>? parentId,
+    Value<DateTime?>? syncUpdatedAt,
     Value<DateTime?>? deletedAt,
     Value<int>? rowid,
   }) {
@@ -2365,6 +2417,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
       sortOrder: sortOrder ?? this.sortOrder,
       viewMode: viewMode ?? this.viewMode,
       parentId: parentId ?? this.parentId,
+      syncUpdatedAt: syncUpdatedAt ?? this.syncUpdatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -2418,6 +2471,9 @@ class ContainersCompanion extends UpdateCompanion<Container> {
     if (parentId.present) {
       map['parent_id'] = Variable<String>(parentId.value);
     }
+    if (syncUpdatedAt.present) {
+      map['sync_updated_at'] = Variable<DateTime>(syncUpdatedAt.value);
+    }
     if (deletedAt.present) {
       map['deleted_at'] = Variable<DateTime>(deletedAt.value);
     }
@@ -2445,6 +2501,7 @@ class ContainersCompanion extends UpdateCompanion<Container> {
           ..write('sortOrder: $sortOrder, ')
           ..write('viewMode: $viewMode, ')
           ..write('parentId: $parentId, ')
+          ..write('syncUpdatedAt: $syncUpdatedAt, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -5695,6 +5752,7 @@ typedef $$ContainersTableCreateCompanionBuilder =
       Value<String> sortOrder,
       Value<String> viewMode,
       Value<String?> parentId,
+      Value<DateTime?> syncUpdatedAt,
       Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
@@ -5715,6 +5773,7 @@ typedef $$ContainersTableUpdateCompanionBuilder =
       Value<String> sortOrder,
       Value<String> viewMode,
       Value<String?> parentId,
+      Value<DateTime?> syncUpdatedAt,
       Value<DateTime?> deletedAt,
       Value<int> rowid,
     });
@@ -5828,6 +5887,11 @@ class $$ContainersTableFilterComposer
 
   ColumnFilters<String> get parentId => $composableBuilder(
     column: $table.parentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get syncUpdatedAt => $composableBuilder(
+    column: $table.syncUpdatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5946,6 +6010,11 @@ class $$ContainersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get syncUpdatedAt => $composableBuilder(
+    column: $table.syncUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
     column: $table.deletedAt,
     builder: (column) => ColumnOrderings(column),
@@ -6011,6 +6080,11 @@ class $$ContainersTableAnnotationComposer
 
   GeneratedColumn<String> get parentId =>
       $composableBuilder(column: $table.parentId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get syncUpdatedAt => $composableBuilder(
+    column: $table.syncUpdatedAt,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get deletedAt =>
       $composableBuilder(column: $table.deletedAt, builder: (column) => column);
@@ -6084,6 +6158,7 @@ class $$ContainersTableTableManager
                 Value<String> sortOrder = const Value.absent(),
                 Value<String> viewMode = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
+                Value<DateTime?> syncUpdatedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ContainersCompanion(
@@ -6102,6 +6177,7 @@ class $$ContainersTableTableManager
                 sortOrder: sortOrder,
                 viewMode: viewMode,
                 parentId: parentId,
+                syncUpdatedAt: syncUpdatedAt,
                 deletedAt: deletedAt,
                 rowid: rowid,
               ),
@@ -6122,6 +6198,7 @@ class $$ContainersTableTableManager
                 Value<String> sortOrder = const Value.absent(),
                 Value<String> viewMode = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
+                Value<DateTime?> syncUpdatedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ContainersCompanion.insert(
@@ -6140,6 +6217,7 @@ class $$ContainersTableTableManager
                 sortOrder: sortOrder,
                 viewMode: viewMode,
                 parentId: parentId,
+                syncUpdatedAt: syncUpdatedAt,
                 deletedAt: deletedAt,
                 rowid: rowid,
               ),

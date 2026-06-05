@@ -92,19 +92,35 @@ class SyncStateNotifier extends Notifier<SyncState> {
     state = state.copyWith(pendingConflicts: remaining);
   }
 
-  /// Konflikte auflösen: 'mine' = lokale Version pushen, 'server' = nichts tun
+  /// Alle Konflikte auf einmal auflösen.
   Future<void> resolveConflicts(ConflictResolution resolution) async {
-    if (resolution == ConflictResolution.server) {
-      // Server hat gewonnen — nichts weiter nötig
-      state = state.copyWith(pendingConflicts: []);
-      return;
-    }
-    if (resolution == ConflictResolution.mine) {
-      // Lokale Versionen erneut pushen mit aktuellem Timestamp
-      final service = ref.read(syncServiceProvider);
-      await service.pushWithForcedTimestamp(state.pendingConflicts);
-    }
+    await _resolve(resolution, state.pendingConflicts);
     state = state.copyWith(pendingConflicts: []);
+  }
+
+  /// Einen einzelnen Konflikt auflösen (Detailansicht).
+  Future<void> resolveSingleConflict(
+      String entityId, ConflictResolution resolution) async {
+    final target =
+        state.pendingConflicts.where((c) => c.entityId == entityId).toList();
+    if (target.isEmpty) return;
+    await _resolve(resolution, target);
+    state = state.copyWith(
+      pendingConflicts: state.pendingConflicts
+          .where((c) => c.entityId != entityId)
+          .toList(),
+    );
+  }
+
+  Future<void> _resolve(
+      ConflictResolution resolution, List<SyncConflict> conflicts) async {
+    if (conflicts.isEmpty) return;
+    final service = ref.read(syncServiceProvider);
+    if (resolution == ConflictResolution.mine) {
+      await service.resolveConflictsMine(conflicts);
+    } else {
+      await service.resolveConflictsServer(conflicts);
+    }
   }
 }
 

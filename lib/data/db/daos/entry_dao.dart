@@ -83,19 +83,18 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
     return rows.length;
   }
 
-  // ── Sync helpers ────────────────────────────────────────────────────────────
+  // ── Sync helpers (Shadow-Version-Modell) ────────────────────────────────────
 
-  /// Returns entries modified after [since] that are not soft-deleted.
-  Future<List<Entry>> getModifiedSince(DateTime since) =>
+  /// Lokal geänderte Einträge, die noch nicht mit dem Server abgeglichen sind.
+  /// dirty = syncUpdatedAt IS NULL (neu) ODER updatedAt > syncUpdatedAt (geändert).
+  /// Gepullte Server-Einträge (updatedAt == syncUpdatedAt) sind NICHT dirty —
+  /// das verhindert, dass sie sofort wieder zurückgepusht werden.
+  Future<List<Entry>> getDirty() =>
       (select(entries)
             ..where((e) =>
-                e.updatedAt.isBiggerThanValue(since) & e.deletedAt.isNull()))
-          .get();
-
-  /// Returns entries that have never been synced (syncUpdatedAt IS NULL).
-  Future<List<Entry>> getUnsynced() =>
-      (select(entries)
-            ..where((e) => e.syncUpdatedAt.isNull() & e.deletedAt.isNull()))
+                e.deletedAt.isNull() &
+                (e.syncUpdatedAt.isNull() |
+                    e.updatedAt.isBiggerThan(e.syncUpdatedAt))))
           .get();
 
   /// Returns soft-deleted entries (tombstones) modified after [since].
@@ -106,17 +105,22 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
                 e.deletedAt.isBiggerThanValue(since)))
           .get();
 
+  /// Alle Tombstones (für Full-Sync ohne since).
+  Future<List<Entry>> getAllSoftDeleted() =>
+      (select(entries)..where((e) => e.deletedAt.isNotNull())).get();
+
   /// Soft-deletes an entry (sets deletedAt).
   Future<void> softDelete(String id) =>
       (update(entries)..where((e) => e.id.equals(id)))
           .write(EntriesCompanion(deletedAt: Value(DateTime.now().toUtc())));
 
-  /// Marks entries as synced (updates syncUpdatedAt).
-  Future<void> markSynced(List<String> ids, DateTime syncedAt) async {
-    for (final id in ids) {
-      await (update(entries)..where((e) => e.id.equals(id)))
-          .write(EntriesCompanion(syncUpdatedAt: Value(syncedAt)));
-    }
+  /// Setzt die Shadow-Version: syncUpdatedAt = updatedAt. Danach gilt der
+  /// Eintrag als mit dem Server abgeglichen (nicht mehr dirty).
+  Future<void> markSyncedToShadow(String id) async {
+    final e = await getById(id);
+    if (e == null) return;
+    await (update(entries)..where((row) => row.id.equals(id)))
+        .write(EntriesCompanion(syncUpdatedAt: Value(e.updatedAt)));
   }
 
   // ── Papierkorb ──────────────────────────────────────────────────────────────

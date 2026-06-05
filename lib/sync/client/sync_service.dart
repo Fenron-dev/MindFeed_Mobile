@@ -70,8 +70,7 @@ class SyncService {
     }
 
     final lastSyncAt = AppSettings.getLastSyncAt();
-
-    // ── PULL ─────────────────────────────────────────────────────────────────
+    final firstSync = lastSyncAt == null;
 
     // ── PULL ─────────────────────────────────────────────────────────────────
     // Alle Exceptions fangen (TimeoutException, SocketException, FormatException…)
@@ -83,70 +82,74 @@ class SyncService {
       return SyncResult.failed('Pull fehlgeschlagen: $e');
     }
 
+    // _applyPull übernimmt Server-Versionen (LWW gegen Shadow) und erkennt
+    // ECHTE Konflikte (lokal UND Server seit dem Shadow geändert). Beim
+    // allerersten Sync gibt es nie Konflikte — alles wird einfach übernommen.
+    List<SyncConflict> conflicts;
     try {
-      await _applyPull(pullResp);
+      conflicts = await _applyPull(pullResp, firstSync: firstSync);
     } catch (e) {
       return SyncResult.failed('Lokale Datenbank-Aktualisierung fehlgeschlagen: $e');
     }
 
     // ── PUSH ─────────────────────────────────────────────────────────────────
+    // Nur wirklich lokal geänderte Einträge (dirty), NICHT die gerade gepullten.
+    // Einträge mit echtem Konflikt werden NICHT gepusht (warten auf Entscheidung).
+    final conflictIds = conflicts.map((c) => c.entityId).toSet();
 
-    final dirtyEntries = lastSyncAt != null
-        ? await entryDao.getModifiedSince(lastSyncAt)
-        : await entryDao.getUnsynced();
+    final dirtyEntries = (await entryDao.getDirty())
+        .where((e) => !conflictIds.contains(e.id))
+        .toList();
+    final dirtyContainers = (await containerDao.getDirty())
+        .where((c) => !conflictIds.contains(c.id))
+        .toList();
 
-    final dirtyContainers = lastSyncAt != null
-        ? await containerDao.getModifiedSince(lastSyncAt)
-        : await containerDao.getUnsynced();
-
-    // Tombstones (soft-deleted since lastSync)
+    // Tombstones: beim Erstsync alle, sonst nur seit dem letzten Sync gelöschte
     final tombstones = <SyncTombstone>[];
-    if (lastSyncAt != null) {
-      final deletedEntries = await entryDao.getSoftDeletedSince(lastSyncAt);
-      for (final e in deletedEntries) {
-        tombstones.add(SyncTombstone(
-          entityType: 'entry',
-          entityId: e.id,
-          deletedAt: e.deletedAt!.toIso8601String(),
-        ));
-      }
-      final deletedContainers = await containerDao.getSoftDeletedSince(lastSyncAt);
-      for (final c in deletedContainers) {
-        tombstones.add(SyncTombstone(
-          entityType: 'container',
-          entityId: c.id,
-          deletedAt: c.deletedAt!.toIso8601String(),
-        ));
-      }
+    final deletedEntries = firstSync
+        ? await entryDao.getAllSoftDeleted()
+        : await entryDao.getSoftDeletedSince(lastSyncAt);
+    for (final e in deletedEntries) {
+      tombstones.add(SyncTombstone(
+        entityType: 'entry',
+        entityId: e.id,
+        deletedAt: e.deletedAt!.toIso8601String(),
+      ));
+    }
+    final deletedContainers = firstSync
+        ? await containerDao.getAllSoftDeleted()
+        : await containerDao.getSoftDeletedSince(lastSyncAt);
+    for (final c in deletedContainers) {
+      tombstones.add(SyncTombstone(
+        entityType: 'container',
+        entityId: c.id,
+        deletedAt: c.deletedAt!.toIso8601String(),
+      ));
     }
 
     // Build push payload
     final syncEntries = await _toSyncEntries(dirtyEntries);
     final syncContainers = _toSyncContainers(dirtyContainers);
 
-    List<SyncConflict> conflicts = [];
     if (syncEntries.isNotEmpty ||
         syncContainers.isNotEmpty ||
         tombstones.isNotEmpty) {
       try {
         final deviceId = AppSettings.getDeviceId();
-        final pushResp = await client.push(SyncPushRequest(
+        // Server macht reines LWW; das conflicts-Feld der Antwort wird
+        // ignoriert — Konflikte werden clientseitig beim Pull erkannt.
+        await client.push(SyncPushRequest(
           deviceId: deviceId,
           entries: syncEntries,
           containers: syncContainers,
           tombstones: tombstones,
         ));
-        conflicts = pushResp.conflicts;
       } catch (e) {
         return SyncResult.failed('Push fehlgeschlagen: $e');
       }
     }
 
     // ── Anhänge übertragen (best-effort, blockiert den Sync-Erfolg nicht) ────
-    // Erst hochladen (Metadaten wurden im Push gespeichert → Server kennt die
-    // Anhänge jetzt), dann fehlende herunterladen. Beide laufen über ALLE
-    // Anhänge, sodass frühere Fehlschläge bei jedem Sync neu versucht werden.
-    // Einträge selbst sind durch _applyPull bereits sichtbar.
     try {
       await _uploadAttachments(client);
       await _downloadMissingAttachments(client);
@@ -155,14 +158,20 @@ class SyncService {
     }
 
     // ── Finalize ─────────────────────────────────────────────────────────────
+    // Erfolgreich gepushte Einträge auf Shadow setzen (syncUpdatedAt = updatedAt)
+    // → nicht mehr dirty, werden beim nächsten Sync nicht erneut gepusht.
+    for (final e in dirtyEntries) {
+      await entryDao.markSyncedToShadow(e.id);
+    }
+    for (final c in dirtyContainers) {
+      await containerDao.markSyncedToShadow(c.id);
+    }
 
     final now = DateTime.now().toUtc();
     await AppSettings.saveLastSyncAt(now);
 
-    // Mark pushed entries as synced
-    final syncedIds = syncEntries.map((e) => e.id).toList();
-    if (syncedIds.isNotEmpty) {
-      await entryDao.markSynced(syncedIds, now);
+    if (conflicts.isNotEmpty) {
+      debugPrint('[Sync] ${conflicts.length} echte(r) Konflikt(e) erkannt');
     }
 
     return SyncResult(
@@ -176,11 +185,18 @@ class SyncService {
     );
   }
 
-  // ── Apply pull response to local DB ───────────────────────────────────────
+  // ── Apply pull response to local DB (Shadow-Version-Modell) ────────────────
+  //
+  // Übernimmt Server-Versionen und erkennt ECHTE Konflikte:
+  //   localDirty   = lokal geändert seit letztem Abgleich (updatedAt > shadow)
+  //   serverChanged= Server-Version weicht vom letzten Abgleich ab (serverTs != shadow)
+  //   → Konflikt nur wenn BEIDES zutrifft. Sonst gewinnt die jeweils einzige
+  //     geänderte Seite lautlos (kein "alles ist ein Konflikt" mehr).
 
-  Future<void> _applyPull(SyncPullResponse pull) async {
-    // Vault-Anhangspfad vor der Transaktion ermitteln (async nicht sicher darin)
+  Future<List<SyncConflict>> _applyPull(SyncPullResponse pull,
+      {bool firstSync = false}) async {
     final vaultAttsPath = await VaultManager.getAttachmentsPath();
+    final conflicts = <SyncConflict>[];
 
     if (pull.tombstones.isNotEmpty) {
       debugPrint('[Sync] ${pull.tombstones.length} Tombstone(s) empfangen '
@@ -188,8 +204,7 @@ class SyncService {
     }
 
     await db.transaction(() async {
-      // 1. Apply tombstones first — gelöschte Einträge landen via softDelete
-      //    im Papierkorb (deletedAt gesetzt), nicht endgültig gelöscht.
+      // 1. Tombstones zuerst (Soft-Delete → Papierkorb)
       for (final t in pull.tombstones) {
         if (t.entityType == 'entry') {
           await entryDao.softDelete(t.entityId);
@@ -198,143 +213,203 @@ class SyncService {
         }
       }
 
-      // 2. Upsert containers VOR entries — FK-Constraint: entry_containers → containers
+      // 2. Container VOR Entries (FK: entry_containers → containers)
       for (final sc in pull.containers) {
         final existing = await (db.select(db.containers)
               ..where((c) => c.id.equals(sc.id)))
             .getSingleOrNull();
         final serverTs = DateTime.tryParse(sc.updatedAt)?.toUtc();
-        if (existing != null && serverTs != null) {
-          if (!serverTs.isAfter(existing.updatedAt)) continue;
-        }
-        if (existing?.deletedAt != null) continue;
+        if (existing?.deletedAt != null) continue; // lokaler Tombstone gewinnt
 
-        await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
-          id: Value(sc.id),
-          kind: Value(sc.kind),
-          name: Value(sc.name),
-          description: Value(sc.description),
-          icon: Value(sc.icon),
-          color: Value(sc.color),
-          createdAt: Value(DateTime.tryParse(sc.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
-          updatedAt: Value(serverTs ?? DateTime.now().toUtc()),
-          archived: Value(sc.archived),
-          filterTag: Value(sc.filterTag),
-          filterStatus: Value(sc.filterStatus),
-          filterType: Value(sc.filterType),
-          sortOrder: Value(sc.sortOrder),
-          viewMode: Value(sc.viewMode),
-          parentId: Value(sc.parentId),
-        ));
+        if (existing == null || firstSync) {
+          await _writeServerContainer(sc, serverTs);
+          continue;
+        }
+
+        final shadow = existing.syncUpdatedAt;
+        final localDirty = shadow == null || existing.updatedAt.isAfter(shadow);
+        final serverChanged = shadow == null ||
+            (serverTs != null && !_sameInstant(serverTs, shadow));
+
+        if (!localDirty) {
+          // Nur Server hat geändert (oder gar nichts) → übernehmen
+          await _writeServerContainer(sc, serverTs);
+        } else if (!serverChanged) {
+          // Nur lokal geändert → lokale Version behalten, wird gepusht
+          continue;
+        } else {
+          // Beide geändert → echter Konflikt
+          conflicts.add(SyncConflict(
+            entityType: 'container',
+            entityId: sc.id,
+            serverModifiedAt: sc.updatedAt,
+            localModifiedAt: existing.updatedAt.toIso8601String(),
+            serverData: sc.toJson(),
+          ));
+        }
       }
 
-      // 3. Upsert entries — Container existieren jetzt, FK-Constraints erfüllt
+      // 3. Entries
       for (final se in pull.entries) {
         final existing = await entryDao.getById(se.id);
         final serverTs = DateTime.tryParse(se.updatedAt)?.toUtc();
-        if (existing != null && serverTs != null) {
-          if (!serverTs.isAfter(existing.updatedAt)) continue; // local is newer
-        }
-        if (existing?.deletedAt != null) continue; // local tombstone wins
+        if (existing?.deletedAt != null) continue; // lokaler Tombstone gewinnt
 
-        await db.into(db.entries).insertOnConflictUpdate(EntriesCompanion(
-          id: Value(se.id),
-          createdAt: Value(DateTime.tryParse(se.createdAt)?.toUtc() ?? DateTime.now().toUtc()),
-          updatedAt: Value(serverTs ?? DateTime.now().toUtc()),
-          type: Value(se.type),
-          title: Value(se.title),
-          body: Value(se.body),
-          status: Value(se.status),
-          pinned: Value(se.pinned),
-          geoLat: Value(se.geoLat),
-          geoLng: Value(se.geoLng),
-          reminderAt: Value(se.reminderAt != null ? DateTime.tryParse(se.reminderAt!) : null),
-          sourceUrl: Value(se.sourceUrl),
-          sourceApp: Value(se.sourceApp),
-          lang: Value(se.lang),
-          aiEnrichedAt: Value(se.aiEnrichedAt != null ? DateTime.tryParse(se.aiEnrichedAt!) : null),
-          syncUpdatedAt: Value(DateTime.now().toUtc()),
-        ));
-
-        // entry_containers — Container sind bereits in DB (Schritt 2)
-        await (db.delete(db.entryContainers)
-              ..where((ec) => ec.entryId.equals(se.id)))
-            .go();
-        for (final cid in se.containers) {
-          // Nur einfügen wenn Container tatsächlich existiert
-          final containerExists = await (db.select(db.containers)
-                ..where((c) => c.id.equals(cid) & c.deletedAt.isNull()))
-              .getSingleOrNull();
-          if (containerExists == null) continue;
-          await db.into(db.entryContainers).insertOnConflictUpdate(
-            EntryContainersCompanion(
-              entryId: Value(se.id),
-              containerId: Value(cid),
-            ),
-          );
+        if (existing == null || firstSync) {
+          await _writeServerEntry(se, serverTs, vaultAttsPath);
+          continue;
         }
 
-        // Properties
-        await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(se.id))).go();
-        for (final prop in se.properties) {
-          final key = prop['key'] as String? ?? '';
-          if (key.isEmpty) continue;
-          await db.into(db.entryProperties).insertOnConflictUpdate(
-            EntryPropertiesCompanion(
-              id: Value('prop-${se.id}-$key'),
-              entryId: Value(se.id),
-              key: Value(key),
-              value: Value(prop['value'] as String?),
-              type: Value(prop['type'] as String? ?? 'text'),
-            ),
-          );
-        }
+        final shadow = existing.syncUpdatedAt;
+        final localDirty = shadow == null || existing.updatedAt.isAfter(shadow);
+        final serverChanged = shadow == null ||
+            (serverTs != null && !_sameInstant(serverTs, shadow));
 
-        // Tags
-        await (db.delete(db.entryTags)..where((t) => t.entryId.equals(se.id))).go();
-        for (final tagName in se.tags) {
-          if (tagName.isEmpty) continue;
-          final tagId = 'tag-$tagName';
-          await db.into(db.tags).insertOnConflictUpdate(
-            TagsCompanion(id: Value(tagId), name: Value(tagName)),
-          );
-          await db.into(db.entryTags).insertOnConflictUpdate(
-            EntryTagsCompanion(entryId: Value(se.id), tagId: Value(tagId)),
-          );
-        }
-
-        // Anhang-Metadaten
-        for (final attMap in se.attachments) {
-          final attId = _attStr(attMap, 'id');
-          if (attId.isEmpty) continue;
-          final fileName = _attStr(attMap, 'fileName', 'file_name').isNotEmpty
-              ? _attStr(attMap, 'fileName', 'file_name')
-              : attId;
-          final ext = p.extension(fileName);
-          final localPath = p.join(vaultAttsPath, '$attId$ext');
-          final mimeType = _attStr(attMap, 'mimeType', 'mime_type').isNotEmpty
-              ? _attStr(attMap, 'mimeType', 'mime_type')
-              : 'application/octet-stream';
-          await db.into(db.attachments).insertOnConflictUpdate(
-            AttachmentsCompanion(
-              id: Value(attId),
-              entryId: Value(se.id),
-              type: Value(_attStr(attMap, 'type').isNotEmpty
-                  ? _attStr(attMap, 'type') : 'file'),
-              mimeType: Value(mimeType),
-              localPath: Value(localPath),
-              fileName: Value(fileName),
-              fileSize: Value(_attInt(attMap, 'fileSize', 'size') ?? 0),
-              durationMs: Value(_attInt(attMap, 'durationMs', 'duration_ms')),
-              transcription: Value(attMap['transcription'] as String?),
-              createdAt: Value(DateTime.tryParse(
-                      _attStr(attMap, 'createdAt', 'created_at'))?.toUtc() ??
-                  DateTime.now().toUtc()),
-            ),
-          );
+        if (!localDirty) {
+          await _writeServerEntry(se, serverTs, vaultAttsPath);
+        } else if (!serverChanged) {
+          continue; // nur lokal geändert → behalten, wird gepusht
+        } else {
+          conflicts.add(SyncConflict(
+            entityType: 'entry',
+            entityId: se.id,
+            serverModifiedAt: se.updatedAt,
+            localModifiedAt: existing.updatedAt.toIso8601String(),
+            serverData: se.toJson(),
+          ));
         }
       }
     });
+
+    return conflicts;
+  }
+
+  static bool _sameInstant(DateTime a, DateTime b) =>
+      a.toUtc().millisecondsSinceEpoch == b.toUtc().millisecondsSinceEpoch;
+
+  /// Schreibt eine Server-Container-Version lokal; setzt Shadow = serverTs.
+  Future<void> _writeServerContainer(SyncContainer sc, DateTime? serverTs) async {
+    final ts = serverTs ?? DateTime.now().toUtc();
+    await db.into(db.containers).insertOnConflictUpdate(ContainersCompanion(
+      id: Value(sc.id),
+      kind: Value(sc.kind),
+      name: Value(sc.name),
+      description: Value(sc.description),
+      icon: Value(sc.icon),
+      color: Value(sc.color),
+      createdAt: Value(DateTime.tryParse(sc.createdAt)?.toUtc() ?? ts),
+      updatedAt: Value(ts),
+      archived: Value(sc.archived),
+      filterTag: Value(sc.filterTag),
+      filterStatus: Value(sc.filterStatus),
+      filterType: Value(sc.filterType),
+      sortOrder: Value(sc.sortOrder),
+      viewMode: Value(sc.viewMode),
+      parentId: Value(sc.parentId),
+      syncUpdatedAt: Value(ts), // Shadow = Server-Version → nicht dirty
+    ));
+  }
+
+  /// Schreibt eine Server-Entry-Version lokal (inkl. Relationen + Anhang-Meta);
+  /// setzt Shadow = serverTs.
+  Future<void> _writeServerEntry(
+      SyncEntry se, DateTime? serverTs, String vaultAttsPath) async {
+    final ts = serverTs ?? DateTime.now().toUtc();
+    await db.into(db.entries).insertOnConflictUpdate(EntriesCompanion(
+      id: Value(se.id),
+      createdAt: Value(DateTime.tryParse(se.createdAt)?.toUtc() ?? ts),
+      updatedAt: Value(ts),
+      type: Value(se.type),
+      title: Value(se.title),
+      body: Value(se.body),
+      status: Value(se.status),
+      pinned: Value(se.pinned),
+      geoLat: Value(se.geoLat),
+      geoLng: Value(se.geoLng),
+      reminderAt: Value(se.reminderAt != null ? DateTime.tryParse(se.reminderAt!) : null),
+      sourceUrl: Value(se.sourceUrl),
+      sourceApp: Value(se.sourceApp),
+      lang: Value(se.lang),
+      aiEnrichedAt: Value(se.aiEnrichedAt != null ? DateTime.tryParse(se.aiEnrichedAt!) : null),
+      syncUpdatedAt: Value(ts), // Shadow = Server-Version → nicht dirty
+    ));
+
+    // entry_containers
+    await (db.delete(db.entryContainers)
+          ..where((ec) => ec.entryId.equals(se.id)))
+        .go();
+    for (final cid in se.containers) {
+      final containerExists = await (db.select(db.containers)
+            ..where((c) => c.id.equals(cid) & c.deletedAt.isNull()))
+          .getSingleOrNull();
+      if (containerExists == null) continue;
+      await db.into(db.entryContainers).insertOnConflictUpdate(
+        EntryContainersCompanion(
+          entryId: Value(se.id),
+          containerId: Value(cid),
+        ),
+      );
+    }
+
+    // Properties
+    await (db.delete(db.entryProperties)..where((p) => p.entryId.equals(se.id))).go();
+    for (final prop in se.properties) {
+      final key = prop['key'] as String? ?? '';
+      if (key.isEmpty) continue;
+      await db.into(db.entryProperties).insertOnConflictUpdate(
+        EntryPropertiesCompanion(
+          id: Value('prop-${se.id}-$key'),
+          entryId: Value(se.id),
+          key: Value(key),
+          value: Value(prop['value'] as String?),
+          type: Value(prop['type'] as String? ?? 'text'),
+        ),
+      );
+    }
+
+    // Tags
+    await (db.delete(db.entryTags)..where((t) => t.entryId.equals(se.id))).go();
+    for (final tagName in se.tags) {
+      if (tagName.isEmpty) continue;
+      final tagId = 'tag-$tagName';
+      await db.into(db.tags).insertOnConflictUpdate(
+        TagsCompanion(id: Value(tagId), name: Value(tagName)),
+      );
+      await db.into(db.entryTags).insertOnConflictUpdate(
+        EntryTagsCompanion(entryId: Value(se.id), tagId: Value(tagId)),
+      );
+    }
+
+    // Anhang-Metadaten (Binärdaten via _downloadMissingAttachments)
+    for (final attMap in se.attachments) {
+      final attId = _attStr(attMap, 'id');
+      if (attId.isEmpty) continue;
+      final fileName = _attStr(attMap, 'fileName', 'file_name').isNotEmpty
+          ? _attStr(attMap, 'fileName', 'file_name')
+          : attId;
+      final ext = p.extension(fileName);
+      final localPath = p.join(vaultAttsPath, '$attId$ext');
+      final mimeType = _attStr(attMap, 'mimeType', 'mime_type').isNotEmpty
+          ? _attStr(attMap, 'mimeType', 'mime_type')
+          : 'application/octet-stream';
+      await db.into(db.attachments).insertOnConflictUpdate(
+        AttachmentsCompanion(
+          id: Value(attId),
+          entryId: Value(se.id),
+          type: Value(_attStr(attMap, 'type').isNotEmpty
+              ? _attStr(attMap, 'type') : 'file'),
+          mimeType: Value(mimeType),
+          localPath: Value(localPath),
+          fileName: Value(fileName),
+          fileSize: Value(_attInt(attMap, 'fileSize', 'size') ?? 0),
+          durationMs: Value(_attInt(attMap, 'durationMs', 'duration_ms')),
+          transcription: Value(attMap['transcription'] as String?),
+          createdAt: Value(DateTime.tryParse(
+                  _attStr(attMap, 'createdAt', 'created_at'))?.toUtc() ??
+              DateTime.now().toUtc()),
+        ),
+      );
+    }
   }
 
   // ── Convert local Drift models → SyncDTO ──────────────────────────────────
@@ -397,48 +472,75 @@ class SyncService {
     return result;
   }
 
-  /// "Meine Version behalten": Konflikte erneut pushen mit aktuellem Timestamp
-  Future<void> pushWithForcedTimestamp(List<SyncConflict> conflicts) async {
+  /// Konflikt-Auflösung "Meine Version behalten": lokale Version mit frischem
+  /// Zeitstempel pushen (gewinnt LWW), danach Shadow setzen.
+  Future<void> resolveConflictsMine(List<SyncConflict> conflicts) async {
     final serverUrl = AppSettings.getSyncServerUrl();
     if (serverUrl == null) return;
     final client = SyncApiClient(serverUrl);
-
-    final forcedEntries = <SyncEntry>[];
     final now = DateTime.now().toUtc();
 
+    final forcedEntries = <SyncEntry>[];
+    final forcedContainers = <SyncContainer>[];
+
     for (final conflict in conflicts) {
-      if (conflict.entityType != 'entry') continue;
-      final entry = await entryDao.getById(conflict.entityId);
-      if (entry == null) continue;
-      final entries = await _toSyncEntries([entry]);
-      if (entries.isEmpty) continue;
-      // Timestamp leicht in die Zukunft setzen → Server akzeptiert als neuere Version
-      final forced = SyncEntry(
-        id: entries.first.id,
-        createdAt: entries.first.createdAt,
-        updatedAt: now.add(const Duration(seconds: 1)).toIso8601String(),
-        type: entries.first.type,
-        title: entries.first.title,
-        body: entries.first.body,
-        status: entries.first.status,
-        pinned: entries.first.pinned,
-        tags: entries.first.tags,
-        properties: entries.first.properties,
-        containers: entries.first.containers,
-        attachments: entries.first.attachments,
-      );
-      forcedEntries.add(forced);
+      if (conflict.entityType == 'entry') {
+        final entry = await entryDao.getById(conflict.entityId);
+        if (entry == null) continue;
+        // updatedAt lokal in die Zukunft setzen → gewinnt LWW + ist > Shadow
+        await (db.update(db.entries)..where((e) => e.id.equals(entry.id)))
+            .write(EntriesCompanion(updatedAt: Value(now)));
+        final entries = await _toSyncEntries([(await entryDao.getById(entry.id))!]);
+        if (entries.isNotEmpty) forcedEntries.add(entries.first);
+      } else if (conflict.entityType == 'container') {
+        await (db.update(db.containers)..where((c) => c.id.equals(conflict.entityId)))
+            .write(ContainersCompanion(updatedAt: Value(now)));
+        final c = await (db.select(db.containers)
+              ..where((row) => row.id.equals(conflict.entityId)))
+            .getSingleOrNull();
+        if (c != null) forcedContainers.addAll(_toSyncContainers([c]));
+      }
     }
 
-    if (forcedEntries.isEmpty) return;
+    if (forcedEntries.isEmpty && forcedContainers.isEmpty) return;
     try {
       await client.push(SyncPushRequest(
         deviceId: AppSettings.getDeviceId(),
         entries: forcedEntries,
-        containers: [],
+        containers: forcedContainers,
         tombstones: [],
       ));
-    } catch (_) {}
+      // Erfolgreich gepusht → Shadow setzen (nicht mehr dirty)
+      for (final e in forcedEntries) {
+        await entryDao.markSyncedToShadow(e.id);
+      }
+      for (final c in forcedContainers) {
+        await containerDao.markSyncedToShadow(c.id);
+      }
+    } catch (e) {
+      debugPrint('[Sync] resolveConflictsMine push fehlgeschlagen: $e');
+    }
+  }
+
+  /// Konflikt-Auflösung "Server-Version übernehmen": die im Konflikt
+  /// mitgelieferte Server-Version lokal anwenden (überschreibt lokale Änderung).
+  Future<void> resolveConflictsServer(List<SyncConflict> conflicts) async {
+    final vaultAttsPath = await VaultManager.getAttachmentsPath();
+    await db.transaction(() async {
+      for (final conflict in conflicts) {
+        final data = conflict.serverData;
+        if (data == null) continue;
+        if (conflict.entityType == 'entry') {
+          final se = SyncEntry.fromJson(data);
+          await _writeServerEntry(
+              se, DateTime.tryParse(se.updatedAt)?.toUtc(), vaultAttsPath);
+        } else if (conflict.entityType == 'container') {
+          final sc = SyncContainer.fromJson(data);
+          await _writeServerContainer(
+              sc, DateTime.tryParse(sc.updatedAt)?.toUtc());
+        }
+      }
+    });
   }
 
   // ── Anhänge hochladen ─────────────────────────────────────────────────────

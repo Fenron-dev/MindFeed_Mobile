@@ -37,6 +37,10 @@ class Containers extends Table {
 
   TextColumn get parentId => text().nullable()();
 
+  // Sync: Shadow-Version = updatedAt-Stand, der zuletzt mit dem Server
+  // abgeglichen wurde. null = noch nie synchronisiert (lokal neu).
+  DateTimeColumn get syncUpdatedAt => dateTime().nullable()();
+
   // Soft-Delete für Sync-Tombstones; null = aktiv
   DateTimeColumn get deletedAt => dateTime().nullable()();
 

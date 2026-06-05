@@ -48,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -65,6 +65,16 @@ class AppDatabase extends _$AppDatabase {
             // Backfill updatedAt für bestehende Container
             await customStatement(
                 'UPDATE containers SET updated_at = created_at WHERE updated_at IS NULL');
+          }
+          if (from < 3) {
+            await m.addColumn(containers, containers.syncUpdatedAt);
+            // Bestehende Daten gelten als bereits abgeglichen → Shadow = updatedAt,
+            // damit sie nicht beim ersten Sync als "dirty" zurückgepusht werden.
+            await customStatement(
+                'UPDATE containers SET sync_updated_at = updated_at');
+            await customStatement(
+                'UPDATE entries SET sync_updated_at = updated_at '
+                'WHERE sync_updated_at IS NULL AND deleted_at IS NULL');
           }
         },
         beforeOpen: (details) async {

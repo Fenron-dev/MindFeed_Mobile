@@ -282,18 +282,12 @@ class _ConflictCard extends ConsumerWidget {
   }
 
   void _resolveOne(WidgetRef ref, BuildContext context, ConflictResolution resolution) {
-    // Einzelnen Konflikt auflösen: diesen aus der Liste entfernen,
-    // dann im Hintergrund die passende Aktion ausführen
+    // Genau diesen Konflikt auflösen (lokale oder Server-Version anwenden)
     final notifier = ref.read(syncStateProvider.notifier);
     final remaining = ref.read(syncStateProvider).pendingConflicts
         .where((c) => c.entityId != conflict.entityId).toList();
 
-    if (resolution == ConflictResolution.mine) {
-      notifier.resolveConflicts(ConflictResolution.mine);
-    } else {
-      // Server hat schon gewonnen → Konflikt einfach entfernen
-      notifier.clearSingleConflict(conflict.entityId);
-    }
+    notifier.resolveSingleConflict(conflict.entityId, resolution);
 
     if (remaining.isEmpty && context.mounted) {
       Navigator.pop(context);

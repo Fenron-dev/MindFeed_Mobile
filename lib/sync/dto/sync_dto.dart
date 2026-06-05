@@ -197,17 +197,26 @@ class SyncConflict {
   final String entityType;
   final String entityId;
   final String serverModifiedAt;
+  // Lokaler Änderungszeitpunkt (für die Gegenüberstellung in der UI)
+  final String? localModifiedAt;
+  // Rohe Server-Version (toJson) — wird gebraucht, um bei "Server gewinnt"
+  // die Server-Version lokal anzuwenden, ohne erneut zu pullen.
+  final Map<String, dynamic>? serverData;
 
   const SyncConflict({
     required this.entityType,
     required this.entityId,
     required this.serverModifiedAt,
+    this.localModifiedAt,
+    this.serverData,
   });
 
   factory SyncConflict.fromJson(Map<String, dynamic> j) => SyncConflict(
         entityType: j['entityType'] as String,
         entityId: j['entityId'] as String,
         serverModifiedAt: j['serverModifiedAt'] as String,
+        localModifiedAt: j['localModifiedAt'] as String?,
+        serverData: j['serverData'] as Map<String, dynamic>?,
       );
 }
 
