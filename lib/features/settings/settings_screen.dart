@@ -18,6 +18,7 @@ import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
 import '../settings/sync_settings_screen.dart';
 import '../../core/constants.dart';
+import '../../sync/sync_provider.dart';
 import 'package:go_router/go_router.dart';
 
 const _keyApiKey = 'openrouter_api_key';
@@ -698,6 +699,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onTap: _importLoading ? null : _importFromFile,
           ),
 
+          const SizedBox(height: 16),
+          _AutoBackupSection(),
+
           // Lokale Backups
           if (_backupsLoaded && _localBackups.isNotEmpty) ...[
             const SizedBox(height: 24),
@@ -1181,6 +1185,185 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
+  }
+}
+
+// ─── Automatisches Backup ─────────────────────────────────────────────────────
+
+class _AutoBackupSection extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_AutoBackupSection> createState() => _AutoBackupSectionState();
+}
+
+class _AutoBackupSectionState extends ConsumerState<_AutoBackupSection> {
+  late bool _enabled;
+  late int _intervalHours;
+  late int _keep;
+  String? _dir;
+
+  @override
+  void initState() {
+    super.initState();
+    _enabled = AppSettings.getAutoBackupEnabled();
+    _intervalHours = AppSettings.getAutoBackupIntervalHours();
+    _keep = AppSettings.getAutoBackupKeep();
+    _dir = AppSettings.getAutoBackupDir();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final last = AppSettings.getLastAutoBackupAt();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.backup_outlined, size: 18, color: MFColors.teal),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Automatisches Backup',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                      color: MFColors.textPrimary)),
+            ),
+            Switch(
+              value: _enabled,
+              onChanged: (v) async {
+                setState(() => _enabled = v);
+                await AppSettings.saveAutoBackupEnabled(v);
+                ref.read(syncSchedulerProvider).reconfigure();
+              },
+            ),
+          ]),
+          if (_enabled) ...[
+            const SizedBox(height: 8),
+            // Zielordner
+            InkWell(
+              onTap: _pickDir,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                decoration: BoxDecoration(
+                  color: MFColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: MFColors.border),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.folder_outlined, size: 16, color: MFColors.teal),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _dir ?? 'Standard (Vault/backups) — tippen zum Ändern',
+                      style: const TextStyle(fontSize: 12, color: MFColors.textPrimary,
+                          fontFamily: 'monospace'),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_dir != null)
+                    GestureDetector(
+                      onTap: () async {
+                        setState(() => _dir = null);
+                        await AppSettings.saveAutoBackupDir(null);
+                      },
+                      child: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
+                    ),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Intervall
+            Row(children: [
+              const Text('Intervall', style: TextStyle(fontSize: 13, color: MFColors.textPrimary)),
+              const Spacer(),
+              DropdownButton<int>(
+                value: _intervalHours,
+                items: const [
+                  DropdownMenuItem(value: 6, child: Text('Alle 6 Std')),
+                  DropdownMenuItem(value: 12, child: Text('Alle 12 Std')),
+                  DropdownMenuItem(value: 24, child: Text('Täglich')),
+                  DropdownMenuItem(value: 72, child: Text('Alle 3 Tage')),
+                  DropdownMenuItem(value: 168, child: Text('Wöchentlich')),
+                ],
+                onChanged: (v) async {
+                  if (v == null) return;
+                  setState(() => _intervalHours = v);
+                  await AppSettings.saveAutoBackupIntervalHours(v);
+                },
+              ),
+            ]),
+            // Aufbewahrung
+            Row(children: [
+              const Text('Behalten', style: TextStyle(fontSize: 13, color: MFColors.textPrimary)),
+              const Spacer(),
+              DropdownButton<int>(
+                value: _keep,
+                items: const [
+                  DropdownMenuItem(value: 5, child: Text('5 Backups')),
+                  DropdownMenuItem(value: 10, child: Text('10 Backups')),
+                  DropdownMenuItem(value: 30, child: Text('30 Backups')),
+                  DropdownMenuItem(value: 0, child: Text('Alle')),
+                ],
+                onChanged: (v) async {
+                  if (v == null) return;
+                  setState(() => _keep = v);
+                  await AppSettings.saveAutoBackupKeep(v);
+                },
+              ),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              last != null
+                  ? 'Letztes Auto-Backup: ${DateFormat('dd.MM.yy HH:mm').format(last.toLocal())}'
+                  : 'Noch kein automatisches Backup erstellt',
+              style: const TextStyle(fontSize: 11, color: MFColors.textMuted),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _runNow,
+                icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                label: const Text('Jetzt sichern'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickDir() async {
+    try {
+      final path = await pickFolder(prompt: 'Backup-Zielordner wählen');
+      if (path != null) {
+        setState(() => _dir = path);
+        await AppSettings.saveAutoBackupDir(path);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _runNow() async {
+    final db = ref.read(databaseProvider);
+    try {
+      await BackupService.createZipBackup(db, targetDir: _dir);
+      await AppSettings.saveLastAutoBackupAt(DateTime.now());
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Backup erstellt'), behavior: SnackBarBehavior.floating));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Backup fehlgeschlagen: $e'),
+          backgroundColor: Colors.red.shade900));
+      }
+    }
   }
 }
 

@@ -615,6 +615,42 @@ class AppSettings {
   static Future<void> saveTrashRetentionDays(int days) async =>
       _prefs?.setInt('trash_retention_days', days);
 
+  // ── Automatisches Backup ──────────────────────────────────────────────────
+
+  static bool getAutoBackupEnabled() =>
+      _prefs?.getBool('auto_backup_enabled') ?? false;
+  static Future<void> saveAutoBackupEnabled(bool v) async =>
+      _prefs?.setBool('auto_backup_enabled', v);
+
+  /// Zielordner für automatische Backups (null = Vault/backups).
+  static String? getAutoBackupDir() => _prefs?.getString('auto_backup_dir');
+  static Future<void> saveAutoBackupDir(String? dir) async {
+    if (dir == null || dir.isEmpty) {
+      await _prefs?.remove('auto_backup_dir');
+    } else {
+      await _prefs?.setString('auto_backup_dir', dir);
+    }
+  }
+
+  /// Backup-Intervall in Stunden (z.B. 24 = täglich, 168 = wöchentlich).
+  static int getAutoBackupIntervalHours() =>
+      _prefs?.getInt('auto_backup_interval_hours') ?? 24;
+  static Future<void> saveAutoBackupIntervalHours(int hours) async =>
+      _prefs?.setInt('auto_backup_interval_hours', hours);
+
+  static DateTime? getLastAutoBackupAt() {
+    final raw = _prefs?.getString('auto_backup_last_at');
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  static Future<void> saveLastAutoBackupAt(DateTime dt) async =>
+      _prefs?.setString('auto_backup_last_at', dt.toIso8601String());
+
+  /// Wie viele Auto-Backups im Zielordner behalten werden (älteste löschen).
+  static int getAutoBackupKeep() => _prefs?.getInt('auto_backup_keep') ?? 10;
+  static Future<void> saveAutoBackupKeep(int n) async =>
+      _prefs?.setInt('auto_backup_keep', n);
+
   static String _randomHex(int bytes) {
     final rng = Random.secure();
     final buf = List<int>.generate(bytes, (_) => rng.nextInt(256));

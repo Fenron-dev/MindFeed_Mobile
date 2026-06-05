@@ -149,16 +149,19 @@ class BackupService {
 
   // ─── ZIP erstellen (JSON + Anhänge) ───────────────────────────────────────
 
-  static Future<BackupResult> createZipBackup(AppDatabase db) async {
+  /// Erstellt ein ZIP-Backup. [targetDir] überschreibt den Standard-Zielordner
+  /// (Vault/backups). Für automatische Backups in einen frei gewählten Ordner.
+  static Future<BackupResult> createZipBackup(AppDatabase db,
+      {String? targetDir}) async {
     await db.customStatement('PRAGMA wal_checkpoint(FULL)');
 
     final root = await _vaultRoot();
     final map = await _buildMap(db);
     final json = const JsonEncoder.withIndent('  ').convert(map);
 
-    final backupsDir = Directory(p.join(root, 'backups'));
+    final backupsDir = Directory(targetDir ?? p.join(root, 'backups'));
     await backupsDir.create(recursive: true);
-    final ts = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+    final ts = DateFormat('yyyy-MM-dd_HH-mm-ss').format(DateTime.now());
     final zipPath = p.join(backupsDir.path, 'mindfeed_$ts.zip');
 
     // JSON-Datei temporär schreiben, dann in ZIP packen
@@ -189,6 +192,49 @@ class BackupService {
       sizeBytes: file.lengthSync(),
       createdAt: DateTime.now(),
     );
+  }
+
+  /// Führt ein automatisches Backup aus, WENN aktiviert und das Intervall
+  /// abgelaufen ist. Schreibt in den konfigurierten Ordner und räumt alte
+  /// Backups auf. Gibt true zurück, wenn ein Backup erstellt wurde.
+  static Future<bool> runAutoBackupIfDue(AppDatabase db) async {
+    if (!AppSettings.getAutoBackupEnabled()) return false;
+
+    final intervalHours = AppSettings.getAutoBackupIntervalHours();
+    final last = AppSettings.getLastAutoBackupAt();
+    if (last != null) {
+      final elapsed = DateTime.now().difference(last);
+      if (elapsed.inMinutes < intervalHours * 60) return false; // noch nicht fällig
+    }
+
+    final targetDir = AppSettings.getAutoBackupDir();
+    try {
+      await createZipBackup(db, targetDir: targetDir);
+      await AppSettings.saveLastAutoBackupAt(DateTime.now());
+      await _pruneOldAutoBackups(targetDir);
+      return true;
+    } catch (_) {
+      return false; // Ordner nicht erreichbar o.ä. — nächster Versuch später
+    }
+  }
+
+  /// Behält nur die neuesten N Auto-Backups im Zielordner.
+  static Future<void> _pruneOldAutoBackups(String? targetDir) async {
+    final keep = AppSettings.getAutoBackupKeep();
+    if (keep <= 0) return;
+    final dirPath = targetDir ?? p.join(await _vaultRoot(), 'backups');
+    final dir = Directory(dirPath);
+    if (!dir.existsSync()) return;
+    final backups = dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => p.basename(f.path).startsWith('mindfeed_') &&
+            f.path.endsWith('.zip'))
+        .toList()
+      ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    for (var i = keep; i < backups.length; i++) {
+      try { await backups[i].delete(); } catch (_) {}
+    }
   }
 
   static Future<void> shareBackup(BackupResult backup) async {

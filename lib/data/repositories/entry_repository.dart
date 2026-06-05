@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../db/app_database.dart';
 import '../db/daos/entry_dao.dart';
@@ -52,17 +53,27 @@ class EntryRepository {
     final sql = sortOrder == 'asc'
         ? 'SELECT * FROM entries ORDER BY pinned DESC, created_at ASC'
         : 'SELECT * FROM entries ORDER BY pinned DESC, created_at DESC';
+    List<EntryWithDetails> lastGood = const [];
     return db.customSelect(sql, readsFrom: {
       db.entries, db.entryProperties, db.tags,
       db.entryTags, db.attachments, db.entryContainers,
     }).watch().asyncMap((rows) async {
-      final ids = rows.map((r) => r.read<String>('id')).toList();
-      final entryList = await Future.wait(ids.map(entryDao.getById));
-      final filtered = entryList
-          .whereType<Entry>()
-          .where((e) => e.status != 'sub_note')
-          .toList();
-      return _bulkEnrich(filtered);
+      // try-catch hält den Stream am Leben: eine transiente Exception würde
+      // ihn sonst beenden → UI aktualisiert erst nach App-Neustart wieder.
+      try {
+        final ids = rows.map((r) => r.read<String>('id')).toList();
+        final entryList = await Future.wait(ids.map(entryDao.getById));
+        final filtered = entryList
+            .whereType<Entry>()
+            .where((e) => e.status != 'sub_note' && e.deletedAt == null)
+            .toList();
+        lastGood = await _bulkEnrich(filtered);
+        return lastGood;
+      } catch (e) {
+        debugPrint('[Feed] watchAll Verarbeitung fehlgeschlagen, behalte '
+            'letzten Stand: $e');
+        return lastGood;
+      }
     });
   }
 
@@ -108,10 +119,15 @@ class EntryRepository {
         db.entryTags, db.attachments, db.entryContainers,
       },
     ).watch().asyncMap((rows) async {
-      if (rows.isEmpty) return null;
-      final entry = await entryDao.getById(id);
-      if (entry == null) return null;
-      return _enrichSingle(entry);
+      try {
+        if (rows.isEmpty) return null;
+        final entry = await entryDao.getById(id);
+        if (entry == null) return null;
+        return await _enrichSingle(entry);
+      } catch (e) {
+        debugPrint('[Detail] watchById Verarbeitung fehlgeschlagen: $e');
+        return null;
+      }
     });
   }
 

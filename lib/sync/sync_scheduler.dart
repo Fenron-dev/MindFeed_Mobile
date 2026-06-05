@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/app_settings.dart';
+import '../services/backup_service.dart';
 import '../core/di.dart';
 import 'client/sync_api_client.dart';
 import 'sync_provider.dart';
@@ -10,12 +11,14 @@ class SyncScheduler with WidgetsBindingObserver {
   final Ref _ref;
   Timer? _timer;
   Timer? _notifyTimer; // Poll ob Server Sync auslösen möchte
+  Timer? _backupTimer; // periodischer Auto-Backup-Check
   DateTime? _lastNotifyCheck;
 
   SyncScheduler(this._ref) {
     WidgetsBinding.instance.addObserver(this);
     _setupTimer();
     _setupNotifyPoll();
+    _setupBackupTimer();
     Future.microtask(_onAppStart);
   }
 
@@ -32,6 +35,9 @@ class SyncScheduler with WidgetsBindingObserver {
 
     // Papierkorb: veraltete Einträge automatisch löschen
     _cleanTrashIfNeeded();
+
+    // Automatisches Backup prüfen (unabhängig vom Sync)
+    _runAutoBackup();
 
     if (!AppSettings.getSyncEnabled()) return;
 
@@ -51,6 +57,21 @@ class SyncScheduler with WidgetsBindingObserver {
     _ref.read(entryDaoProvider).cleanTrashOlderThan(days);
   }
 
+  void _setupBackupTimer() {
+    _backupTimer?.cancel();
+    if (!AppSettings.getAutoBackupEnabled()) return;
+    // Stündlich prüfen ob ein Backup fällig ist (Intervall wird in der
+    // runAutoBackupIfDue-Logik anhand des letzten Backups entschieden).
+    _backupTimer = Timer.periodic(const Duration(hours: 1), (_) => _runAutoBackup());
+  }
+
+  Future<void> _runAutoBackup() async {
+    try {
+      final db = _ref.read(databaseProvider);
+      await BackupService.runAutoBackupIfDue(db);
+    } catch (_) {}
+  }
+
   void _setupTimer() {
     _timer?.cancel();
     if (!AppSettings.getSyncAutoEnabled() || !AppSettings.getSyncEnabled()) return;
@@ -61,6 +82,7 @@ class SyncScheduler with WidgetsBindingObserver {
   void reconfigure() {
     _setupTimer();
     _setupNotifyPoll();
+    _setupBackupTimer();
   }
 
   void _setupNotifyPoll() {
@@ -102,6 +124,7 @@ class SyncScheduler with WidgetsBindingObserver {
   void dispose() {
     _timer?.cancel();
     _notifyTimer?.cancel();
+    _backupTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as p;
 import '../dto/sync_dto.dart';
 import '../client/sync_api_client.dart';
@@ -615,6 +616,9 @@ class SyncService {
           continue;
         }
         await File(localPath).writeAsBytes(bytes);
+        // Flutter cached den vorherigen (fehlgeschlagenen) File-Load unter dem
+        // Pfad. Ohne evict bliebe das "Datei fehlt"-Bild bis zum App-Neustart.
+        await FileImage(File(localPath)).evict();
         // localPath aktualisieren → triggert watchByEntry → UI rendert Datei
         await (db.update(db.attachments)..where((a) => a.id.equals(att.id)))
             .write(AttachmentsCompanion(localPath: Value(localPath)));

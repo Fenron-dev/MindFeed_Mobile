@@ -305,11 +305,11 @@ class _DesktopCard extends StatelessWidget {
                               fontSize: 12, color: MFColors.textSecondary, height: 1.45),
                           maxLines: 2, overflow: TextOverflow.ellipsis),
 
-                    // Tags — auf Desktop alle anzeigen
+                    // Tags — auf Desktop als farbige Pills (AniList-Stil)
                     if (item.tags.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Wrap(spacing: 5, runSpacing: 4,
-                          children: item.tags.map((tag) => _TagChip(tag)).toList()),
+                      Wrap(spacing: 6, runSpacing: 5,
+                          children: item.tags.map((tag) => _DesktopTagChip(tag)).toList()),
                     ],
 
                     // Properties — auf Desktop vollständig, keine Kürzung
@@ -347,6 +347,57 @@ class _TypeIcon extends StatelessWidget {
       _ => (Icons.notes_rounded, MFColors.textMuted),
     };
     return Icon(icon, size: 12, color: color);
+  }
+}
+
+// Desktop-Tag-Chip im AniList-Stil: farbige Pills, Farbe stabil aus Tag-Name
+class _DesktopTagChip extends StatelessWidget {
+  final String tag;
+  const _DesktopTagChip(this.tag);
+
+  // Palette für gut unterscheidbare, im Dark-Mode lesbare Tag-Farben
+  static const _palette = [
+    Color(0xFF3B82F6), // blau
+    Color(0xFFF59E0B), // amber
+    Color(0xFF10B981), // grün
+    Color(0xFFA78BFA), // violett
+    Color(0xFFEC4899), // pink
+    Color(0xFF06B6D4), // cyan
+    Color(0xFFF97316), // orange
+    Color(0xFF8B5CF6), // purple
+    Color(0xFF14B8A6), // teal
+    Color(0xFFEF4444), // rot
+  ];
+
+  static Color _colorFor(String tag) {
+    var hash = 0;
+    for (final code in tag.toLowerCase().codeUnits) {
+      hash = (hash * 31 + code) & 0x7fffffff;
+    }
+    return _palette[hash % _palette.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _colorFor(tag);
+    final label = tag.startsWith('#') ? tag.substring(1) : tag;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(38),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withAlpha(110), width: 1),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+          height: 1.1,
+        ),
+      ),
+    );
   }
 }
 
