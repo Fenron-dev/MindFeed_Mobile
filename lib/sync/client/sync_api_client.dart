@@ -22,7 +22,7 @@ class SyncApiClient {
   Future<http.Response> _get(String path, {Map<String, String>? queryParams}) async {
     final headers = await _authHeaders();
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: queryParams);
-    final resp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 30));
+    final resp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 60));
     if (resp.statusCode == 401) await _tryRefresh();
     return resp;
   }

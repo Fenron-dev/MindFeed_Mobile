@@ -20,26 +20,31 @@ class SyncStateNotifier extends Notifier<SyncState> {
 
   Future<SyncResult> triggerSync() async {
     state = state.copyWith(status: SyncStatus.syncing, message: null);
+    try {
+      // mDNS: Wenn gespeicherte Server-URL nicht mehr stimmt (Netzwerkwechsel),
+      // aktuelle IP via mDNS-Discovery nachschlagen und URL aktualisieren.
+      await _refreshServerUrlViaMdns();
 
-    // mDNS: Wenn gespeicherte Server-URL nicht mehr stimmt (Netzwerkwechsel),
-    // aktuelle IP via mDNS-Discovery nachschlagen und URL aktualisieren.
-    await _refreshServerUrlViaMdns();
-
-    final service = ref.read(syncServiceProvider);
-    final result = await service.sync();
-    if (result.success) {
-      state = state.copyWith(
-        status: SyncStatus.success,
-        lastSyncAt: result.completedAt,
-        pendingConflicts: result.conflicts,
-        message: result.conflicts.isNotEmpty
-            ? '${result.conflicts.length} Konflikte gefunden'
-            : null,
-      );
-    } else {
-      state = state.copyWith(status: SyncStatus.error, message: result.error);
+      final service = ref.read(syncServiceProvider);
+      final result = await service.sync();
+      if (result.success) {
+        state = state.copyWith(
+          status: SyncStatus.success,
+          lastSyncAt: result.completedAt,
+          pendingConflicts: result.conflicts,
+          message: result.conflicts.isNotEmpty
+              ? '${result.conflicts.length} Konflikte gefunden'
+              : null,
+        );
+      } else {
+        state = state.copyWith(status: SyncStatus.error, message: result.error);
+      }
+      return result;
+    } catch (e) {
+      // Sicherheitsnetz: verhindert dass der Status dauerhaft auf 'syncing' bleibt
+      state = state.copyWith(status: SyncStatus.error, message: e.toString());
+      return SyncResult.failed(e.toString());
     }
-    return result;
   }
 
   /// Versucht via mDNS-Discovery die aktuelle Server-IP zu ermitteln.

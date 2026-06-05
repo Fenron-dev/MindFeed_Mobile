@@ -76,14 +76,21 @@ class SyncService {
 
     // ── PULL ─────────────────────────────────────────────────────────────────
 
-    late SyncPullResponse pullResp;
+    // ── PULL ─────────────────────────────────────────────────────────────────
+    // Alle Exceptions fangen (TimeoutException, SocketException, FormatException…)
+
+    SyncPullResponse pullResp;
     try {
       pullResp = await client.pull(since: lastSyncAt);
-    } on SyncException catch (e) {
-      return SyncResult.failed('Pull fehlgeschlagen: ${e.message}');
+    } catch (e) {
+      return SyncResult.failed('Pull fehlgeschlagen: $e');
     }
 
-    await _applyPull(pullResp);
+    try {
+      await _applyPull(pullResp);
+    } catch (e) {
+      return SyncResult.failed('Lokale Datenbank-Aktualisierung fehlgeschlagen: $e');
+    }
 
     // ── PUSH ─────────────────────────────────────────────────────────────────
 
@@ -133,8 +140,8 @@ class SyncService {
           tombstones: tombstones,
         ));
         conflicts = pushResp.conflicts;
-      } on SyncException catch (e) {
-        return SyncResult.failed('Push fehlgeschlagen: ${e.message}');
+      } catch (e) {
+        return SyncResult.failed('Push fehlgeschlagen: $e');
       }
 
       // ── Anhänge hochladen (fire-and-forget — blockiert Sync nicht) ──────

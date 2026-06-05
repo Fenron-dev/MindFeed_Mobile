@@ -28,8 +28,16 @@ class SyncScheduler with WidgetsBindingObserver {
         AppSettings.getDeviceName(),
       );
     }
+    if (!AppSettings.getSyncEnabled()) return;
+
+    // Erstmaligen Sync automatisch auslösen: noch nie synchronisiert aber
+    // Sync ist aktiviert (z.B. direkt nach Ersteinrichtung via Server)
+    if (AppSettings.getLastSyncAt() == null) {
+      await _doSync();
+      return;
+    }
     // Sync beim App-Start ausführen (falls konfiguriert)
-    if (AppSettings.getSyncOnAppStart() && AppSettings.getSyncEnabled()) {
+    if (AppSettings.getSyncOnAppStart()) {
       await _doSync();
     }
   }
