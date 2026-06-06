@@ -8,7 +8,8 @@ import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/recurrence_calculator.dart';
 import '../../features/entry_detail/entry_detail_provider.dart';
-import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable, subNotesProvider;
+import '../../features/entry_detail/entry_detail_screen.dart' show subNotesProvider;
+import '../../features/entry_detail/properties_block.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry, navigateToCapture, navigateToTask;
 import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
@@ -771,9 +772,10 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
           const SizedBox(height: 16),
           const Divider(color: MFColors.border),
           const SizedBox(height: 12),
-          EntryPropertiesTable(
-            properties: task.properties,
+          PropertiesBlock(
             entryId: task.entry.id,
+            properties: task.properties,
+            tags: task.tags,
             editable: _isEditing,
           ),
 

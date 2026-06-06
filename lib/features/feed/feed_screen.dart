@@ -110,6 +110,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         return false;
       }
 
+      // Tag-Filter (UND): alle gewählten Tags müssen vorhanden sein
+      for (final t in filter.tags) {
+        final tl = t.toLowerCase();
+        if (!e.tags.any((et) => et.toLowerCase() == tl)) return false;
+      }
+
       // Property-Regeln
       for (final rule in filter.propRules.entries) {
         final match = e.properties.where((p) =>
@@ -458,9 +464,17 @@ class _ActiveFilterBar extends ConsumerWidget {
           _FilterChip(
             label: _typeLabel(filter.entryType!),
             onRemove: () => ref.read(feedFilterProvider.notifier).update(
-              (f) => FeedFilter(propRules: f.propRules),
+              (f) => f.copyWith(clearType: true),
             ),
           ),
+        // Tag-Chips
+        ...filter.tags.map((t) => _FilterChip(
+          label: '#$t',
+          onRemove: () => ref.read(feedFilterProvider.notifier).update(
+            (f) => f.copyWith(
+                tags: f.tags.where((x) => x != t).toList()),
+          ),
+        )),
         // Property-Chips
         ...filter.propRules.entries.map((r) => _FilterChip(
           label: r.value != null && r.value!.isNotEmpty
@@ -470,7 +484,7 @@ class _ActiveFilterBar extends ConsumerWidget {
             final rules = Map<String, String?>.from(filter.propRules)
               ..remove(r.key);
             ref.read(feedFilterProvider.notifier).update(
-              (f) => FeedFilter(entryType: f.entryType, propRules: rules),
+              (f) => f.copyWith(propRules: rules),
             );
           },
         )),
@@ -539,19 +553,29 @@ class _FilterSheetState extends State<_FilterSheet> {
   List<String> _availableKeys = [];
   String? _selectedKey;
   final _valueCtrl = TextEditingController();
+  final _tagCtrl = TextEditingController();
+  List<String> _tags = [];
 
   @override
   void initState() {
     super.initState();
     _entryType = widget.current.entryType;
     _propRules = Map.from(widget.current.propRules);
+    _tags = List.from(widget.current.tags);
     _loadKeys();
   }
 
   @override
   void dispose() {
     _valueCtrl.dispose();
+    _tagCtrl.dispose();
     super.dispose();
+  }
+
+  void _addTag() {
+    final t = _tagCtrl.text.trim().replaceAll(RegExp(r'^#'), '').toLowerCase();
+    if (t.isEmpty || _tags.contains(t)) return;
+    setState(() { _tags = [..._tags, t]; _tagCtrl.clear(); });
   }
 
   Future<void> _loadKeys() async {
@@ -701,6 +725,51 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ]),
 
+          // ── Tags-Filter ──────────────────────────────────────────────
+          const SizedBox(height: 18),
+          const Text('TAGS', style: TextStyle(
+              fontSize: 10, fontWeight: FontWeight.bold,
+              color: MFColors.textMuted, letterSpacing: 1.2)),
+          const SizedBox(height: 8),
+          if (_tags.isNotEmpty) ...[
+            Wrap(
+              spacing: 6, runSpacing: 6,
+              children: _tags.map((t) => Container(
+                padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+                decoration: BoxDecoration(
+                  color: MFColors.tealBg, borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: MFColors.tealDark)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('#$t', style: const TextStyle(fontSize: 11, color: MFColors.teal)),
+                  const SizedBox(width: 2),
+                  GestureDetector(
+                    onTap: () => setState(() => _tags = _tags.where((x) => x != t).toList()),
+                    child: const Icon(Icons.close, size: 12, color: MFColors.teal)),
+                ]),
+              )).toList(),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _tagCtrl,
+                style: const TextStyle(fontSize: 14, color: MFColors.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Tag filtern (z.B. buch)…',
+                  hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 13),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _addTag(),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add, color: MFColors.teal),
+              onPressed: _addTag,
+            ),
+          ]),
+
           const SizedBox(height: 20),
           Row(children: [
             Expanded(
@@ -723,6 +792,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                   widget.onApply(FeedFilter(
                     entryType: _entryType,
                     propRules: _propRules,
+                    tags: _tags,
                   ));
                   Navigator.pop(context);
                 },

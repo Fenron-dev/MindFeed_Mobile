@@ -414,12 +414,51 @@ class EntryRepository {
     await _finalizeLog(logId, entryId);
   }
 
+  /// Fügt dem Eintrag einen Tag hinzu (in-place, andere bleiben).
+  Future<void> addTag(String entryId, String tagName) async {
+    final clean = tagName.trim().replaceAll(RegExp(r'^#'), '');
+    if (clean.isEmpty) return;
+    await tagDao.addEntryTag(entryId, clean.toLowerCase());
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Entfernt einen Tag vom Eintrag.
+  Future<void> removeTag(String entryId, String tagName) async {
+    await tagDao.removeEntryTag(entryId, tagName);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
   /// Aktualisiert genau eine Property in-place (für Toggle/Rating/Wert-Edit).
   /// Kein Lösch-/Neu-Schreiben aller Properties → kein Scroll-Sprung, kein
   /// Changelog-Spam. Touch der updatedAt für Sync.
   Future<void> setPropertyValue(
       String entryId, String propId, String? value) async {
     await propertyDao.updateValue(propId, value);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Fügt eine einzelne Property hinzu (ohne andere zu berühren).
+  Future<void> addProperty(
+      String entryId, String key, String? value, String type) async {
+    await db.into(db.entryProperties).insertOnConflictUpdate(
+      EntryPropertiesCompanion(
+        id: Value('prop-${_uuid.v4()}'),
+        entryId: Value(entryId),
+        key: Value(key),
+        value: Value(value),
+        type: Value(type),
+      ),
+    );
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Löscht eine einzelne Property anhand ihrer ID.
+  Future<void> deletePropertyById(String entryId, String propId) async {
+    await (db.delete(db.entryProperties)..where((p) => p.id.equals(propId))).go();
     await entryDao.upsert(EntriesCompanion(
         id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
   }

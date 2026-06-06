@@ -27,6 +27,7 @@ import '../../widgets/entry_card.dart';
 import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
+import 'properties_block.dart';
 
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
@@ -541,7 +542,17 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                                 color: MFColors.textPrimary))
                         : const SizedBox.shrink()),
 
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
+
+                // Eigenschaften (Obsidian-Stil) — oben unter dem Titel, inkl. Tags
+                PropertiesBlock(
+                  entryId: entry.id,
+                  properties: item.properties,
+                  tags: item.tags,
+                  editable: _isEditing,
+                ),
+
+                const SizedBox(height: 14),
 
                 // Body
                 _isEditing
@@ -638,25 +649,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                       properties: item.properties),
                 ],
 
-                // Tags
-                if (item.tags.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _Section(
-                    label: 'Tags',
-                    child: Wrap(
-                      spacing: 6, runSpacing: 4,
-                      children:
-                          item.tags.map((t) => _TagChip(t)).toList(),
-                    ),
-                  ),
-                ],
-
-                // Properties — immer sichtbar + eigene hinzufügen
-                const SizedBox(height: 16),
-                _PropertiesTable(
-                    properties: item.properties,
-                    entryId: entry.id,
-                    editable: _isEditing),
+                // (Tags + Eigenschaften jetzt oben im PropertiesBlock)
 
                 // Container-Zuweisung
                 const SizedBox(height: 16),

@@ -70,9 +70,22 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
     final rows = await customSelect(
       'SELECT DISTINCT key FROM entry_properties '
       'WHERE key NOT IN (\'og_image\',\'og_title\',\'og_description\',\'domain\') '
+      'AND key NOT LIKE \'task_%\' '
       'ORDER BY key',
       readsFrom: {entryProperties},
     ).get();
     return rows.map((r) => r.read<String>('key')).toList();
+  }
+
+  /// Bisher verwendete Werte für einen Property-Key (für Wert-Autovervollständigung).
+  Future<List<String>> getDistinctValues(String key) async {
+    final rows = await customSelect(
+      'SELECT DISTINCT value FROM entry_properties '
+      'WHERE key = ? AND value IS NOT NULL AND value != \'\' '
+      'ORDER BY value LIMIT 50',
+      variables: [Variable.withString(key)],
+      readsFrom: {entryProperties},
+    ).get();
+    return rows.map((r) => r.read<String>('value')).toList();
   }
 }

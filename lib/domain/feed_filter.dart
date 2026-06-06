@@ -6,14 +6,18 @@ class FeedFilter {
   /// Property-Regeln: key → gewünschter Wert (null = nur Existenz prüfen)
   final Map<String, String?> propRules;
 
-  const FeedFilter({this.entryType, this.propRules = const {}});
+  /// Tags, die der Eintrag haben muss (UND-Verknüpfung).
+  final List<String> tags;
 
-  bool get isActive => entryType != null || propRules.isNotEmpty;
+  const FeedFilter({this.entryType, this.propRules = const {}, this.tags = const []});
+
+  bool get isActive => entryType != null || propRules.isNotEmpty || tags.isNotEmpty;
 
   FeedFilter copyWith({String? entryType, Map<String, String?>? propRules,
-      bool clearType = false}) =>
+      List<String>? tags, bool clearType = false}) =>
       FeedFilter(
         entryType: clearType ? null : (entryType ?? this.entryType),
         propRules: propRules ?? this.propRules,
+        tags: tags ?? this.tags,
       );
 }

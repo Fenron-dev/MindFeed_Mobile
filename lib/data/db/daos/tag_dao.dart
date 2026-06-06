@@ -11,6 +11,31 @@ class TagDao extends DatabaseAccessor<AppDatabase> with _$TagDaoMixin {
   Stream<List<Tag>> watchAll() =>
       (select(tags)..orderBy([(t) => OrderingTerm.asc(t.name)])).watch();
 
+  /// Alle Tag-Namen (für Autovervollständigung).
+  Future<List<String>> getAllTagNames() async {
+    final rows = await (select(tags)
+          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .get();
+    return rows.map((t) => t.name).toList();
+  }
+
+  /// Fügt dem Eintrag einen einzelnen Tag hinzu, ohne andere zu entfernen.
+  Future<void> addEntryTag(String entryId, String tagName) async {
+    final tag = await upsertByName(tagName);
+    await into(entryTags).insertOnConflictUpdate(
+      EntryTagsCompanion(entryId: Value(entryId), tagId: Value(tag.id)),
+    );
+  }
+
+  /// Entfernt einen einzelnen Tag vom Eintrag.
+  Future<void> removeEntryTag(String entryId, String tagName) async {
+    final tag = await getByName(tagName);
+    if (tag == null) return;
+    await (delete(entryTags)
+          ..where((et) => et.entryId.equals(entryId) & et.tagId.equals(tag.id)))
+        .go();
+  }
+
   Future<Tag?> getByName(String name) =>
       (select(tags)..where((t) => t.name.equals(name))).getSingleOrNull();
 
