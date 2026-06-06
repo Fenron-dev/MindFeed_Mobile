@@ -20,10 +20,13 @@ class ChangeLog extends Table {
   // null bei Aktionen ohne sinnvollen Vorzustand (z.B. Erstanlage).
   TextColumn get beforeJson => text().nullable()();
 
+  // Snapshot NACH der Änderung — ermöglicht Redo (erneutes Anwenden).
+  TextColumn get afterJson => text().nullable()();
+
   DateTimeColumn get createdAt =>
       dateTime().clientDefault(() => DateTime.now().toUtc())();
 
-  // true = bereits rückgängig gemacht (nicht erneut anwendbar)
+  // true = aktuell rückgängig gemacht (Redo möglich); false = aktiv (Undo möglich)
   BoolColumn get undone => boolean().withDefault(const Constant(false))();
 
   @override

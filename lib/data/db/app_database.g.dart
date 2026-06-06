@@ -4039,6 +4039,17 @@ class $ChangeLogTable extends ChangeLog
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _afterJsonMeta = const VerificationMeta(
+    'afterJson',
+  );
+  @override
+  late final GeneratedColumn<String> afterJson = GeneratedColumn<String>(
+    'after_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -4072,6 +4083,7 @@ class $ChangeLogTable extends ChangeLog
     action,
     description,
     beforeJson,
+    afterJson,
     createdAt,
     undone,
   ];
@@ -4133,6 +4145,12 @@ class $ChangeLogTable extends ChangeLog
         beforeJson.isAcceptableOrUnknown(data['before_json']!, _beforeJsonMeta),
       );
     }
+    if (data.containsKey('after_json')) {
+      context.handle(
+        _afterJsonMeta,
+        afterJson.isAcceptableOrUnknown(data['after_json']!, _afterJsonMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -4178,6 +4196,10 @@ class $ChangeLogTable extends ChangeLog
         DriftSqlType.string,
         data['${effectivePrefix}before_json'],
       ),
+      afterJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}after_json'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -4202,6 +4224,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
   final String action;
   final String description;
   final String? beforeJson;
+  final String? afterJson;
   final DateTime createdAt;
   final bool undone;
   const ChangeLogData({
@@ -4211,6 +4234,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
     required this.action,
     required this.description,
     this.beforeJson,
+    this.afterJson,
     required this.createdAt,
     required this.undone,
   });
@@ -4224,6 +4248,9 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
     map['description'] = Variable<String>(description);
     if (!nullToAbsent || beforeJson != null) {
       map['before_json'] = Variable<String>(beforeJson);
+    }
+    if (!nullToAbsent || afterJson != null) {
+      map['after_json'] = Variable<String>(afterJson);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['undone'] = Variable<bool>(undone);
@@ -4240,6 +4267,9 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
       beforeJson: beforeJson == null && nullToAbsent
           ? const Value.absent()
           : Value(beforeJson),
+      afterJson: afterJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(afterJson),
       createdAt: Value(createdAt),
       undone: Value(undone),
     );
@@ -4257,6 +4287,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
       action: serializer.fromJson<String>(json['action']),
       description: serializer.fromJson<String>(json['description']),
       beforeJson: serializer.fromJson<String?>(json['beforeJson']),
+      afterJson: serializer.fromJson<String?>(json['afterJson']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       undone: serializer.fromJson<bool>(json['undone']),
     );
@@ -4271,6 +4302,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
       'action': serializer.toJson<String>(action),
       'description': serializer.toJson<String>(description),
       'beforeJson': serializer.toJson<String?>(beforeJson),
+      'afterJson': serializer.toJson<String?>(afterJson),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'undone': serializer.toJson<bool>(undone),
     };
@@ -4283,6 +4315,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
     String? action,
     String? description,
     Value<String?> beforeJson = const Value.absent(),
+    Value<String?> afterJson = const Value.absent(),
     DateTime? createdAt,
     bool? undone,
   }) => ChangeLogData(
@@ -4292,6 +4325,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
     action: action ?? this.action,
     description: description ?? this.description,
     beforeJson: beforeJson.present ? beforeJson.value : this.beforeJson,
+    afterJson: afterJson.present ? afterJson.value : this.afterJson,
     createdAt: createdAt ?? this.createdAt,
     undone: undone ?? this.undone,
   );
@@ -4309,6 +4343,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
       beforeJson: data.beforeJson.present
           ? data.beforeJson.value
           : this.beforeJson,
+      afterJson: data.afterJson.present ? data.afterJson.value : this.afterJson,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       undone: data.undone.present ? data.undone.value : this.undone,
     );
@@ -4323,6 +4358,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
           ..write('action: $action, ')
           ..write('description: $description, ')
           ..write('beforeJson: $beforeJson, ')
+          ..write('afterJson: $afterJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('undone: $undone')
           ..write(')'))
@@ -4337,6 +4373,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
     action,
     description,
     beforeJson,
+    afterJson,
     createdAt,
     undone,
   );
@@ -4350,6 +4387,7 @@ class ChangeLogData extends DataClass implements Insertable<ChangeLogData> {
           other.action == this.action &&
           other.description == this.description &&
           other.beforeJson == this.beforeJson &&
+          other.afterJson == this.afterJson &&
           other.createdAt == this.createdAt &&
           other.undone == this.undone);
 }
@@ -4361,6 +4399,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
   final Value<String> action;
   final Value<String> description;
   final Value<String?> beforeJson;
+  final Value<String?> afterJson;
   final Value<DateTime> createdAt;
   final Value<bool> undone;
   final Value<int> rowid;
@@ -4371,6 +4410,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
     this.action = const Value.absent(),
     this.description = const Value.absent(),
     this.beforeJson = const Value.absent(),
+    this.afterJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.undone = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -4382,6 +4422,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
     required String action,
     required String description,
     this.beforeJson = const Value.absent(),
+    this.afterJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.undone = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -4397,6 +4438,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
     Expression<String>? action,
     Expression<String>? description,
     Expression<String>? beforeJson,
+    Expression<String>? afterJson,
     Expression<DateTime>? createdAt,
     Expression<bool>? undone,
     Expression<int>? rowid,
@@ -4408,6 +4450,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
       if (action != null) 'action': action,
       if (description != null) 'description': description,
       if (beforeJson != null) 'before_json': beforeJson,
+      if (afterJson != null) 'after_json': afterJson,
       if (createdAt != null) 'created_at': createdAt,
       if (undone != null) 'undone': undone,
       if (rowid != null) 'rowid': rowid,
@@ -4421,6 +4464,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
     Value<String>? action,
     Value<String>? description,
     Value<String?>? beforeJson,
+    Value<String?>? afterJson,
     Value<DateTime>? createdAt,
     Value<bool>? undone,
     Value<int>? rowid,
@@ -4432,6 +4476,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
       action: action ?? this.action,
       description: description ?? this.description,
       beforeJson: beforeJson ?? this.beforeJson,
+      afterJson: afterJson ?? this.afterJson,
       createdAt: createdAt ?? this.createdAt,
       undone: undone ?? this.undone,
       rowid: rowid ?? this.rowid,
@@ -4459,6 +4504,9 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
     if (beforeJson.present) {
       map['before_json'] = Variable<String>(beforeJson.value);
     }
+    if (afterJson.present) {
+      map['after_json'] = Variable<String>(afterJson.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -4480,6 +4528,7 @@ class ChangeLogCompanion extends UpdateCompanion<ChangeLogData> {
           ..write('action: $action, ')
           ..write('description: $description, ')
           ..write('beforeJson: $beforeJson, ')
+          ..write('afterJson: $afterJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('undone: $undone, ')
           ..write('rowid: $rowid')
@@ -8278,6 +8327,7 @@ typedef $$ChangeLogTableCreateCompanionBuilder =
       required String action,
       required String description,
       Value<String?> beforeJson,
+      Value<String?> afterJson,
       Value<DateTime> createdAt,
       Value<bool> undone,
       Value<int> rowid,
@@ -8290,6 +8340,7 @@ typedef $$ChangeLogTableUpdateCompanionBuilder =
       Value<String> action,
       Value<String> description,
       Value<String?> beforeJson,
+      Value<String?> afterJson,
       Value<DateTime> createdAt,
       Value<bool> undone,
       Value<int> rowid,
@@ -8331,6 +8382,11 @@ class $$ChangeLogTableFilterComposer
 
   ColumnFilters<String> get beforeJson => $composableBuilder(
     column: $table.beforeJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get afterJson => $composableBuilder(
+    column: $table.afterJson,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8384,6 +8440,11 @@ class $$ChangeLogTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get afterJson => $composableBuilder(
+    column: $table.afterJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -8427,6 +8488,9 @@ class $$ChangeLogTableAnnotationComposer
     column: $table.beforeJson,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get afterJson =>
+      $composableBuilder(column: $table.afterJson, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -8472,6 +8536,7 @@ class $$ChangeLogTableTableManager
                 Value<String> action = const Value.absent(),
                 Value<String> description = const Value.absent(),
                 Value<String?> beforeJson = const Value.absent(),
+                Value<String?> afterJson = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<bool> undone = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -8482,6 +8547,7 @@ class $$ChangeLogTableTableManager
                 action: action,
                 description: description,
                 beforeJson: beforeJson,
+                afterJson: afterJson,
                 createdAt: createdAt,
                 undone: undone,
                 rowid: rowid,
@@ -8494,6 +8560,7 @@ class $$ChangeLogTableTableManager
                 required String action,
                 required String description,
                 Value<String?> beforeJson = const Value.absent(),
+                Value<String?> afterJson = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<bool> undone = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -8504,6 +8571,7 @@ class $$ChangeLogTableTableManager
                 action: action,
                 description: description,
                 beforeJson: beforeJson,
+                afterJson: afterJson,
                 createdAt: createdAt,
                 undone: undone,
                 rowid: rowid,

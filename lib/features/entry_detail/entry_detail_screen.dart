@@ -291,7 +291,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         final existing = await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
         final existingKeys = existing.map((p) => p.key.toLowerCase()).toSet();
         if (!existingKeys.contains('zusammenfassung') && !existingKeys.contains('summary')) {
-          await ref.read(propertyDaoProvider).setProperties(entryId, [
+          await ref.read(entryRepositoryProvider).setEntryProperties(entryId, [
             ...existing.map((p) => EntryPropertiesCompanion(
               id: drift.Value(p.id), entryId: drift.Value(p.entryId),
               key: drift.Value(p.key), value: drift.Value(p.value), type: drift.Value(p.type),
@@ -783,11 +783,25 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   const SizedBox(height: 16),
                   _Section(
                     label: 'Anhänge',
-                    child: Column(
-                      children: item.attachments
-                          .map((a) => _AttachmentTile(a))
-                          .toList(),
-                    ),
+                    child: Builder(builder: (_) {
+                      // Bild-Galerie für Fullscreen-Swipe vorbereiten
+                      final imageAtts = item.attachments
+                          .where((a) => a.type == 'image')
+                          .toList();
+                      final gallery = imageAtts
+                          .map((a) => GalleryImage(a.localPath))
+                          .toList();
+                      return Column(
+                        children: item.attachments.map((a) {
+                          final gi = a.type == 'image'
+                              ? imageAtts.indexWhere((x) => x.id == a.id)
+                              : 0;
+                          return _AttachmentTile(a,
+                              gallery: a.type == 'image' ? gallery : const [],
+                              galleryIndex: gi < 0 ? 0 : gi);
+                        }).toList(),
+                      );
+                    }),
                   ),
                 ],
 
@@ -1120,8 +1134,9 @@ class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
                                       ))
                                   .toList();
                               await ref
-                                  .read(propertyDaoProvider)
-                                  .setProperties(entryId, remaining);
+                                  .read(entryRepositoryProvider)
+                                  .setEntryProperties(entryId, remaining,
+                                      description: 'Eigenschaft entfernt');
                             },
                             child: const Icon(Icons.close,
                                 size: 12, color: MFColors.textMuted),
@@ -1191,7 +1206,7 @@ class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
       value: drift.Value(result.value.isEmpty ? null : result.value),
       type: drift.Value(result.type),
     );
-    await ref.read(propertyDaoProvider).setProperties(entryId, [
+    await ref.read(entryRepositoryProvider).setEntryProperties(entryId, [
       ...allProps.map((p) => EntryPropertiesCompanion(
             id: drift.Value(p.id),
             entryId: drift.Value(p.entryId),
@@ -1240,7 +1255,7 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
               type: drift.Value(p.type),
             ))
         .toList();
-    await ref.read(propertyDaoProvider).setProperties(widget.entryId, updated);
+    await ref.read(entryRepositoryProvider).setEntryProperties(widget.entryId, updated);
     if (mounted) setState(() => _editing = false);
   }
 
@@ -1568,9 +1583,10 @@ class _TemplateApplyButton extends ConsumerWidget {
         ...toAdd,
       ];
     }
-    await dao.setProperties(entryId, newProps);
-    // watchById hört nur auf entries-Tabelle → Entry berühren um Stream zu triggern
-    await ref.read(entryRepositoryProvider).updateEntry(entryId);
+    // setEntryProperties protokolliert die Änderung und berührt den Entry
+    // (updatedAt) → triggert den watchById-Stream und markiert ihn als dirty.
+    await ref.read(entryRepositoryProvider).setEntryProperties(
+        entryId, newProps, description: 'Vorlage angewendet');
   }
 }
 
@@ -1995,11 +2011,16 @@ class _AddPropertySheetState extends State<_AddPropertySheet> {
 
 class _AttachmentTile extends StatelessWidget {
   final Attachment att;
-  const _AttachmentTile(this.att);
+  final List<GalleryImage> gallery;
+  final int galleryIndex;
+  const _AttachmentTile(this.att,
+      {this.gallery = const [], this.galleryIndex = 0});
   @override
   Widget build(BuildContext context) {
     if (att.type == 'audio') return _AudioTile(att);
-    if (att.type == 'image') return _ImageTile(att);
+    if (att.type == 'image') {
+      return _ImageTile(att, gallery: gallery, galleryIndex: galleryIndex);
+    }
     if (att.type == 'video') return _VideoTile(att);
     return _FileTile(att);
   }
@@ -2092,15 +2113,20 @@ class _FileTile extends StatelessWidget {
 // ─── Bild-Vorschau ────────────────────────────────────────────────────────────
 class _ImageTile extends StatelessWidget {
   final Attachment att;
-  const _ImageTile(this.att);
+  // Alle Bilder des Eintrags + Index dieses Bildes → Swipen im Fullscreen
+  final List<GalleryImage> gallery;
+  final int galleryIndex;
+  const _ImageTile(this.att, {this.gallery = const [], this.galleryIndex = 0});
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
             fullscreenDialog: true,
-            builder: (_) => _FullscreenImageViewer(
-                path: att.localPath, isLocal: true),
+            builder: (_) => gallery.isNotEmpty
+                ? _FullscreenImageViewer(
+                    images: gallery, initialIndex: galleryIndex)
+                : _FullscreenImageViewer.single(att.localPath),
           )),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
@@ -2766,8 +2792,10 @@ class _MediaHeader extends StatelessWidget {
               itemCount: images.length,
               separatorBuilder: (_, __) => const SizedBox(width: 6),
               itemBuilder: (_, i) => GestureDetector(
-                onTap: () =>
-                    _openFullscreen(context, images[i].localPath, isLocal: true),
+                onTap: () => _openGallery(
+                    context,
+                    images.map((a) => GalleryImage(a.localPath)).toList(),
+                    i),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.file(
@@ -2797,7 +2825,15 @@ class _MediaHeader extends StatelessWidget {
       {bool isLocal = false}) {
     Navigator.of(context).push(MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => _FullscreenImageViewer(path: path, isLocal: isLocal),
+      builder: (_) => _FullscreenImageViewer.single(path, isLocal: isLocal),
+    ));
+  }
+
+  void _openGallery(BuildContext context, List<GalleryImage> images, int index) {
+    Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) =>
+          _FullscreenImageViewer(images: images, initialIndex: index),
     ));
   }
 }
@@ -2827,40 +2863,90 @@ class _MissingAttachmentHint extends StatelessWidget {
       );
 }
 
-// ─── Fullscreen-Bild-Viewer ───────────────────────────────────────────────────
+// ─── Fullscreen-Bild-Viewer (swipebare Galerie) ──────────────────────────────
 
-class _FullscreenImageViewer extends StatelessWidget {
+/// Ein Bild in der Galerie: Pfad + ob lokal (Datei) oder Netzwerk-URL.
+class GalleryImage {
   final String path;
   final bool isLocal;
-  const _FullscreenImageViewer({required this.path, required this.isLocal});
+  const GalleryImage(this.path, {this.isLocal = true});
+}
+
+class _FullscreenImageViewer extends StatefulWidget {
+  final List<GalleryImage> images;
+  final int initialIndex;
+
+  const _FullscreenImageViewer({
+    required this.images,
+    this.initialIndex = 0,
+  });
+
+  /// Bequemer Konstruktor für ein einzelnes Bild.
+  factory _FullscreenImageViewer.single(String path, {bool isLocal = true}) =>
+      _FullscreenImageViewer(images: [GalleryImage(path, isLocal: isLocal)]);
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  State<_FullscreenImageViewer> createState() => _FullscreenImageViewerState();
+}
+
+class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
+  late final PageController _controller;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex.clamp(0, widget.images.length - 1);
+    _controller = PageController(initialPage: _index);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.images.length;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
         backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          iconTheme: const IconThemeData(color: Colors.white),
-          elevation: 0,
-        ),
-        body: InteractiveViewer(
-          maxScale: 5.0,
-          child: Center(
-            child: isLocal
-                ? Image.file(
-                    File(path),
-                    errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
-                  )
-                : Image.network(
-                    path,
-                    loadingBuilder: (_, child, progress) => progress == null
-                        ? child
-                        : const Center(
-                            child: CircularProgressIndicator(
-                                color: Colors.white)),
-                    errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
-                  ),
-          ),
-        ),
-      );
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
+        title: total > 1
+            ? Text('${_index + 1} / $total',
+                style: const TextStyle(color: Colors.white, fontSize: 15))
+            : null,
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: total,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (_, i) {
+          final img = widget.images[i];
+          return InteractiveViewer(
+            maxScale: 5.0,
+            child: Center(
+              child: img.isLocal
+                  ? Image.file(
+                      File(img.path),
+                      errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
+                    )
+                  : Image.network(
+                      img.path,
+                      loadingBuilder: (_, child, progress) => progress == null
+                          ? child
+                          : const Center(
+                              child: CircularProgressIndicator(color: Colors.white)),
+                      errorBuilder: (_, __, ___) => const _MissingAttachmentHint(),
+                    ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }

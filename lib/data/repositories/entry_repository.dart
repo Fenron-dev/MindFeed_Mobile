@@ -283,13 +283,14 @@ class EntryRepository {
 
     // Journal: Snapshot VOR der Änderung für Undo (nur bei inhaltlichen
     // Änderungen — Pin/Reminder sind trivial und werden nicht protokolliert).
+    String? logId;
     if (body != null || title != null || status != null) {
       final desc = status != null
           ? 'Status geändert → ${_statusLabel(status)}'
           : (title != null && body == null
               ? 'Titel geändert'
               : 'Text geändert');
-      await _logChange(id, status != null ? 'status' : 'edit', desc);
+      logId = await _logChange(id, status != null ? 'status' : 'edit', desc);
     }
 
     await entryDao.upsert(EntriesCompanion(
@@ -321,13 +322,25 @@ class EntryRepository {
       await entryDao.setContainers(id, containerIds);
     }
 
+    await _finalizeLog(logId, id);
     return (await getById(id))!;
+  }
+
+  /// Setzt die Properties eines Eintrags und protokolliert die Änderung
+  /// (Undo/Redo). Zentraler Einstieg statt direktem propertyDao.setProperties.
+  Future<void> setEntryProperties(
+      String entryId, List<EntryPropertiesCompanion> props,
+      {String description = 'Eigenschaften geändert'}) async {
+    final logId = await _logChange(entryId, 'edit', description);
+    await propertyDao.setProperties(entryId, props);
+    await _finalizeLog(logId, entryId);
   }
 
   /// Verschiebt Eintrag in den Papierkorb (Soft-Delete, Tombstone für Sync).
   Future<void> deleteEntry(String id) async {
-    await _logChange(id, 'delete', 'In den Papierkorb verschoben');
+    final logId = await _logChange(id, 'delete', 'In den Papierkorb verschoben');
     await entryDao.softDelete(id);
+    await _finalizeLog(logId, id);
   }
 
   // ── Änderungs-Journal & Undo ────────────────────────────────────────────────
@@ -380,7 +393,7 @@ class EntryRepository {
 
   /// Protokolliert eine Konflikt-Entscheidung (für Undo). Nur für Einträge —
   /// speichert den lokalen Zustand VOR dem Anwenden der Entscheidung.
-  Future<void> logConflictChoice(String entityId, bool serverWins) =>
+  Future<String?> logConflictChoice(String entityId, bool serverWins) =>
       _logChange(
         entityId,
         serverWins ? 'conflict_server' : 'conflict_mine',
@@ -389,29 +402,54 @@ class EntryRepository {
             : 'Konflikt: eigene Version behalten',
       );
 
-  Future<void> _logChange(String entityId, String action, String description) async {
+  /// Protokolliert den Vorzustand und gibt die Log-ID zurück (für _finalizeLog).
+  Future<String?> _logChange(
+      String entityId, String action, String description) async {
     try {
       final snap = await _snapshotJson(entityId);
+      final id = 'cl-${_uuid.v4()}';
       await db.changeLogDao.add(ChangeLogCompanion(
-        id: Value('cl-${_uuid.v4()}'),
+        id: Value(id),
         entityType: const Value('entry'),
         entityId: Value(entityId),
         action: Value(action),
         description: Value(description),
         beforeJson: Value(snap),
       ));
+      return id;
     } catch (e) {
       debugPrint('[Journal] Logging fehlgeschlagen: $e');
+      return null;
     }
   }
 
-  /// Macht eine protokollierte Änderung rückgängig: stellt den Snapshot wieder her.
+  /// Trägt den Nachzustand (afterJson) nach → ermöglicht Redo.
+  Future<void> _finalizeLog(String? logId, String entityId) async {
+    if (logId == null) return;
+    try {
+      final snap = await _snapshotJson(entityId);
+      if (snap != null) await db.changeLogDao.setAfterJson(logId, snap);
+    } catch (e) {
+      debugPrint('[Journal] afterJson nachtragen fehlgeschlagen: $e');
+    }
+  }
+
+  /// Macht eine protokollierte Änderung rückgängig (stellt beforeJson her).
   Future<void> undoChange(String logId) async {
     final log = await db.changeLogDao.getById(logId);
     if (log == null || log.undone || log.beforeJson == null) return;
     final data = jsonDecode(log.beforeJson!) as Map<String, dynamic>;
     await _restoreSnapshot(data);
-    await db.changeLogDao.markUndone(logId);
+    await db.changeLogDao.setUndone(logId, true);
+  }
+
+  /// Wiederholt eine rückgängig gemachte Änderung (stellt afterJson her).
+  Future<void> redoChange(String logId) async {
+    final log = await db.changeLogDao.getById(logId);
+    if (log == null || !log.undone || log.afterJson == null) return;
+    final data = jsonDecode(log.afterJson!) as Map<String, dynamic>;
+    await _restoreSnapshot(data);
+    await db.changeLogDao.setUndone(logId, false);
   }
 
   Future<void> _restoreSnapshot(Map<String, dynamic> data) async {

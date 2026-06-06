@@ -616,6 +616,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       resolvedTitle =
           'Sprachnotiz – ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}';
     }
+    // Auto-Titel für Bild-Notizen ohne eigenen Text/Titel
+    if (resolvedTitle == null && _pendingImages.isNotEmpty && rawBody.isEmpty) {
+      resolvedTitle =
+          'Bild – ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}';
+    }
 
     // API-Feld-Einstellungen laden und anwenden
     final apiFields = AppSettings.loadApiFieldSettings();

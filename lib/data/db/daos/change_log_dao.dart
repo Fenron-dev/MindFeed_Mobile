@@ -22,9 +22,13 @@ class ChangeLogDao extends DatabaseAccessor<AppDatabase>
   Future<ChangeLogData?> getById(String id) =>
       (select(changeLog)..where((c) => c.id.equals(id))).getSingleOrNull();
 
-  Future<void> markUndone(String id) =>
+  Future<void> setUndone(String id, bool value) =>
       (update(changeLog)..where((c) => c.id.equals(id)))
-          .write(const ChangeLogCompanion(undone: Value(true)));
+          .write(ChangeLogCompanion(undone: Value(value)));
+
+  Future<void> setAfterJson(String id, String json) =>
+      (update(changeLog)..where((c) => c.id.equals(id)))
+          .write(ChangeLogCompanion(afterJson: Value(json)));
 
   /// Hält das Journal schlank: löscht Einträge älter als [days] Tage.
   Future<void> pruneOlderThan(int days) {

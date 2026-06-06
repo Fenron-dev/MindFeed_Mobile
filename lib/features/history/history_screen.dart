@@ -108,6 +108,7 @@ class _LogCard extends ConsumerWidget {
       _ => (Icons.history, MFColors.textMuted),
     };
     final canUndo = !log.undone && log.beforeJson != null;
+    final canRedo = log.undone && log.afterJson != null;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -137,7 +138,17 @@ class _LogCard extends ConsumerWidget {
             ),
           ]),
         ),
-        if (log.undone)
+        if (canRedo)
+          TextButton.icon(
+            onPressed: () => _redo(context, ref),
+            icon: const Icon(Icons.redo, size: 14),
+            label: const Text('Wiederholen', style: TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFF59E0B),
+              visualDensity: VisualDensity.compact,
+            ),
+          )
+        else if (log.undone)
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: Text('rückgängig',
@@ -162,6 +173,16 @@ class _LogCard extends ConsumerWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Änderung rückgängig gemacht'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  Future<void> _redo(BuildContext context, WidgetRef ref) async {
+    await ref.read(entryRepositoryProvider).redoChange(log.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Änderung wiederhergestellt'),
         behavior: SnackBarBehavior.floating,
       ));
     }
