@@ -2,6 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 
+/// Repräsentiert einen Task mit seinen direkten Subtasks.
+class TaskNode {
+  final EntryWithDetails task;
+  final List<EntryWithDetails> subtasks;
+  const TaskNode({required this.task, this.subtasks = const []});
+}
+
 /// Subtasks eines Tasks (type='task' mit parent_entry_id = parentId).
 /// Key = parentTaskId.
 final subtasksByParentProvider =
@@ -23,37 +30,53 @@ final tasksProvider = StreamProvider<List<EntryWithDetails>>((ref) {
   return ref.watch(entryRepositoryProvider).watchTasks();
 });
 
-/// Gruppierte Tasks für die Übersicht: Überfällig / Heute / Woche / Später / Kein Datum.
+/// Gruppierte Tasks für die Übersicht — nur Top-Level-Tasks (keine Subtasks).
+/// Subtasks werden als eingerückte Kinder unter dem jeweiligen Parent angezeigt.
 final groupedTasksProvider = Provider<AsyncValue<TaskGroups>>((ref) {
   return ref.watch(tasksProvider).whenData((tasks) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final weekEnd = today.add(const Duration(days: 7));
 
-    final overdue = <EntryWithDetails>[];
-    final todayTasks = <EntryWithDetails>[];
-    final thisWeek = <EntryWithDetails>[];
-    final later = <EntryWithDetails>[];
-    final noDate = <EntryWithDetails>[];
+    // Subtask-Map: parentId → Liste von Subtasks
+    final subtaskMap = <String, List<EntryWithDetails>>{};
+    final topLevel = <EntryWithDetails>[];
 
     for (final t in tasks) {
-      // Erledigte/archivierte Tasks nicht in der Hauptliste zeigen
       if (t.entry.status == 'done' || t.entry.status == 'archived') continue;
-
-      final due = t.entry.reminderAt;
-      if (due == null) {
-        noDate.add(t);
-        continue;
+      final parentId = EntryRepository.getTaskProperty(t, 'parent_entry_id');
+      if (parentId != null && parentId.isNotEmpty) {
+        subtaskMap.putIfAbsent(parentId, () => []).add(t);
+      } else {
+        topLevel.add(t);
       }
+    }
+
+    // Baut einen TaskNode: Top-Level-Task + seine Subtasks
+    TaskNode toNode(EntryWithDetails t) => TaskNode(
+      task: t,
+      subtasks: subtaskMap[t.entry.id] ?? [],
+    );
+
+    final overdue = <TaskNode>[];
+    final todayTasks = <TaskNode>[];
+    final thisWeek = <TaskNode>[];
+    final later = <TaskNode>[];
+    final noDate = <TaskNode>[];
+
+    for (final t in topLevel) {
+      final node = toNode(t);
+      final due = t.entry.reminderAt;
+      if (due == null) { noDate.add(node); continue; }
       final dueDay = DateTime(due.year, due.month, due.day);
       if (dueDay.isBefore(today)) {
-        overdue.add(t);
+        overdue.add(node);
       } else if (dueDay.isAtSameMomentAs(today)) {
-        todayTasks.add(t);
+        todayTasks.add(node);
       } else if (dueDay.isBefore(weekEnd)) {
-        thisWeek.add(t);
+        thisWeek.add(node);
       } else {
-        later.add(t);
+        later.add(node);
       }
     }
 
@@ -68,11 +91,11 @@ final groupedTasksProvider = Provider<AsyncValue<TaskGroups>>((ref) {
 });
 
 class TaskGroups {
-  final List<EntryWithDetails> overdue;
-  final List<EntryWithDetails> today;
-  final List<EntryWithDetails> thisWeek;
-  final List<EntryWithDetails> later;
-  final List<EntryWithDetails> noDate;
+  final List<TaskNode> overdue;
+  final List<TaskNode> today;
+  final List<TaskNode> thisWeek;
+  final List<TaskNode> later;
+  final List<TaskNode> noDate;
 
   const TaskGroups({
     required this.overdue,

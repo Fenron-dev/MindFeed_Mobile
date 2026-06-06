@@ -202,8 +202,12 @@ class _MindFeedAppState extends ConsumerState<MindFeedApp> {
     final router = ref.read(routerProvider);
     switch (event.logicalKey) {
       case LogicalKeyboardKey.keyN:
-        router.push(AppRoutes.capture);
-        return true;
+        // Wird von _DesktopShellState._onHwKey abgefangen (inline im rechten Frame).
+        // Hier keinen fullscreen-Route pushen → nicht konsumieren, weiterleiten.
+        return false;
+      case LogicalKeyboardKey.keyT:
+        // Analog: wird von _DesktopShellState._onHwKey behandelt.
+        return false;
       case LogicalKeyboardKey.keyF:
         router.go(AppRoutes.search);
         return true;

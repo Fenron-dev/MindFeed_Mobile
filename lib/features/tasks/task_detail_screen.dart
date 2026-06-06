@@ -346,6 +346,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     final isDone = task.entry.status == 'done';
     final sourceNoteId =
         EntryRepository.getTaskProperty(task, 'task_source_entry_id');
+    final parentTaskId =
+        EntryRepository.getTaskProperty(task, 'parent_entry_id');
     final completedAt =
         EntryRepository.getTaskProperty(task, 'task_completed_at');
 
@@ -676,6 +678,27 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                 onTap: () => navigateToEntry(context, ref, sourceNoteId),
                 child: const Text(
                   'Zur Notiz →',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: MFColors.teal,
+                    decoration: TextDecoration.underline,
+                    decorationColor: MFColors.teal,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // ─── Übergeordnete Aufgabe ──────────────────────────────────
+          if (parentTaskId != null) ...[
+            _PropertyRow(
+              icon: Icons.account_tree_outlined,
+              label: 'Teil von',
+              child: GestureDetector(
+                onTap: () => navigateToTask(context, ref, parentTaskId),
+                child: const Text(
+                  'Zur Aufgabe →',
                   style: TextStyle(
                     fontSize: 14,
                     color: MFColors.teal,

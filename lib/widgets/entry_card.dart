@@ -11,10 +11,11 @@ import '../services/app_settings.dart';
 bool get _isDesktop =>
     Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 
-class EntryCard extends ConsumerWidget {
+class EntryCard extends StatelessWidget {
   final EntryWithDetails item;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onToggleTask;
   final bool compact;
 
   const EntryCard({
@@ -22,11 +23,12 @@ class EntryCard extends ConsumerWidget {
     required this.item,
     required this.onTap,
     this.onLongPress,
+    this.onToggleTask,
     this.compact = false,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final entry = item.entry;
     final isPinned = entry.pinned;
     final isInbox = entry.status == 'inbox';
@@ -50,7 +52,7 @@ class EntryCard extends ConsumerWidget {
             if (entry.type == 'task')
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => ref.read(entryRepositoryProvider).toggleTaskStatus(entry.id),
+                onTap: onToggleTask,
                 child: Padding(
                   padding: const EdgeInsets.only(right: 10),
                   child: Icon(

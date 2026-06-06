@@ -338,6 +338,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         onTap: () => item.entry.type == 'task'
                             ? navigateToTask(context, ref, item.entry.id)
                             : navigateToEntry(context, ref, item.entry.id),
+                        onToggleTask: item.entry.type == 'task'
+                            ? () => ref.read(entryRepositoryProvider).toggleTaskStatus(item.entry.id)
+                            : null,
                       ),
                     );
                   },

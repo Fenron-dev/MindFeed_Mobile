@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -56,10 +57,29 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   void initState() {
     super.initState();
     _bodyCtrl.addListener(_checkWikilinkContext);
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.addHandler(_onHwKey);
+    }
+  }
+
+  bool _onHwKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final mod = Platform.isMacOS
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (!mod) return false;
+    if (event.logicalKey == LogicalKeyboardKey.keyE) {
+      setState(() => _isEditing = !_isEditing);
+      return true;
+    }
+    return false;
   }
 
   @override
   void dispose() {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.removeHandler(_onHwKey);
+    }
     _wikilinkDebounce?.cancel();
     _bodyCtrl.removeListener(_checkWikilinkContext);
     _titleCtrl.dispose();
