@@ -14,12 +14,12 @@ import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
-import '../../data/repositories/entry_repository.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
 import '../../sync/sync_provider.dart';
+import '../../widgets/wikilink_text_field.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
@@ -58,12 +58,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _loadingPreview = false;
   String? _lastCheckedUrl;
   Timer? _urlDebounce;
-
-  // Wikilink-Autocomplete
-  List<EntryWithDetails> _wikilinkSuggestions = [];
-  bool _wikilinkLoading = false;
-  Timer? _wikilinkDebounce;
-  String? _partialWikilink; // Text nach [[
 
   // Bild-Anhänge
   final List<XFile> _pendingImages = [];
@@ -130,7 +124,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     }
     _urlDebounce?.cancel();
-    _wikilinkDebounce?.cancel();
     _autoSaveDebounce?.cancel();
     _recordingTimer?.cancel();
     _recorder.dispose();
@@ -185,55 +178,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       });
     }
     _scheduleUrlCheck();
-    _checkWikilinkContext();
-  }
-
-  void _checkWikilinkContext() {
-    final text = _bodyCtrl.text;
-    // Letztes [[ das kein ]] danach hat → aktive Wikilink-Eingabe
-    final openIdx = text.lastIndexOf('[[');
-    if (openIdx == -1) {
-      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
-      return;
-    }
-    final afterOpen = text.substring(openIdx + 2);
-    if (afterOpen.contains(']]')) {
-      if (_partialWikilink != null) setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
-      return;
-    }
-
-    final partial = afterOpen.trim();
-    if (partial == _partialWikilink) return;
-    _partialWikilink = partial;
-    setState(() => _wikilinkLoading = true); // sofort Ladeindikator zeigen
-
-    _wikilinkDebounce?.cancel();
-    _wikilinkDebounce = Timer(const Duration(milliseconds: 180), () async {
-      final results = await ref
-          .read(entryRepositoryProvider)
-          .search(partial.isEmpty ? '' : partial);
-      if (mounted) {
-        setState(() {
-          _wikilinkSuggestions = results.take(8).toList();
-          _wikilinkLoading = false;
-        });
-      }
-    });
-  }
-
-  void _insertWikilink(String title) {
-    final text = _bodyCtrl.text;
-    final openIdx = text.lastIndexOf('[[');
-    if (openIdx == -1) return;
-
-    // Alles ab [[ ersetzen mit [[Title]]
-    final before = text.substring(0, openIdx);
-    final newText = '$before[[$title]]';
-    _bodyCtrl.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newText.length),
-    );
-    setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
+    // [[-Autocomplete läuft jetzt im WikilinkTextField selbst
   }
 
   void _scheduleUrlCheck() {
@@ -903,12 +848,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: TextField(
+              child: WikilinkTextField(
                 controller: _bodyCtrl,
                 focusNode: _bodyFocus,
-                maxLines: null,
                 expands: true,
-                textAlignVertical: TextAlignVertical.top,
                 style: const TextStyle(
                   fontSize: 15,
                   color: MFColors.textPrimary,
@@ -930,77 +873,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
             ),
           ),
-
-          // Wikilink-Autocomplete Suggestion Bar
-          if (_wikilinkSuggestions.isNotEmpty || _wikilinkLoading)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-              decoration: const BoxDecoration(
-                color: MFColors.surfaceAlt,
-                border: Border(top: BorderSide(color: MFColors.border))),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, bottom: 3),
-                    child: Row(children: [
-                      const Text('Wikilink einfügen:',
-                          style: TextStyle(
-                              fontSize: 10, color: MFColors.textMuted,
-                              fontFamily: 'monospace')),
-                      if (_wikilinkLoading) ...[
-                        const SizedBox(width: 6),
-                        const SizedBox(
-                          width: 8, height: 8,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 1.5, color: MFColors.teal),
-                        ),
-                      ],
-                    ]),
-                  ),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _wikilinkSuggestions.map((item) {
-                        final title = item.entry.title ?? 'Unbenannt';
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: GestureDetector(
-                            onTap: () => _insertWikilink(title),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1E1B4B),
-                                borderRadius: BorderRadius.circular(99),
-                                border: Border.all(
-                                    color: const Color(0xFF4338CA),
-                                    width: 0.5),
-                              ),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                const Icon(Icons.layers_outlined,
-                                    size: 11, color: Color(0xFFA78BFA)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  title.length > 24
-                                      ? '${title.substring(0, 24)}…'
-                                      : title,
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Color(0xFFA78BFA),
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ]),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
 
           // URL-Preview (lädt automatisch beim Eintippen)
           if (_loadingPreview)

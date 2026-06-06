@@ -23,6 +23,7 @@ import '../../services/openrouter_service.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
+import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 
 const _keyApiKey = 'openrouter_api_key';
@@ -47,16 +48,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   // ScrollController bleibt über Stream-Re-Emits hinweg erhalten → Position springt nicht
   final _scrollCtrl = ScrollController();
 
-  // Wikilink-Autocomplete
-  List<EntryWithDetails> _wikilinkSuggestions = [];
-  bool _wikilinkLoading = false;
-  String? _partialWikilink;
-  Timer? _wikilinkDebounce;
-
   @override
   void initState() {
     super.initState();
-    _bodyCtrl.addListener(_checkWikilinkContext);
     if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
       HardwareKeyboard.instance.addHandler(_onHwKey);
     }
@@ -80,66 +74,12 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
       HardwareKeyboard.instance.removeHandler(_onHwKey);
     }
-    _wikilinkDebounce?.cancel();
-    _bodyCtrl.removeListener(_checkWikilinkContext);
     _titleCtrl.dispose();
     _bodyCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
 
-  void _checkWikilinkContext() {
-    if (!_isEditing) return;
-    final text = _bodyCtrl.text;
-    final openIdx = text.lastIndexOf('[[');
-    if (openIdx == -1) {
-      if (_partialWikilink != null) {
-        setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
-      }
-      return;
-    }
-    final afterOpen = text.substring(openIdx + 2);
-    if (afterOpen.contains(']]')) {
-      if (_partialWikilink != null) {
-        setState(() { _wikilinkSuggestions = []; _partialWikilink = null; _wikilinkLoading = false; });
-      }
-      return;
-    }
-    final partial = afterOpen.trim();
-    if (partial == _partialWikilink) return;
-    _partialWikilink = partial;
-    setState(() => _wikilinkLoading = true);
-
-    _wikilinkDebounce?.cancel();
-    _wikilinkDebounce = Timer(const Duration(milliseconds: 180), () async {
-      final results = await ref
-          .read(entryRepositoryProvider)
-          .search(partial.isEmpty ? '' : partial);
-      if (mounted) {
-        setState(() {
-          // Aktuellen Eintrag ausblenden
-          _wikilinkSuggestions = results
-              .where((e) => e.entry.id != widget.entryId)
-              .take(8)
-              .toList();
-          _wikilinkLoading = false;
-        });
-      }
-    });
-  }
-
-  void _insertWikilink(String title) {
-    final text = _bodyCtrl.text;
-    final openIdx = text.lastIndexOf('[[');
-    if (openIdx == -1) return;
-    final before = text.substring(0, openIdx);
-    final newText = '$before[[$title]]';
-    _bodyCtrl.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newText.length),
-    );
-    setState(() { _wikilinkSuggestions = []; _partialWikilink = null; });
-  }
 
   String _fmtDate(DateTime dt) =>
       DateFormat('dd.MM.yy HH:mm').format(dt.toLocal());
@@ -357,11 +297,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
           body: _bodyCtrl.text,
         );
     if (mounted) {
-      setState(() {
-        _isEditing = false;
-        _wikilinkSuggestions = [];
-        _partialWikilink = null;
-      });
+      setState(() => _isEditing = false);
     }
   }
 
@@ -654,96 +590,19 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                               ),
                             )
                           else
-                            TextField(
-                            controller: _bodyCtrl,
-                            maxLines: null,
-                            style: const TextStyle(
-                                fontSize: 15,
-                                color: MFColors.textPrimary,
-                                height: 1.6),
-                            decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.zero,
-                                filled: false),
-                          ),
-                          // Wikilink-Autocomplete
-                          if (_wikilinkSuggestions.isNotEmpty || _wikilinkLoading)
-                            Container(
-                              margin: const EdgeInsets.only(top: 6),
-                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
-                              decoration: BoxDecoration(
-                                color: MFColors.surfaceAlt,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: MFColors.border),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(children: [
-                                    const Text('Wikilink einfügen:',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: MFColors.textMuted,
-                                            fontFamily: 'monospace')),
-                                    if (_wikilinkLoading) ...[
-                                      const SizedBox(width: 6),
-                                      const SizedBox(
-                                        width: 8, height: 8,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 1.5,
-                                            color: MFColors.teal),
-                                      ),
-                                    ],
-                                  ]),
-                                  const SizedBox(height: 4),
-                                  SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    child: Row(
-                                      children: _wikilinkSuggestions
-                                          .map((s) {
-                                        final t = s.entry.title ?? 'Unbenannt';
-                                        return Padding(
-                                          padding: const EdgeInsets.only(right: 6),
-                                          child: GestureDetector(
-                                            onTap: () => _insertWikilink(t),
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                  horizontal: 10, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFF1E1B4B),
-                                                borderRadius:
-                                                    BorderRadius.circular(99),
-                                                border: Border.all(
-                                                    color: const Color(0xFF4338CA),
-                                                    width: 0.5),
-                                              ),
-                                              child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(
-                                                        Icons.layers_outlined,
-                                                        size: 11,
-                                                        color: Color(0xFFA78BFA)),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      t.length > 24
-                                                          ? '${t.substring(0, 24)}…'
-                                                          : t,
-                                                      style: const TextStyle(
-                                                          fontSize: 11,
-                                                          color: Color(0xFFA78BFA),
-                                                          fontWeight:
-                                                              FontWeight.w500),
-                                                    ),
-                                                  ]),
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            WikilinkTextField(
+                              controller: _bodyCtrl,
+                              maxLines: null,
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  color: MFColors.textPrimary,
+                                  height: 1.6),
+                              decoration: const InputDecoration(
+                                  hintText: '[[ für Verknüpfung…',
+                                  hintStyle: TextStyle(color: MFColors.textMuted),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                  filled: false),
                             ),
                         ],
                       )
@@ -794,7 +653,8 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 const SizedBox(height: 16),
                 _PropertiesTable(
                     properties: item.properties,
-                    entryId: entry.id),
+                    entryId: entry.id,
+                    editable: _isEditing),
 
                 // Container-Zuweisung
                 const SizedBox(height: 16),
@@ -1028,16 +888,25 @@ class _LinkPreview extends StatelessWidget {
 }
 
 /// Öffentlich zugänglicher Properties-Wrapper — kann von anderen Screens genutzt werden.
+/// [editable] = false → Lese-Modus: nur Toggle/Rating schaltbar, Links klickbar,
+/// kein Hinzufügen/Löschen/Bearbeiten von Werten.
 class EntryPropertiesTable extends ConsumerStatefulWidget {
   final List<EntryProperty> properties;
   final String entryId;
-  const EntryPropertiesTable({super.key, required this.properties, required this.entryId});
+  final bool editable;
+  const EntryPropertiesTable({
+    super.key,
+    required this.properties,
+    required this.entryId,
+    this.editable = true,
+  });
   @override
   ConsumerState<EntryPropertiesTable> createState() => _PropertiesTableState();
 }
 
 class _PropertiesTable extends EntryPropertiesTable {
-  const _PropertiesTable({required super.properties, required super.entryId});
+  const _PropertiesTable(
+      {required super.properties, required super.entryId, super.editable});
   @override
   ConsumerState<EntryPropertiesTable> createState() => _PropertiesTableState();
 }
@@ -1149,76 +1018,80 @@ class _PropertiesTableState extends ConsumerState<EntryPropertiesTable> {
                               ]),
                               const SizedBox(height: 3),
                               // Wert
-                              _EditablePropValue(prop: p, entryId: entryId),
+                              _EditablePropValue(
+                                  prop: p, entryId: entryId,
+                                  editable: widget.editable),
                             ],
                           ),
                         ),
-                        // Löschen-Button (oben rechts)
-                        Positioned(
-                          top: 4, right: 4,
-                          child: GestureDetector(
-                            onTap: () async {
-                              final allProps = await ref
-                                  .read(propertyDaoProvider)
-                                  .watchByEntry(entryId)
-                                  .first;
-                              final remaining = allProps
-                                  .where((x) => x.id != p.id)
-                                  .map((x) => EntryPropertiesCompanion(
-                                        id: drift.Value(x.id),
-                                        entryId: drift.Value(x.entryId),
-                                        key: drift.Value(x.key),
-                                        value: drift.Value(x.value),
-                                        type: drift.Value(x.type),
-                                      ))
-                                  .toList();
-                              await ref
-                                  .read(entryRepositoryProvider)
-                                  .setEntryProperties(entryId, remaining,
-                                      description: 'Eigenschaft entfernt');
-                            },
-                            child: const Icon(Icons.close,
-                                size: 12, color: MFColors.textMuted),
+                        // Löschen-Button (oben rechts) — nur im Bearbeiten-Modus
+                        if (widget.editable)
+                          Positioned(
+                            top: 4, right: 4,
+                            child: GestureDetector(
+                              onTap: () async {
+                                final allProps = await ref
+                                    .read(propertyDaoProvider)
+                                    .watchByEntry(entryId)
+                                    .first;
+                                final remaining = allProps
+                                    .where((x) => x.id != p.id)
+                                    .map((x) => EntryPropertiesCompanion(
+                                          id: drift.Value(x.id),
+                                          entryId: drift.Value(x.entryId),
+                                          key: drift.Value(x.key),
+                                          value: drift.Value(x.value),
+                                          type: drift.Value(x.type),
+                                        ))
+                                    .toList();
+                                await ref
+                                    .read(entryRepositoryProvider)
+                                    .setEntryProperties(entryId, remaining,
+                                        description: 'Eigenschaft entfernt');
+                              },
+                              child: const Icon(Icons.close,
+                                  size: 12, color: MFColors.textMuted),
+                            ),
                           ),
-                        ),
                       ],
                     );
                   }).toList(),
                 ),
               ),
             ),
-          const SizedBox(height: 6),
-          Row(children: [
-            // Eigenschaft hinzufügen
-            Expanded(
-              child: GestureDetector(
-                onTap: () => _showAddPropertyDialog(context, ref),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: MFColors.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: MFColors.border),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add, size: 14, color: MFColors.teal),
-                      SizedBox(width: 6),
-                      Text('Eigenschaft hinzufügen',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: MFColors.teal,
-                              fontWeight: FontWeight.w500)),
-                    ],
+          // Hinzufügen/Template nur im Bearbeiten-Modus
+          if (widget.editable) ...[
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _showAddPropertyDialog(context, ref),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: MFColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: MFColors.border),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add, size: 14, color: MFColors.teal),
+                        SizedBox(width: 6),
+                        Text('Eigenschaft hinzufügen',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: MFColors.teal,
+                                fontWeight: FontWeight.w500)),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            // Template anwenden
-            _TemplateApplyButton(entryId: entryId, existingProps: properties),
-          ]),
+              const SizedBox(width: 8),
+              _TemplateApplyButton(entryId: entryId, existingProps: properties),
+            ]),
+          ],
         ],
         ),  // Ende if (!_collapsed)
       ],
@@ -1261,7 +1134,9 @@ class _PropertiesTableState extends ConsumerState<EntryPropertiesTable> {
 class _EditablePropValue extends ConsumerStatefulWidget {
   final EntryProperty prop;
   final String entryId;
-  const _EditablePropValue({required this.prop, required this.entryId});
+  final bool editable;
+  const _EditablePropValue(
+      {required this.prop, required this.entryId, this.editable = true});
   @override
   ConsumerState<_EditablePropValue> createState() => _EditablePropValueState();
 }
@@ -1332,28 +1207,32 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
         ? '${parsed.day.toString().padLeft(2, '0')}.${parsed.month.toString().padLeft(2, '0')}.${parsed.year}'
         : '—';
     return GestureDetector(
-      onTap: () async {
-        final now = DateTime.now();
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: parsed?.toLocal() ?? now,
-          firstDate: DateTime(2000),
-          lastDate: DateTime(2100),
-          builder: (_, child) => Theme(
-            data: ThemeData.dark().copyWith(
-              colorScheme: const ColorScheme.dark(primary: MFColors.teal),
-            ),
-            child: child!,
-          ),
-        );
-        if (picked != null) {
-          await _saveValue(picked.toIso8601String().substring(0, 10));
-        }
-      },
+      onTap: widget.editable
+          ? () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: parsed?.toLocal() ?? now,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+                builder: (_, child) => Theme(
+                  data: ThemeData.dark().copyWith(
+                    colorScheme: const ColorScheme.dark(primary: MFColors.teal),
+                  ),
+                  child: child!,
+                ),
+              );
+              if (picked != null) {
+                await _saveValue(picked.toIso8601String().substring(0, 10));
+              }
+            }
+          : null,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(label, style: const TextStyle(fontSize: 12, color: MFColors.textPrimary)),
-        const SizedBox(width: 4),
-        const Icon(Icons.edit_calendar_outlined, size: 12, color: MFColors.textMuted),
+        if (widget.editable) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.edit_calendar_outlined, size: 12, color: MFColors.textMuted),
+        ],
       ]),
     );
   }
@@ -1421,10 +1300,11 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
           ),
         ),
       ),
-      GestureDetector(
-        onTap: () => setState(() { _ctrl.text = url; _editing = true; }),
-        child: const Icon(Icons.edit_outlined, size: 13, color: MFColors.textMuted),
-      ),
+      if (widget.editable)
+        GestureDetector(
+          onTap: () => setState(() { _ctrl.text = url; _editing = true; }),
+          child: const Icon(Icons.edit_outlined, size: 13, color: MFColors.textMuted),
+        ),
     ]);
   }
 
@@ -1456,12 +1336,16 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
     final chips = raw.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
     if (chips.isEmpty) {
       return GestureDetector(
-        onTap: () => setState(() { _ctrl.text = raw; _editing = true; }),
+        onTap: widget.editable
+            ? () => setState(() { _ctrl.text = raw; _editing = true; })
+            : null,
         child: const Text('—', style: TextStyle(fontSize: 12, color: MFColors.textMuted)),
       );
     }
     return GestureDetector(
-      onTap: () => setState(() { _ctrl.text = raw; _editing = true; }),
+      onTap: widget.editable
+          ? () => setState(() { _ctrl.text = raw; _editing = true; })
+          : null,
       child: Wrap(
         spacing: 4, runSpacing: 2,
         children: chips.map((t) => Container(
@@ -1503,7 +1387,9 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
       ]);
     }
     return GestureDetector(
-      onTap: () => setState(() { _ctrl.text = widget.prop.value ?? ''; _editing = true; }),
+      onTap: widget.editable
+          ? () => setState(() { _ctrl.text = widget.prop.value ?? ''; _editing = true; })
+          : null,
       child: Text(
         widget.prop.value ?? '—',
         style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),

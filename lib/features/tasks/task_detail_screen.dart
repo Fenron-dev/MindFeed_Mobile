@@ -10,6 +10,7 @@ import '../../domain/recurrence_calculator.dart';
 import '../../features/entry_detail/entry_detail_provider.dart';
 import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable, subNotesProvider;
 import '../../widgets/app_shell.dart' show navigateToEntry, navigateToCapture, navigateToTask;
+import '../../widgets/wikilink_text_field.dart';
 import 'task_provider.dart' show subtasksByParentProvider;
 import 'widgets/recurrence_picker.dart';
 
@@ -716,12 +717,12 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
 
           // ─── Beschreibung ───────────────────────────────────────────
           if (_isEditing)
-            TextField(
+            WikilinkTextField(
               controller: _bodyCtrl,
               style: const TextStyle(
                   fontSize: 14, color: MFColors.textSecondary, height: 1.6),
               decoration: const InputDecoration(
-                hintText: 'Beschreibung (optional)…',
+                hintText: 'Beschreibung (optional, [[ für Verknüpfung)…',
                 hintStyle: TextStyle(color: MFColors.textMuted),
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.zero,
@@ -751,6 +752,7 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
           EntryPropertiesTable(
             properties: task.properties,
             entryId: task.entry.id,
+            editable: _isEditing,
           ),
 
           // ─── Unternotizen ───────────────────────────────────────────
@@ -924,12 +926,12 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
           const Divider(color: MFColors.border),
           const SizedBox(height: 12),
 
-          TextField(
+          WikilinkTextField(
             controller: _bodyCtrl,
             style: const TextStyle(
                 fontSize: 14, color: MFColors.textSecondary, height: 1.6),
             decoration: const InputDecoration(
-              hintText: 'Beschreibung (optional)…',
+              hintText: 'Beschreibung (optional, [[ für Verknüpfung)…',
               hintStyle: TextStyle(color: MFColors.textMuted),
               border: InputBorder.none,
               contentPadding: EdgeInsets.zero,
