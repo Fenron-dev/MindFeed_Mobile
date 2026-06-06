@@ -67,7 +67,7 @@ class EntryRepository {
         // Rows enthalten bereits alle Entry-Spalten (SELECT *) → direkt mappen
         // statt N× getById (vermeidet N+1).
         final filtered = rows
-            .map((r) => Entry.fromJson(r.data))
+            .map((r) => db.entries.map(r.data))
             .where((e) => e.status != 'sub_note' && e.deletedAt == null)
             .toList();
         lastGood = await _bulkEnrich(filtered);
@@ -94,7 +94,7 @@ class EntryRepository {
       variables: [Variable.withString(noteId)],
       readsFrom: {db.entries, db.entryProperties},
     ).watch().asyncMap((rows) async {
-      final entries = rows.map((r) => Entry.fromJson(r.data)).toList();
+      final entries = rows.map((r) => db.entries.map(r.data)).toList();
       return _bulkEnrich(entries);
     });
   }
@@ -152,7 +152,7 @@ class EntryRepository {
       },
     ).watch().asyncMap((rows) async {
       final entries = rows
-          .map((r) => Entry.fromJson(r.data))
+          .map((r) => db.entries.map(r.data))
           .where((e) => e.deletedAt == null)
           .toList();
       return _bulkEnrich(entries);
@@ -172,7 +172,7 @@ class EntryRepository {
       variables: [Variable.withString(parentEntryId)],
       readsFrom: {db.entries, db.entryProperties},
     ).watch().asyncMap((rows) async {
-      final entries = rows.map((r) => Entry.fromJson(r.data)).toList();
+      final entries = rows.map((r) => db.entries.map(r.data)).toList();
       return _bulkEnrich(entries);
     });
   }

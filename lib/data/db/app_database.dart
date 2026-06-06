@@ -191,7 +191,9 @@ class AppDatabase extends _$AppDatabase {
         readsFrom: {entries},
       ).get();
       if (rows.isNotEmpty) {
-        return rows.map((r) => Entry.fromJson(r.data)).toList();
+        // entries.map() liest die SQL-Spaltennamen direkt (Entry.fromJson würde
+        // camelCase-Keys erwarten und scheitern → bisher stiller LIKE-Fallback).
+        return rows.map((r) => entries.map(r.data)).toList();
       }
     } catch (_) { /* FTS5 nicht verfügbar, Fallback */ }
 
