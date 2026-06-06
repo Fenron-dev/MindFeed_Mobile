@@ -1146,6 +1146,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 8),
           _TagStyleSection(),
 
+          // ─── Aufgaben ──────────────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('AUFGABEN'),
+          const SizedBox(height: 8),
+          _ShowTasksInNotesToggle(),
+
           // ─── Templates ─────────────────────────────────────────────────────
           const SizedBox(height: 28),
           _SectionHeader('PROPERTY-TEMPLATES'),
@@ -1376,6 +1382,37 @@ class _AutoBackupSectionState extends ConsumerState<_AutoBackupSection> {
 }
 
 // ─── Sub-Widgets ──────────────────────────────────────────────────────────────
+
+class _ShowTasksInNotesToggle extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = ref.watch(showTasksInNotesProvider);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Row(children: [
+        const Icon(Icons.task_alt_rounded, size: 18, color: MFColors.teal),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Text('Aufgaben-Sektion in Notizen anzeigen',
+              style: TextStyle(fontSize: 14, color: MFColors.textPrimary)),
+        ),
+        Switch(
+          value: enabled,
+          activeThumbColor: MFColors.teal,
+          onChanged: (v) async {
+            ref.read(showTasksInNotesProvider.notifier).state = v;
+            await AppSettings.saveShowTasksInNotes(v);
+          },
+        ),
+      ]),
+    );
+  }
+}
 
 class _SectionHeader extends StatelessWidget {
   final String label;

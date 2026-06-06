@@ -550,6 +550,13 @@ class AppSettings {
   static Future<void> saveSyncEnabled(bool v) async =>
       _prefs?.setBool('sync_enabled', v);
 
+  /// Aufgaben-Sektion in Notiz-Details anzeigen (verlinkte Tasks). Default: an.
+  static bool getShowTasksInNotes() =>
+      _prefs?.getBool('show_tasks_in_notes') ?? true;
+
+  static Future<void> saveShowTasksInNotes(bool v) async =>
+      _prefs?.setBool('show_tasks_in_notes', v);
+
   static String? getSyncServerUrl() => _prefs?.getString('sync_server_url');
 
   static Future<void> saveSyncServerUrl(String? url) async {

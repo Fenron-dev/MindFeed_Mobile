@@ -60,6 +60,10 @@ final tagStyleProvider =
 final templatesProvider =
     StateProvider<List<PropTemplate>>((ref) => AppSettings.loadTemplates());
 
+/// Toggle: Aufgaben-Sektion in Notiz-Details anzeigen (reaktiv).
+final showTasksInNotesProvider =
+    StateProvider<bool>((ref) => AppSettings.getShowTasksInNotes());
+
 // ─── Feed-Filter ──────────────────────────────────────────────────────────────
 final feedFilterProvider =
     StateProvider<FeedFilter>((ref) => const FeedFilter());

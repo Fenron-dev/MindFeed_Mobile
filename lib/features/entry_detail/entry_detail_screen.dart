@@ -21,6 +21,7 @@ import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
+import '../../features/tasks/task_provider.dart' show tasksBySourceNoteProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
 import '../../widgets/wikilink_text_field.dart';
@@ -698,6 +699,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     }),
                   ),
                 ],
+
+                // Verlinkte Aufgaben (per Einstellung ein-/ausschaltbar)
+                if (entry.type != 'task' &&
+                    ref.watch(showTasksInNotesProvider))
+                  _NoteTasksSection(noteId: entry.id),
 
                 // Sub-Notizen zu diesem Eintrag
                 _SubNotesSection(parentEntryId: entry.id),
@@ -2525,6 +2531,136 @@ class _CheckTile extends StatelessWidget {
           ]),
         ),
       );
+}
+
+// ─── Verlinkte Aufgaben zu einer Notiz ───────────────────────────────────────
+
+class _NoteTasksSection extends ConsumerStatefulWidget {
+  final String noteId;
+  const _NoteTasksSection({required this.noteId});
+  @override
+  ConsumerState<_NoteTasksSection> createState() => _NoteTasksSectionState();
+}
+
+class _NoteTasksSectionState extends ConsumerState<_NoteTasksSection> {
+  final _addCtrl = TextEditingController();
+  bool _adding = false;
+
+  @override
+  void dispose() {
+    _addCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _add() async {
+    final title = _addCtrl.text.trim();
+    if (title.isEmpty) return;
+    setState(() => _adding = true);
+    try {
+      await ref.read(entryRepositoryProvider)
+          .createTask(title: title, sourceEntryId: widget.noteId);
+      _addCtrl.clear();
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasksAsync = ref.watch(tasksBySourceNoteProvider(widget.noteId));
+    return tasksAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (tasks) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 20),
+            Row(children: [
+              const Icon(Icons.task_alt_rounded, size: 13, color: MFColors.textMuted),
+              const SizedBox(width: 6),
+              const Text('AUFGABEN',
+                  style: TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.bold,
+                      color: MFColors.textMuted, letterSpacing: 1.2)),
+              if (tasks.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: MFColors.tealBg, borderRadius: BorderRadius.circular(99)),
+                  child: Text('${tasks.length}',
+                      style: const TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.bold, color: MFColors.teal)),
+                ),
+              ],
+            ]),
+            const SizedBox(height: 8),
+            ...tasks.map((t) {
+              final isDone = t.entry.status == 'done';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(children: [
+                  GestureDetector(
+                    onTap: () => ref.read(entryRepositoryProvider)
+                        .toggleTaskStatus(t.entry.id),
+                    child: Icon(
+                      isDone ? Icons.check_circle_rounded
+                             : Icons.radio_button_unchecked_rounded,
+                      size: 18, color: isDone ? MFColors.teal : MFColors.textMuted),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => navigateToTask(context, ref, t.entry.id),
+                      child: Text(
+                        t.entry.title ?? t.entry.body,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDone ? MFColors.textMuted : MFColors.textPrimary,
+                          decoration: isDone ? TextDecoration.lineThrough : null,
+                          decorationColor: MFColors.textMuted,
+                        ),
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ]),
+              );
+            }),
+            // Quick-Add
+            Row(children: [
+              const Icon(Icons.radio_button_unchecked_rounded,
+                  size: 18, color: MFColors.border),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _addCtrl,
+                  style: const TextStyle(fontSize: 14, color: MFColors.textPrimary),
+                  decoration: const InputDecoration(
+                    hintText: 'Aufgabe hinzufügen…',
+                    hintStyle: TextStyle(fontSize: 14, color: MFColors.textMuted),
+                    border: InputBorder.none, isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _add(),
+                ),
+              ),
+              if (_adding)
+                const SizedBox(width: 14, height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 1.5, color: MFColors.teal))
+              else
+                GestureDetector(
+                  onTap: _add,
+                  child: const Icon(Icons.add_circle_outline_rounded,
+                      size: 18, color: MFColors.teal)),
+            ]),
+          ],
+        );
+      },
+    );
+  }
 }
 
 // ─── Sub-Notizen zu einem Eintrag ────────────────────────────────────────────
