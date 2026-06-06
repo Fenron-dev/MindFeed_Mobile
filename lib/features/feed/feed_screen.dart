@@ -316,6 +316,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     final item = entries[i];
                     final isSubtask = subtaskIds.contains(item.entry.id);
                     return Padding(
+                      key: ValueKey('feed-${item.entry.id}'),
                       padding: EdgeInsets.only(left: isSubtask ? 24 : 0),
                       child: Dismissible(
                       key: ValueKey(item.entry.id),

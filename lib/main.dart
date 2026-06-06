@@ -32,6 +32,11 @@ void main() async {
     debugPrint('[FlutterError] ${details.exceptionAsString()}');
   };
 
+  // Bild-Cache hart begrenzen: verhindert, dass das Dekodieren vieler
+  // Cover-/Foto-Anhänge beim Scrollen den Speicher flutet (Swap → System-Freeze).
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 60 << 20; // 60 MB
+  PaintingBinding.instance.imageCache.maximumSize = 150; // max. 150 Bilder
+
   if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
