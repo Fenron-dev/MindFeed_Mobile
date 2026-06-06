@@ -818,6 +818,40 @@ class EntryRepository {
         .firstOrNull;
   }
 
+  // ─── Manuelle Verknüpfungen ────────────────────────────────────────────────
+
+  /// Verknüpft [fromId] manuell mit [toId] (bidirektional auffindbar via Backlinks).
+  Future<void> addLink(String fromId, String toId) async {
+    if (fromId == toId) return;
+    await propertyDao.addManualLink(fromId, toId);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(fromId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Entfernt eine Verknüpfung zwischen [fromId] und [toId].
+  Future<void> removeLink(String fromId, String toId) async {
+    await propertyDao.removeLink(fromId, toId);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(fromId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Reaktiver Stream der ausgehenden Verknüpfungen eines Eintrags (als Details).
+  Stream<List<EntryWithDetails>> watchOutgoingLinks(String fromId) {
+    return db.customSelect(
+      '''
+      SELECT e.* FROM entries e
+      INNER JOIN entry_links l ON l.to_id = e.id
+      WHERE l.from_id = ? AND e.deleted_at IS NULL
+      ORDER BY e.updated_at DESC
+      ''',
+      variables: [Variable.withString(fromId)],
+      readsFrom: {db.entries, db.entryLinks},
+    ).watch().asyncMap((rows) async {
+      final entries = rows.map((r) => db.entries.map(r.data)).toList();
+      return _bulkEnrich(entries);
+    });
+  }
+
   /// Stellt einen Eintrag aus dem Papierkorb wieder her.
   Future<void> restoreEntry(String id) => entryDao.restore(id);
 

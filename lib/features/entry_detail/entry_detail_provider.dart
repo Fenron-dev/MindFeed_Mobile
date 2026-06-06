@@ -9,6 +9,12 @@ final entryDetailProvider =
   return ref.watch(entryRepositoryProvider).watchById(id);
 });
 
+// Ausgehende Verknüpfungen (Wikilink + manuell), reaktiv
+final outgoingLinksProvider =
+    StreamProvider.autoDispose.family<List<EntryWithDetails>, String>((ref, id) {
+  return ref.watch(entryRepositoryProvider).watchOutgoingLinks(id);
+});
+
 // Backlinks: Einträge die auf diesen Eintrag verlinken ([[Wikilink]])
 final backlinksProvider =
     FutureProvider.autoDispose.family<List<EntryWithDetails>, String>(

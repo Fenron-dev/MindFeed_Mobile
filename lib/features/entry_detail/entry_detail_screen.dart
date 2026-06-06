@@ -24,6 +24,7 @@ import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../features/tasks/task_provider.dart' show tasksBySourceNoteProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
+import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 
@@ -707,6 +708,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
 
                 // Sub-Notizen zu diesem Eintrag
                 _SubNotesSection(parentEntryId: entry.id),
+
+                // Manuelle Verknüpfungen
+                LinkedEntriesSection(entryId: entry.id),
 
                 // Backlinks
                 _BacklinksSection(entryId: entry.id),

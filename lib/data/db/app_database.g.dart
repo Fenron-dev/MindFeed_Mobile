@@ -3787,8 +3787,21 @@ class $EntryLinksTable extends EntryLinks
       'REFERENCES entries (id) ON DELETE CASCADE',
     ),
   );
+  static const VerificationMeta _manualMeta = const VerificationMeta('manual');
   @override
-  List<GeneratedColumn> get $columns => [fromId, toId];
+  late final GeneratedColumn<bool> manual = GeneratedColumn<bool>(
+    'manual',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("manual" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [fromId, toId, manual];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -3817,6 +3830,12 @@ class $EntryLinksTable extends EntryLinks
     } else if (isInserting) {
       context.missing(_toIdMeta);
     }
+    if (data.containsKey('manual')) {
+      context.handle(
+        _manualMeta,
+        manual.isAcceptableOrUnknown(data['manual']!, _manualMeta),
+      );
+    }
     return context;
   }
 
@@ -3834,6 +3853,10 @@ class $EntryLinksTable extends EntryLinks
         DriftSqlType.string,
         data['${effectivePrefix}to_id'],
       )!,
+      manual: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}manual'],
+      )!,
     );
   }
 
@@ -3846,17 +3869,30 @@ class $EntryLinksTable extends EntryLinks
 class EntryLink extends DataClass implements Insertable<EntryLink> {
   final String fromId;
   final String toId;
-  const EntryLink({required this.fromId, required this.toId});
+
+  /// true = manuell verknüpft (bleibt bei Body-Edits erhalten);
+  /// false = aus [[Wikilink]] abgeleitet (wird beim Reparse ersetzt).
+  final bool manual;
+  const EntryLink({
+    required this.fromId,
+    required this.toId,
+    required this.manual,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['from_id'] = Variable<String>(fromId);
     map['to_id'] = Variable<String>(toId);
+    map['manual'] = Variable<bool>(manual);
     return map;
   }
 
   EntryLinksCompanion toCompanion(bool nullToAbsent) {
-    return EntryLinksCompanion(fromId: Value(fromId), toId: Value(toId));
+    return EntryLinksCompanion(
+      fromId: Value(fromId),
+      toId: Value(toId),
+      manual: Value(manual),
+    );
   }
 
   factory EntryLink.fromJson(
@@ -3867,6 +3903,7 @@ class EntryLink extends DataClass implements Insertable<EntryLink> {
     return EntryLink(
       fromId: serializer.fromJson<String>(json['fromId']),
       toId: serializer.fromJson<String>(json['toId']),
+      manual: serializer.fromJson<bool>(json['manual']),
     );
   }
   @override
@@ -3875,15 +3912,20 @@ class EntryLink extends DataClass implements Insertable<EntryLink> {
     return <String, dynamic>{
       'fromId': serializer.toJson<String>(fromId),
       'toId': serializer.toJson<String>(toId),
+      'manual': serializer.toJson<bool>(manual),
     };
   }
 
-  EntryLink copyWith({String? fromId, String? toId}) =>
-      EntryLink(fromId: fromId ?? this.fromId, toId: toId ?? this.toId);
+  EntryLink copyWith({String? fromId, String? toId, bool? manual}) => EntryLink(
+    fromId: fromId ?? this.fromId,
+    toId: toId ?? this.toId,
+    manual: manual ?? this.manual,
+  );
   EntryLink copyWithCompanion(EntryLinksCompanion data) {
     return EntryLink(
       fromId: data.fromId.present ? data.fromId.value : this.fromId,
       toId: data.toId.present ? data.toId.value : this.toId,
+      manual: data.manual.present ? data.manual.value : this.manual,
     );
   }
 
@@ -3891,44 +3933,51 @@ class EntryLink extends DataClass implements Insertable<EntryLink> {
   String toString() {
     return (StringBuffer('EntryLink(')
           ..write('fromId: $fromId, ')
-          ..write('toId: $toId')
+          ..write('toId: $toId, ')
+          ..write('manual: $manual')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(fromId, toId);
+  int get hashCode => Object.hash(fromId, toId, manual);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is EntryLink &&
           other.fromId == this.fromId &&
-          other.toId == this.toId);
+          other.toId == this.toId &&
+          other.manual == this.manual);
 }
 
 class EntryLinksCompanion extends UpdateCompanion<EntryLink> {
   final Value<String> fromId;
   final Value<String> toId;
+  final Value<bool> manual;
   final Value<int> rowid;
   const EntryLinksCompanion({
     this.fromId = const Value.absent(),
     this.toId = const Value.absent(),
+    this.manual = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   EntryLinksCompanion.insert({
     required String fromId,
     required String toId,
+    this.manual = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : fromId = Value(fromId),
        toId = Value(toId);
   static Insertable<EntryLink> custom({
     Expression<String>? fromId,
     Expression<String>? toId,
+    Expression<bool>? manual,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (fromId != null) 'from_id': fromId,
       if (toId != null) 'to_id': toId,
+      if (manual != null) 'manual': manual,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3936,11 +3985,13 @@ class EntryLinksCompanion extends UpdateCompanion<EntryLink> {
   EntryLinksCompanion copyWith({
     Value<String>? fromId,
     Value<String>? toId,
+    Value<bool>? manual,
     Value<int>? rowid,
   }) {
     return EntryLinksCompanion(
       fromId: fromId ?? this.fromId,
       toId: toId ?? this.toId,
+      manual: manual ?? this.manual,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3954,6 +4005,9 @@ class EntryLinksCompanion extends UpdateCompanion<EntryLink> {
     if (toId.present) {
       map['to_id'] = Variable<String>(toId.value);
     }
+    if (manual.present) {
+      map['manual'] = Variable<bool>(manual.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3965,6 +4019,7 @@ class EntryLinksCompanion extends UpdateCompanion<EntryLink> {
     return (StringBuffer('EntryLinksCompanion(')
           ..write('fromId: $fromId, ')
           ..write('toId: $toId, ')
+          ..write('manual: $manual, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7978,12 +8033,14 @@ typedef $$EntryLinksTableCreateCompanionBuilder =
     EntryLinksCompanion Function({
       required String fromId,
       required String toId,
+      Value<bool> manual,
       Value<int> rowid,
     });
 typedef $$EntryLinksTableUpdateCompanionBuilder =
     EntryLinksCompanion Function({
       Value<String> fromId,
       Value<String> toId,
+      Value<bool> manual,
       Value<int> rowid,
     });
 
@@ -8037,6 +8094,11 @@ class $$EntryLinksTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<bool> get manual => $composableBuilder(
+    column: $table.manual,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$EntriesTableFilterComposer get fromId {
     final $$EntriesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -8093,6 +8155,11 @@ class $$EntryLinksTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<bool> get manual => $composableBuilder(
+    column: $table.manual,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$EntriesTableOrderingComposer get fromId {
     final $$EntriesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -8149,6 +8216,9 @@ class $$EntryLinksTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<bool> get manual =>
+      $composableBuilder(column: $table.manual, builder: (column) => column);
+
   $$EntriesTableAnnotationComposer get fromId {
     final $$EntriesTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -8226,17 +8296,24 @@ class $$EntryLinksTableTableManager
               ({
                 Value<String> fromId = const Value.absent(),
                 Value<String> toId = const Value.absent(),
+                Value<bool> manual = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
-              }) =>
-                  EntryLinksCompanion(fromId: fromId, toId: toId, rowid: rowid),
+              }) => EntryLinksCompanion(
+                fromId: fromId,
+                toId: toId,
+                manual: manual,
+                rowid: rowid,
+              ),
           createCompanionCallback:
               ({
                 required String fromId,
                 required String toId,
+                Value<bool> manual = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EntryLinksCompanion.insert(
                 fromId: fromId,
                 toId: toId,
+                manual: manual,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -17,7 +17,7 @@ class EntryProperties extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// Wikilinks zwischen Entries
+/// Verknüpfungen zwischen Entries (Wikilinks UND manuelle Links)
 class EntryLinks extends Table {
   @ReferenceName('outgoingLinks')
   TextColumn get fromId =>
@@ -25,6 +25,10 @@ class EntryLinks extends Table {
   @ReferenceName('incomingLinks')
   TextColumn get toId =>
       text().references(Entries, #id, onDelete: KeyAction.cascade)();
+
+  /// true = manuell verknüpft (bleibt bei Body-Edits erhalten);
+  /// false = aus [[Wikilink]] abgeleitet (wird beim Reparse ersetzt).
+  BoolColumn get manual => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {fromId, toId};

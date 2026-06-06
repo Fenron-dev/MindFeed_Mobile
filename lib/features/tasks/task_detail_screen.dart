@@ -10,6 +10,7 @@ import '../../domain/recurrence_calculator.dart';
 import '../../features/entry_detail/entry_detail_provider.dart';
 import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable, subNotesProvider;
 import '../../widgets/app_shell.dart' show navigateToEntry, navigateToCapture, navigateToTask;
+import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'task_provider.dart' show subtasksByParentProvider;
 import 'widgets/recurrence_picker.dart';
@@ -781,6 +782,9 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
 
           // ─── Subtasks ────────────────────────────────────────────────
           _SubtaskSection(parentId: task.entry.id),
+
+          // ─── Manuelle Verknüpfungen ──────────────────────────────────
+          LinkedEntriesSection(entryId: task.entry.id),
         ],
       ),
     );

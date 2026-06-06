@@ -25,20 +25,39 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
         .write(EntriesCompanion(updatedAt: Value(DateTime.now().toUtc())));
   }
 
-  Future<void> upsertLink(String fromId, String toId) =>
+  Future<void> upsertLink(String fromId, String toId, {bool manual = false}) =>
       into(entryLinks).insertOnConflictUpdate(
-        EntryLinksCompanion(fromId: Value(fromId), toId: Value(toId)),
+        EntryLinksCompanion(
+            fromId: Value(fromId), toId: Value(toId), manual: Value(manual)),
       );
 
   Future<List<EntryLink>> getBacklinks(String entryId) =>
       (select(entryLinks)..where((l) => l.toId.equals(entryId))).get();
 
+  /// Ausgehende Verknüpfungen (Wikilink + manuell).
+  Future<List<EntryLink>> getOutgoingLinks(String fromId) =>
+      (select(entryLinks)..where((l) => l.fromId.equals(fromId))).get();
+
+  /// Ersetzt nur die aus [[Wikilinks]] abgeleiteten (manual=false) Links.
+  /// Manuelle Verknüpfungen bleiben erhalten.
   Future<void> setOutgoingLinks(String fromId, List<String> toIds) async {
-    await (delete(entryLinks)..where((l) => l.fromId.equals(fromId))).go();
+    await (delete(entryLinks)
+          ..where((l) => l.fromId.equals(fromId) & l.manual.equals(false)))
+        .go();
     for (final toId in toIds) {
       await upsertLink(fromId, toId);
     }
   }
+
+  /// Fügt eine manuelle, bidirektional auffindbare Verknüpfung hinzu.
+  Future<void> addManualLink(String fromId, String toId) =>
+      upsertLink(fromId, toId, manual: true);
+
+  /// Entfernt eine Verknüpfung (egal ob manuell oder Wikilink).
+  Future<void> removeLink(String fromId, String toId) =>
+      (delete(entryLinks)
+            ..where((l) => l.fromId.equals(fromId) & l.toId.equals(toId)))
+          .go();
 
   /// Alle eindeutigen Property-Keys (für Filter-UI)
   Future<List<String>> getUniqueKeys() async {
