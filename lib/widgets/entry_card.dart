@@ -625,20 +625,25 @@ class _DesktopPropChip extends StatelessWidget {
     final type = PropType.fromString(prop.type as String? ?? 'text');
     final val = prop.value as String? ?? '';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: MFColors.bg,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: MFColors.border),
+    return ConstrainedBox(
+      // Begrenzt die Chip-Breite, damit lange Werte (z.B. Zusammenfassung)
+      // per Ellipsis abgeschnitten werden statt über die Karte hinauszulaufen.
+      constraints: const BoxConstraints(maxWidth: 360),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: MFColors.bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: MFColors.border),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(type.icon, size: 10, color: type.color),
+          const SizedBox(width: 4),
+          Text('${prop.key}: ',
+              style: const TextStyle(fontSize: 11, color: MFColors.textMuted, fontFamily: 'monospace')),
+          Flexible(child: _renderValue(type, val)),
+        ]),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(type.icon, size: 10, color: type.color),
-        const SizedBox(width: 4),
-        Text('${prop.key}: ',
-            style: const TextStyle(fontSize: 11, color: MFColors.textMuted, fontFamily: 'monospace')),
-        _renderValue(type, val),
-      ]),
     );
   }
 
