@@ -77,6 +77,22 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
     return rows.map((r) => r.read<String>('key')).toList();
   }
 
+  /// Häufigster bereits verwendeter Typ für einen Property-Key (zum Vorbelegen).
+  Future<String?> getTypeForKey(String key) async {
+    final rows = await customSelect(
+      'SELECT type, COUNT(*) c FROM entry_properties '
+      'WHERE key = ? GROUP BY type ORDER BY c DESC LIMIT 1',
+      variables: [Variable.withString(key)],
+      readsFrom: {entryProperties},
+    ).get();
+    return rows.isEmpty ? null : rows.first.read<String>('type');
+  }
+
+  /// Ändert den Typ EINER Property für ALLE Einträge, die diesen Key haben.
+  Future<void> changeTypeForKey(String key, String newType) =>
+      (update(entryProperties)..where((p) => p.key.equals(key)))
+          .write(EntryPropertiesCompanion(type: Value(newType)));
+
   /// Bisher verwendete Werte für einen Property-Key (für Wert-Autovervollständigung).
   Future<List<String>> getDistinctValues(String key) async {
     final rows = await customSelect(

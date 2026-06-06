@@ -524,6 +524,7 @@ class _ValuePickerSheetState extends State<_ValuePickerSheet> {
         left: 16, right: 16, top: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
+      child: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -564,26 +565,21 @@ class _ValuePickerSheetState extends State<_ValuePickerSheet> {
             const Text('Vorschläge',
                 style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
             const SizedBox(height: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 180),
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 6, runSpacing: 6,
-                  children: filtered.map((s) => GestureDetector(
-                    onTap: () => Navigator.of(context).pop(s),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: MFColors.bg,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: MFColors.border),
-                      ),
-                      child: Text(s,
-                          style: const TextStyle(fontSize: 13, color: MFColors.textPrimary)),
-                    ),
-                  )).toList(),
+            Wrap(
+              spacing: 6, runSpacing: 6,
+              children: filtered.map((s) => GestureDetector(
+                onTap: () => Navigator.of(context).pop(s),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: MFColors.bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: MFColors.border),
+                  ),
+                  child: Text(s,
+                      style: const TextStyle(fontSize: 13, color: MFColors.textPrimary)),
                 ),
-              ),
+              )).toList(),
             ),
           ],
           const SizedBox(height: 14),
@@ -598,6 +594,7 @@ class _ValuePickerSheetState extends State<_ValuePickerSheet> {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -618,12 +615,23 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
   final _valCtrl = TextEditingController();
   PropType _type = PropType.text;
   String _keyQuery = '';
+  bool _typeManuallySet = false;
 
   @override
   void dispose() {
     _keyCtrl.dispose();
     _valCtrl.dispose();
     super.dispose();
+  }
+
+  /// Wenn der eingegebene Key bereits existiert, dessen Typ automatisch
+  /// vorbelegen (sofern der Nutzer den Typ nicht selbst geändert hat).
+  Future<void> _prefillTypeForKey(String key) async {
+    if (_typeManuallySet || key.trim().isEmpty) return;
+    final existing = await ref.read(propertyDaoProvider).getTypeForKey(key.trim());
+    if (!mounted || existing == null) return;
+    final t = PropType.fromString(existing);
+    if (t != _type) setState(() => _type = t);
   }
 
   Future<void> _submit() async {
@@ -648,6 +656,7 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
         left: 16, right: 16, top: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
+      child: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,7 +671,7 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
             children: PropType.values.where((t) => t != PropType.tags).map((t) {
               final sel = _type == t;
               return GestureDetector(
-                onTap: () => setState(() => _type = t),
+                onTap: () => setState(() { _type = t; _typeManuallySet = true; }),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
@@ -690,16 +699,17 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
             autofocus: true,
             style: const TextStyle(fontSize: 16, color: MFColors.textPrimary),
             decoration: _inputDeco('Schlüssel (z.B. Autor, Jahr…)'),
-            onChanged: (v) => setState(() => _keyQuery = v),
+            onChanged: (v) { setState(() => _keyQuery = v); _prefillTypeForKey(v); },
           ),
           if (keySuggestions.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 6, runSpacing: 6,
               children: keySuggestions.map((k) => GestureDetector(
-                onTap: () => setState(() {
-                  _keyCtrl.text = k; _keyQuery = k;
-                }),
+                onTap: () {
+                  setState(() { _keyCtrl.text = k; _keyQuery = k; });
+                  _prefillTypeForKey(k);
+                },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
@@ -736,6 +746,7 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

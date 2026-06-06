@@ -77,7 +77,10 @@ class _EntryPickerSheetState extends ConsumerState<_EntryPickerSheet> {
         left: 16, right: 16, top: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
-      child: Column(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.7),
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -113,9 +116,7 @@ class _EntryPickerSheetState extends ConsumerState<_EntryPickerSheet> {
             onChanged: _onChanged,
           ),
           const SizedBox(height: 12),
-          ConstrainedBox(
-            constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.5),
+          Flexible(
             child: _loading
                 ? const Padding(
                     padding: EdgeInsets.all(24),
@@ -155,6 +156,7 @@ class _EntryPickerSheetState extends ConsumerState<_EntryPickerSheet> {
                       ),
           ),
         ],
+      ),
       ),
     );
   }
