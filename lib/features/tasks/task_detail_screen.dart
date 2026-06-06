@@ -257,6 +257,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                 type: 'text');
           }
         }
+        // Push-Erinnerung an neues Fälligkeitsdatum anpassen
+        await repo.syncTaskNotification(existing.entry.id);
         setState(() => _isEditing = false);
       }
     } finally {
@@ -282,12 +284,31 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
         child: child!,
       ),
     );
-    if (picked != null) {
-      setState(() {
-        _localDueDate = picked;
-        _dueDateWasCleared = false;
-      });
-    }
+    if (picked == null || !mounted) return;
+
+    // Uhrzeit wählen → ermöglicht Push-Erinnerung zum Fälligkeitszeitpunkt
+    final time = await showTimePicker(
+      context: context,
+      initialTime: current != null && (current.hour != 0 || current.minute != 0)
+          ? TimeOfDay.fromDateTime(current)
+          : const TimeOfDay(hour: 9, minute: 0),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: MFColors.teal,
+            surface: MFColors.surface,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    final result = time == null
+        ? DateTime(picked.year, picked.month, picked.day)
+        : DateTime(picked.year, picked.month, picked.day, time.hour, time.minute);
+    setState(() {
+      _localDueDate = result;
+      _dueDateWasCleared = false;
+    });
   }
 
   void _clearDueDate() {
@@ -948,12 +969,17 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final d = DateTime(dt.year, dt.month, dt.day);
-    if (d.isAtSameMomentAs(today)) return 'Heute';
-    if (d.isAtSameMomentAs(today.add(const Duration(days: 1)))) return 'Morgen';
+    // Uhrzeit anhängen, wenn gesetzt (nicht Mitternacht)
+    final hasTime = dt.hour != 0 || dt.minute != 0;
+    final time = hasTime
+        ? ' ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'
+        : '';
+    if (d.isAtSameMomentAs(today)) return 'Heute$time';
+    if (d.isAtSameMomentAs(today.add(const Duration(days: 1)))) return 'Morgen$time';
     if (d.isAtSameMomentAs(today.subtract(const Duration(days: 1)))) {
-      return 'Gestern';
+      return 'Gestern$time';
     }
-    return '${dt.day}.${dt.month}.${dt.year}';
+    return '${dt.day}.${dt.month}.${dt.year}$time';
   }
 
   static String _formatDateTime(String iso) {

@@ -11,6 +11,7 @@ import '../../domain/tag_parser.dart';
 import '../../domain/task_parser.dart';
 import '../../domain/recurrence_calculator.dart';
 import '../../domain/wikilink_parser.dart';
+import '../../services/notification_service.dart';
 
 const _uuid = Uuid();
 
@@ -417,6 +418,8 @@ class EntryRepository {
   Future<void> deleteEntry(String id) async {
     final logId = await _logChange(id, 'delete', 'In den Papierkorb verschoben');
     await entryDao.softDelete(id);
+    // Geplante Erinnerung entfernen
+    await NotificationService.cancel(NotificationService.idFromEntryId(id));
     await _finalizeLog(logId, id);
   }
 
@@ -637,6 +640,9 @@ class EntryRepository {
       await entryDao.setContainers(id, containerIds);
     }
 
+    // Push-Erinnerung planen, falls Fälligkeitsdatum in der Zukunft liegt
+    if (dueAt != null) await syncTaskNotification(id);
+
     return (await getById(id))!;
   }
 
@@ -687,6 +693,9 @@ class EntryRepository {
         }
       }
     }
+
+    // Erinnerung aktualisieren: erledigt → löschen, wieder geöffnet → ggf. neu planen
+    await syncTaskNotification(id);
 
     await _finalizeLog(logId, id);
   }
@@ -756,6 +765,30 @@ class EntryRepository {
       if (currentDue == null || rowDue == null || !rowDue.isBefore(currentDue)) {
         await deleteEntry(rowId);
       }
+    }
+  }
+
+  /// Plant oder löscht die Push-Erinnerung für einen Task anhand seines
+  /// Fälligkeitsdatums (reminderAt) und Status. Offen + zukünftig → planen,
+  /// sonst → vorhandene Erinnerung löschen.
+  Future<void> syncTaskNotification(String id) async {
+    final e = await entryDao.getById(id);
+    final notifId = NotificationService.idFromEntryId(id);
+    if (e == null || e.type != 'task') {
+      await NotificationService.cancel(notifId);
+      return;
+    }
+    final due = e.reminderAt?.toLocal();
+    final active = e.status != 'done' && e.status != 'archived';
+    if (due != null && active && due.isAfter(DateTime.now())) {
+      await NotificationService.schedule(
+        id: notifId,
+        title: 'Aufgabe fällig',
+        body: e.title ?? e.body,
+        when: due,
+      );
+    } else {
+      await NotificationService.cancel(notifId);
     }
   }
 
