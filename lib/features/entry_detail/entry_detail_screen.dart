@@ -2588,9 +2588,11 @@ class _CheckTile extends StatelessWidget {
               visualDensity: VisualDensity.compact,
             ),
             const SizedBox(width: 6),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: MFColors.textPrimary)),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 13, color: MFColors.textPrimary)),
+            ),
           ]),
         ),
       );

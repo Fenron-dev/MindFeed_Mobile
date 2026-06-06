@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
@@ -192,7 +193,9 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
     widget.shell.goBranch(index);
   }
 
-  void _handleSwipeBack() {
+  /// Geht einen Schritt zurück: schließt das oberste Overlay bzw. poppt die
+  /// Route. Wird von der Zwei-Finger-Swipe-Geste UND der ESC-Taste genutzt.
+  void _handleBack() {
     // Capture → Entry → Container → Router-Pop
     if (ref.read(desktopCaptureProvider) != null) {
       ref.read(desktopCaptureProvider.notifier).state = null;
@@ -223,7 +226,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
     // Threshold: 120px akkumuliert → Swipe erkannt
     if (_swipeAccX.abs() > 120) {
       // dx > 0: Finger von rechts nach links (natural scroll) → zurück
-      if (_swipeAccX > 0) _handleSwipeBack();
+      if (_swipeAccX > 0) _handleBack();
       _swipeAccX = 0;
     }
   }
@@ -269,7 +272,14 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
       mainContent = widget.shell;
     }
 
-    return Scaffold(
+    return FocusScope(
+      autofocus: true,
+      child: CallbackShortcuts(
+        bindings: {
+          // ESC = zurück/abbrechen (wie in Desktop-Apps üblich)
+          const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
+        },
+        child: Scaffold(
       key: appScaffoldKey,
       drawer: pinned
           ? null
@@ -313,6 +323,8 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
             ),
           ),
         ],
+      ),
+        ),
       ),
     );
   }
