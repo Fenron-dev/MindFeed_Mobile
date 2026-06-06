@@ -25,6 +25,12 @@ class PropertyDao extends DatabaseAccessor<AppDatabase> with _$PropertyDaoMixin 
         .write(EntriesCompanion(updatedAt: Value(DateTime.now().toUtc())));
   }
 
+  /// Aktualisiert nur den Wert EINER Property-Zeile (in-place, ohne alle
+  /// Properties zu löschen/neu zu schreiben) → vermeidet schwere Rebuilds.
+  Future<void> updateValue(String propId, String? value) =>
+      (update(entryProperties)..where((p) => p.id.equals(propId)))
+          .write(EntryPropertiesCompanion(value: Value(value)));
+
   Future<void> upsertLink(String fromId, String toId, {bool manual = false}) =>
       into(entryLinks).insertOnConflictUpdate(
         EntryLinksCompanion(

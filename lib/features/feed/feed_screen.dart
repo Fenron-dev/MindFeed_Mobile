@@ -29,6 +29,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   final _scrollController = ScrollController();
   // 'view_list' | 'view_cards' | 'view_grid'
   String _viewMode = 'view_cards';
+  // Kachelgröße (max. Spaltenbreite) der Thumbnail-Ansicht
+  double _gridTileSize = AppSettings.getGridTileSize();
   // 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc'
   String _sortBy = 'date_desc';
   int _filterIndex = 0; // 0=Alle 1=Inbox 2=Angeheftet
@@ -64,6 +66,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _setGridTileSize(double size) {
+    final clamped = size.clamp(110.0, 320.0);
+    setState(() => _gridTileSize = clamped);
+    AppSettings.saveGridTileSize(clamped);
   }
 
   void _onMenuAction(String value) {
@@ -214,6 +222,21 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               ),
             ),
             actions: [
+              // Zoom-Steuerung nur in der Thumbnail-Ansicht
+              if (_viewMode == 'view_grid') ...[
+                IconButton(
+                  icon: const Icon(Icons.zoom_out_rounded,
+                      color: MFColors.textSecondary, size: 20),
+                  tooltip: 'Kacheln größer',
+                  onPressed: () => _setGridTileSize(_gridTileSize + 40),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.zoom_in_rounded,
+                      color: MFColors.textSecondary, size: 20),
+                  tooltip: 'Kacheln kleiner',
+                  onPressed: () => _setGridTileSize(_gridTileSize - 40),
+                ),
+              ],
               // Sync-Status-Button
               _SyncStatusButton(),
               // Filter-Button (leuchtet wenn aktiv)
@@ -288,12 +311,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 return SliverPadding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
                   sliver: SliverGrid(
+                    // Responsive: Kachelbreite skalierbar (_gridTileSize),
+                    // Spaltenzahl ergibt sich aus der Fensterbreite.
                     gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
+                        SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: _gridTileSize,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
-                      childAspectRatio: 0.8,
+                      childAspectRatio: 0.78,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (ctx, i) => _GridCard(

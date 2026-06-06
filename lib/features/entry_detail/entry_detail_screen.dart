@@ -1168,18 +1168,10 @@ class _EditablePropValueState extends ConsumerState<_EditablePropValue> {
   }
 
   Future<void> _saveValue(String newValue) async {
-    final allProps =
-        await ref.read(propertyDaoProvider).watchByEntry(widget.entryId).first;
-    final updated = allProps
-        .map((p) => EntryPropertiesCompanion(
-              id: drift.Value(p.id),
-              entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key),
-              value: drift.Value(p.id == widget.prop.id ? newValue : p.value),
-              type: drift.Value(p.type),
-            ))
-        .toList();
-    await ref.read(entryRepositoryProvider).setEntryProperties(widget.entryId, updated);
+    // In-place: nur diese eine Property-Zeile aktualisieren → kein Rebuild
+    // der ganzen Liste, kein Scroll-Sprung.
+    await ref.read(entryRepositoryProvider)
+        .setPropertyValue(widget.entryId, widget.prop.id, newValue);
     if (mounted) setState(() => _editing = false);
   }
 

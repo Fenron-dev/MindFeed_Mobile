@@ -550,6 +550,13 @@ class AppSettings {
   static Future<void> saveSyncEnabled(bool v) async =>
       _prefs?.setBool('sync_enabled', v);
 
+  /// Kachelgröße der Thumbnail-Ansicht (max. Spaltenbreite in px).
+  static double getGridTileSize() =>
+      _prefs?.getDouble('grid_tile_size') ?? 170;
+
+  static Future<void> saveGridTileSize(double v) async =>
+      _prefs?.setDouble('grid_tile_size', v);
+
   /// Aufgaben-Sektion in Notiz-Details anzeigen (verlinkte Tasks). Default: an.
   static bool getShowTasksInNotes() =>
       _prefs?.getBool('show_tasks_in_notes') ?? true;

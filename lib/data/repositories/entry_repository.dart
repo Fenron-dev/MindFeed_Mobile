@@ -414,6 +414,16 @@ class EntryRepository {
     await _finalizeLog(logId, entryId);
   }
 
+  /// Aktualisiert genau eine Property in-place (für Toggle/Rating/Wert-Edit).
+  /// Kein Lösch-/Neu-Schreiben aller Properties → kein Scroll-Sprung, kein
+  /// Changelog-Spam. Touch der updatedAt für Sync.
+  Future<void> setPropertyValue(
+      String entryId, String propId, String? value) async {
+    await propertyDao.updateValue(propId, value);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
   /// Verschiebt Eintrag in den Papierkorb (Soft-Delete, Tombstone für Sync).
   Future<void> deleteEntry(String id) async {
     final logId = await _logChange(id, 'delete', 'In den Papierkorb verschoben');

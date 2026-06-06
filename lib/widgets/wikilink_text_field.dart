@@ -42,12 +42,39 @@ class WikilinkTextField extends ConsumerStatefulWidget {
 
 class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
   final _link = LayerLink();
+  final _fieldKey = GlobalKey();
   final _portal = OverlayPortalController();
   Timer? _debounce;
   List<EntryWithDetails> _suggestions = [];
   bool _loading = false;
   String? _partial;
   int _highlight = 0;
+  Offset _caretOffset = Offset.zero;
+
+  /// Berechnet die Cursor-Position (relativ zur Feld-Oberkante) via TextPainter,
+  /// damit das Dropdown direkt unter der Eingabestelle erscheint statt am Rand.
+  void _updateCaretOffset() {
+    final rb = _fieldKey.currentContext?.findRenderObject() as RenderBox?;
+    final width = rb?.size.width ?? 300.0;
+    final text = widget.controller.text;
+    final cursor = widget.controller.selection.baseOffset;
+    final upto = cursor < 0 ? text : text.substring(0, cursor.clamp(0, text.length));
+    final style = widget.style ?? const TextStyle(fontSize: 15);
+    final tp = TextPainter(
+      text: TextSpan(text: upto, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: null,
+    )..layout(maxWidth: width);
+    final caret = tp.getOffsetForCaret(
+        TextPosition(offset: upto.length), Rect.zero);
+    final lineH = (style.fontSize ?? 15) * (style.height ?? 1.4);
+    // dy auf Feldhöhe begrenzen, damit das Popup im Feldbereich bleibt
+    final maxDy = (rb?.size.height ?? 400) - 8;
+    _caretOffset = Offset(
+      caret.dx.clamp(0, width - 40),
+      (caret.dy + lineH + 4).clamp(0, maxDy),
+    );
+  }
 
   @override
   void initState() {
@@ -87,6 +114,7 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
     if (ctx.partial == _partial && _portal.isShowing) return;
     _partial = ctx.partial;
     _highlight = 0;
+    _updateCaretOffset();
     setState(() => _loading = true);
     if (!_portal.isShowing) _portal.show();
 
@@ -136,9 +164,9 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
       overlayChildBuilder: (context) {
         return CompositedTransformFollower(
           link: _link,
-          targetAnchor: Alignment.bottomLeft,
+          targetAnchor: Alignment.topLeft,
           followerAnchor: Alignment.topLeft,
-          offset: const Offset(0, 4),
+          offset: _caretOffset,
           child: Align(
             alignment: Alignment.topLeft,
             child: _SuggestionList(
@@ -153,6 +181,7 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
       child: CompositedTransformTarget(
         link: _link,
         child: TextField(
+          key: _fieldKey,
           controller: widget.controller,
           focusNode: widget.focusNode,
           decoration: widget.decoration,
