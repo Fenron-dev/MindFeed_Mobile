@@ -64,10 +64,10 @@ class EntryRepository {
       // try-catch hält den Stream am Leben: eine transiente Exception würde
       // ihn sonst beenden → UI aktualisiert erst nach App-Neustart wieder.
       try {
-        final ids = rows.map((r) => r.read<String>('id')).toList();
-        final entryList = await Future.wait(ids.map(entryDao.getById));
-        final filtered = entryList
-            .whereType<Entry>()
+        // Rows enthalten bereits alle Entry-Spalten (SELECT *) → direkt mappen
+        // statt N× getById (vermeidet N+1).
+        final filtered = rows
+            .map((r) => Entry.fromJson(r.data))
             .where((e) => e.status != 'sub_note' && e.deletedAt == null)
             .toList();
         lastGood = await _bulkEnrich(filtered);
@@ -94,9 +94,8 @@ class EntryRepository {
       variables: [Variable.withString(noteId)],
       readsFrom: {db.entries, db.entryProperties},
     ).watch().asyncMap((rows) async {
-      final ids = rows.map((r) => r.read<String>('id')).toList();
-      final list = await Future.wait(ids.map(entryDao.getById));
-      return _bulkEnrich(list.whereType<Entry>().toList());
+      final entries = rows.map((r) => Entry.fromJson(r.data)).toList();
+      return _bulkEnrich(entries);
     });
   }
 
@@ -152,13 +151,11 @@ class EntryRepository {
         db.entryTags, db.entryContainers,
       },
     ).watch().asyncMap((rows) async {
-      final ids = rows.map((r) => r.read<String>('id')).toList();
-      final entryList = await Future.wait(ids.map(entryDao.getById));
-      final filtered = entryList
-          .whereType<Entry>()
+      final entries = rows
+          .map((r) => Entry.fromJson(r.data))
           .where((e) => e.deletedAt == null)
           .toList();
-      return _bulkEnrich(filtered);
+      return _bulkEnrich(entries);
     });
   }
 
@@ -175,12 +172,8 @@ class EntryRepository {
       variables: [Variable.withString(parentEntryId)],
       readsFrom: {db.entries, db.entryProperties},
     ).watch().asyncMap((rows) async {
-      final list = await Future.wait(rows.map((r) async {
-        final id = r.read<String>('id');
-        final e = await entryDao.getById(id);
-        return e;
-      }));
-      return _bulkEnrich(list.whereType<Entry>().toList());
+      final entries = rows.map((r) => Entry.fromJson(r.data)).toList();
+      return _bulkEnrich(entries);
     });
   }
 
@@ -839,39 +832,68 @@ class EntryRepository {
     return enriched.first;
   }
 
+  // Echte Bulk-Queries (eine Query pro Tabelle via WHERE IN), statt N+1.
+  // Wichtig: KEINE .watch().first-Streams — die würden pro Eintrag eine
+  // Drift-Query-Stream-Subscription erzeugen und bei jeder DB-Änderung neu
+  // feuern → das hat den Feed eingefroren.
+
   Future<Map<String, List<String>>> _bulkTags(List<String> ids) async {
-    final result = <String, List<String>>{};
-    for (final id in ids) {
-      result[id] = await tagDao.getTagNamesForEntry(id);
+    final result = {for (final id in ids) id: <String>[]};
+    if (ids.isEmpty) return result;
+    final rows = await db.customSelect(
+      'SELECT et.entry_id AS eid, t.name AS name '
+      'FROM entry_tags et INNER JOIN tags t ON t.id = et.tag_id '
+      'WHERE et.entry_id IN (${_placeholders(ids)})',
+      variables: ids.map(Variable.withString).toList(),
+      readsFrom: {db.entryTags, db.tags},
+    ).get();
+    for (final r in rows) {
+      result[r.read<String>('eid')]?.add(r.read<String>('name'));
     }
     return result;
   }
 
   Future<Map<String, List<EntryProperty>>> _bulkProperties(
       List<String> ids) async {
-    final result = <String, List<EntryProperty>>{};
-    for (final id in ids) {
-      result[id] = await propertyDao.watchByEntry(id).first;
+    final result = {for (final id in ids) id: <EntryProperty>[]};
+    if (ids.isEmpty) return result;
+    final rows = await (db.select(db.entryProperties)
+          ..where((p) => p.entryId.isIn(ids)))
+        .get();
+    for (final p in rows) {
+      result[p.entryId]?.add(p);
     }
     return result;
   }
 
   Future<Map<String, List<Attachment>>> _bulkAttachments(
       List<String> ids) async {
-    final result = <String, List<Attachment>>{};
-    for (final id in ids) {
-      result[id] = await attachmentDao.watchByEntry(id).first;
+    final result = {for (final id in ids) id: <Attachment>[]};
+    if (ids.isEmpty) return result;
+    final rows = await (db.select(db.attachments)
+          ..where((a) => a.entryId.isIn(ids))
+          ..orderBy([(a) => OrderingTerm.asc(a.createdAt)]))
+        .get();
+    for (final a in rows) {
+      result[a.entryId]?.add(a);
     }
     return result;
   }
 
   Future<Map<String, List<String>>> _bulkContainers(List<String> ids) async {
-    final result = <String, List<String>>{};
-    for (final id in ids) {
-      result[id] = await entryDao.getContainerIds(id);
+    final result = {for (final id in ids) id: <String>[]};
+    if (ids.isEmpty) return result;
+    final rows = await (db.select(db.entryContainers)
+          ..where((ec) => ec.entryId.isIn(ids)))
+        .get();
+    for (final ec in rows) {
+      result[ec.entryId]?.add(ec.containerId);
     }
     return result;
   }
+
+  static String _placeholders(List<String> ids) =>
+      List.filled(ids.length, '?').join(', ');
 
 }
 

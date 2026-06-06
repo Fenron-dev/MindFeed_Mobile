@@ -100,7 +100,10 @@ class EntryCard extends StatelessWidget {
     }
 
     // Desktop bekommt ein breiteres AniList-ähnliches Layout
-    if (_isDesktop) return _DesktopCard(item: item, onTap: onTap, onLongPress: onLongPress);
+    if (_isDesktop) {
+      return _DesktopCard(
+          item: item, onTap: onTap, onLongPress: onLongPress, onToggleTask: onToggleTask);
+    }
 
     // ── Mobile Layout ──────────────────────────────────────────────────────
     final coverUrl = item.properties
@@ -130,15 +133,21 @@ class EntryCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (entry.type == 'task') ...[
+                _TaskCheckbox(isDone: isDone, onToggle: onToggleTask),
+                const SizedBox(width: 10),
+              ],
               if (coverUrl != null || coverLocalPath != null) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: coverUrl != null
                       ? Image.network(coverUrl,
                           width: 56, height: 72, fit: BoxFit.cover,
+                          cacheWidth: 112,
                           errorBuilder: (_, __, ___) => const SizedBox.shrink())
                       : Image.file(File(coverLocalPath!),
                           width: 56, height: 72, fit: BoxFit.cover,
+                          cacheWidth: 112,
                           errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                 ),
                 const SizedBox(width: 10),
@@ -212,8 +221,9 @@ class _DesktopCard extends StatelessWidget {
   final EntryWithDetails item;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onToggleTask;
 
-  const _DesktopCard({required this.item, required this.onTap, this.onLongPress});
+  const _DesktopCard({required this.item, required this.onTap, this.onLongPress, this.onToggleTask});
 
   @override
   Widget build(BuildContext context) {
@@ -267,6 +277,10 @@ class _DesktopCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (entry.type == 'task') ...[
+                _TaskCheckbox(isDone: isDone, onToggle: onToggleTask),
+                const SizedBox(width: 12),
+              ],
               // ── Cover-Bild (größer auf Desktop) ──────────────────────────
               if (hasCover) ...[
                 ClipRRect(
@@ -274,9 +288,11 @@ class _DesktopCard extends StatelessWidget {
                   child: coverUrl != null
                       ? Image.network(coverUrl,
                           width: 72, height: 96, fit: BoxFit.cover,
+                          cacheWidth: 144,
                           errorBuilder: (_, __, ___) => const SizedBox.shrink())
                       : Image.file(File(coverLocalPath!),
                           width: 72, height: 96, fit: BoxFit.cover,
+                          cacheWidth: 144,
                           errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                 ),
                 const SizedBox(width: 14),
@@ -355,6 +371,31 @@ class _DesktopCard extends StatelessWidget {
 }
 
 // ─── Kleine Subwidgets ────────────────────────────────────────────────────────
+
+// Klickbare Task-Checkbox für die Feed-Karten
+class _TaskCheckbox extends StatelessWidget {
+  final bool isDone;
+  final VoidCallback? onToggle;
+  const _TaskCheckbox({required this.isDone, this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onToggle,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 1),
+        child: Icon(
+          isDone
+              ? Icons.check_circle_rounded
+              : Icons.radio_button_unchecked_rounded,
+          size: 22,
+          color: isDone ? MFColors.teal : MFColors.textMuted,
+        ),
+      ),
+    );
+  }
+}
 
 class _TypeIcon extends StatelessWidget {
   final String type;
@@ -457,7 +498,7 @@ class _PropertiesRow extends StatelessWidget {
   const _PropertiesRow(this.properties);
 
   static const _excludedPrefixes = [
-    'og_', 'bgg_', 'anilist_', 'github_', 'youtube_', 'vgg_', 'rpg_',
+    'og_', 'bgg_', 'anilist_', 'github_', 'youtube_', 'vgg_', 'rpg_', 'task_',
   ];
   static const _excludedExact = {
     'cover_image', 'cover', 'bild', 'genres', 'media_type', 'domain',

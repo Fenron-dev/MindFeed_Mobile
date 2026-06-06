@@ -2174,6 +2174,7 @@ class _ImageTile extends StatelessWidget {
               height: 120,
               width: 120,
               fit: BoxFit.cover,
+              cacheWidth: 240,
               errorBuilder: (_, __, ___) => Container(
                 height: 60, width: 60,
                 color: MFColors.surface,

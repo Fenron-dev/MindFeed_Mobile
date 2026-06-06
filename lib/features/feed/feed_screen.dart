@@ -132,6 +132,39 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return result;
   }
 
+  /// Ordnet die Liste so um, dass Subtasks direkt unter ihrem Parent-Task
+  /// stehen (eingerückt). Gibt die neue Reihenfolge + Set der Subtask-IDs zurück.
+  /// Subtasks deren Parent nicht sichtbar ist, bleiben als normale Einträge.
+  (List<EntryWithDetails>, Set<String>) _groupSubtasks(
+      List<EntryWithDetails> entries) {
+    final byId = {for (final e in entries) e.entry.id: e};
+    final childrenOf = <String, List<EntryWithDetails>>{};
+    final subtaskIds = <String>{};
+    final topLevel = <EntryWithDetails>[];
+
+    for (final e in entries) {
+      final parentId = e.properties
+          .where((p) => p.key == 'parent_entry_id')
+          .firstOrNull
+          ?.value;
+      if (parentId != null && parentId.isNotEmpty && byId.containsKey(parentId)) {
+        childrenOf.putIfAbsent(parentId, () => []).add(e);
+        subtaskIds.add(e.entry.id);
+      } else {
+        topLevel.add(e);
+      }
+    }
+    if (subtaskIds.isEmpty) return (entries, const <String>{});
+
+    final result = <EntryWithDetails>[];
+    for (final e in topLevel) {
+      result.add(e);
+      final kids = childrenOf[e.entry.id];
+      if (kids != null) result.addAll(kids);
+    }
+    return (result, subtaskIds);
+  }
+
   String get _sortDateLabel => _sortBy == 'date_asc'
       ? 'Datum ↑ (älteste zuerst)'
       : 'Datum ↓ (neueste zuerst)';
@@ -238,9 +271,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       style: const TextStyle(color: Colors.red))),
             ),
             data: (allEntries) {
-              final entries = _filterAndSort(allEntries, filter)
+              final flat = _filterAndSort(allEntries, filter)
                   .where((e) => !_dismissedIds.contains(e.entry.id))
                   .toList();
+              // Subtasks unter ihren Parent einsortieren (außer Grid-Ansicht)
+              final (entries, subtaskIds) = _viewMode == 'view_grid'
+                  ? (flat, const <String>{})
+                  : _groupSubtasks(flat);
               if (entries.isEmpty) {
                 return SliverFillRemaining(
                   child: _EmptyFeed(
@@ -277,7 +314,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (ctx, i) {
                     final item = entries[i];
-                    return Dismissible(
+                    final isSubtask = subtaskIds.contains(item.entry.id);
+                    return Padding(
+                      padding: EdgeInsets.only(left: isSubtask ? 24 : 0),
+                      child: Dismissible(
                       key: ValueKey(item.entry.id),
                       // Rechts wischen → Erledigt
                       background: _SwipeBg(
@@ -342,6 +382,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                             ? () => ref.read(entryRepositoryProvider).toggleTaskStatus(item.entry.id)
                             : null,
                       ),
+                    ),
                     );
                   },
                 ),
@@ -840,6 +881,7 @@ class _GridCard extends StatelessWidget {
                       width: double.infinity,
                       height: 90,
                       fit: BoxFit.cover,
+                      cacheHeight: 180,
                       errorBuilder: (_, __, ___) => _placeholder(entry.type),
                     )
                   : coverLocalPath != null
@@ -848,6 +890,7 @@ class _GridCard extends StatelessWidget {
                           width: double.infinity,
                           height: 90,
                           fit: BoxFit.cover,
+                          cacheHeight: 180,
                           errorBuilder: (_, __, ___) => _placeholder(entry.type),
                         )
                       : _placeholder(entry.type),
