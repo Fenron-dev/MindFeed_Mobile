@@ -211,16 +211,21 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
   double _swipeAccX = 0;
   DateTime? _lastSwipeEvent;
 
-  // HardwareKeyboard-Handler für globale Desktop-Shortcuts
+  // HardwareKeyboard-Handler für globale Desktop-Shortcuts.
+  // Setzt Provider direkt statt navigateToCapture zu nutzen → kein context.push-Risiko.
   bool _onHwKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
-    final isMac = Platform.isMacOS;
-    final modifier = isMac
+    final mod = Platform.isMacOS
         ? HardwareKeyboard.instance.isMetaPressed
         : HardwareKeyboard.instance.isControlPressed;
-    if (!modifier) return false;
+    if (!mod) return false;
+
     if (event.logicalKey == LogicalKeyboardKey.keyN) {
-      navigateToCapture(context, ref);
+      // Alle anderen Overlays schließen, dann Capture inline öffnen
+      ref.read(desktopSelectedEntryProvider.notifier).state = null;
+      ref.read(desktopSelectedTaskProvider.notifier).state = null;
+      ref.read(desktopSelectedContainerProvider.notifier).state = null;
+      ref.read(desktopCaptureProvider.notifier).state = const _CaptureArgs();
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.keyT) {
@@ -346,19 +351,8 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
       autofocus: true,
       child: CallbackShortcuts(
         bindings: {
-          // ESC = zurück/abbrechen (wie in Desktop-Apps üblich)
+          // ESC = zurück/abbrechen (Cmd+N/Cmd+T laufen via HardwareKeyboard-Handler)
           const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
-          // Cmd+T = Neuer Task (inline im rechten Frame)
-          SingleActivator(LogicalKeyboardKey.keyT, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
-            ref.read(desktopCaptureProvider.notifier).state = null;
-            ref.read(desktopSelectedEntryProvider.notifier).state = null;
-            ref.read(desktopSelectedTaskProvider.notifier).state = 'new';
-            widget.shell.goBranch(1); // Tasks-Tab
-          },
-          // Cmd+N = Neuer Eintrag (bestehender Shortcut, explizit dokumentiert)
-          SingleActivator(LogicalKeyboardKey.keyN, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
-            navigateToCapture(context, ref);
-          },
         },
         child: Scaffold(
       key: appScaffoldKey,

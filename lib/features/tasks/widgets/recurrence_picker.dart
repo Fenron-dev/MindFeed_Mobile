@@ -167,8 +167,10 @@ class _RecurrencePickerState extends State<_RecurrencePicker> {
                 style: const TextStyle(fontSize: 14, color: MFColors.textSecondary)),
           ]),
 
-          // ── Wochentage (nur bei WEEKLY)
-          if (_freq == RecurrenceFrequency.weekly) ...[
+          // ── Wochentage (bei WEEKLY, HOURLY und MINUTELY)
+          if (_freq == RecurrenceFrequency.weekly ||
+              _freq == RecurrenceFrequency.hourly ||
+              _freq == RecurrenceFrequency.minutely) ...[
             const SizedBox(height: 16),
             const Text('An welchen Tagen?',
                 style: TextStyle(fontSize: 12, color: MFColors.textMuted)),

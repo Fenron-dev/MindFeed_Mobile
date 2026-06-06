@@ -50,9 +50,11 @@ class RecurrenceRule {
     final ivLabel = interval > 1 ? 'Alle $interval ' : '';
     switch (frequency) {
       case RecurrenceFrequency.minutely:
-        return interval == 1 ? 'Jede Minute' : 'Alle $interval Minuten';
+        final mDays = weekdays.isEmpty ? '' : ' (${weekdays.map(_dayName).join(', ')})';
+        return interval == 1 ? 'Jede Minute$mDays' : 'Alle $interval Minuten$mDays';
       case RecurrenceFrequency.hourly:
-        return interval == 1 ? 'Stündlich' : 'Alle $interval Stunden';
+        final hDays = weekdays.isEmpty ? '' : ' (${weekdays.map(_dayName).join(', ')})';
+        return interval == 1 ? 'Stündlich$hDays' : 'Alle $interval Stunden$hDays';
       case RecurrenceFrequency.daily:
         return interval == 1 ? 'Täglich' : '${ivLabel}Tage';
       case RecurrenceFrequency.weekly:

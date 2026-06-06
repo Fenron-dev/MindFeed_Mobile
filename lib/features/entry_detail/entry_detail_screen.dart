@@ -20,7 +20,7 @@ import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
-import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry;
+import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
 import 'entry_detail_provider.dart';
 
@@ -740,7 +740,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                                   title.toLowerCase())
                               .firstOrNull;
                           if (found != null && mounted) {
-                            navigateToEntry(context, ref, found.entry.id);
+                            if (found.entry.type == 'task') {
+                              navigateToTask(context, ref, found.entry.id);
+                            } else {
+                              navigateToEntry(context, ref, found.entry.id);
+                            }
                           }
                         },
                       ),
@@ -2499,7 +2503,9 @@ class _BacklinksSection extends ConsumerWidget {
                   child: EntryCard(
                     item: bl,
                     compact: true,
-                    onTap: () => navigateToEntry(context, ref, bl.entry.id),
+                    onTap: () => bl.entry.type == 'task'
+                        ? navigateToTask(context, ref, bl.entry.id)
+                        : navigateToEntry(context, ref, bl.entry.id),
                   ),
                 )),
           ],

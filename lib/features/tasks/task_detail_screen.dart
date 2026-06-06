@@ -1033,7 +1033,7 @@ class _TaskSubNotesSection extends ConsumerWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              note.entry.title ?? note.entry.body,
+                              note.entry.title ?? _cleanPreview(note.entry.body),
                               style: const TextStyle(
                                   fontSize: 13, color: MFColors.textPrimary),
                               maxLines: 1,
@@ -1088,6 +1088,40 @@ class _SubtaskSectionState extends ConsumerState<_SubtaskSection> {
     }
   }
 
+  Widget _buildAddRow() => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(children: [
+          const Icon(Icons.radio_button_unchecked_rounded,
+              size: 18, color: MFColors.border),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: _addCtrl,
+              style: const TextStyle(fontSize: 14, color: MFColors.textPrimary),
+              decoration: const InputDecoration(
+                hintText: 'Teilaufgabe hinzufügen…',
+                hintStyle: TextStyle(fontSize: 14, color: MFColors.textMuted),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+              ),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _addSubtask(),
+            ),
+          ),
+          if (_adding)
+            const SizedBox(width: 14, height: 14,
+                child: CircularProgressIndicator(strokeWidth: 1.5, color: MFColors.teal))
+          else
+            GestureDetector(
+              onTap: _addSubtask,
+              child: const Icon(Icons.add_circle_outline_rounded,
+                  size: 18, color: MFColors.teal),
+            ),
+        ]),
+      );
+
+  @override
   Widget build(BuildContext context) {
     final subtasksAsync = ref.watch(subtasksByParentProvider(widget.parentId));
 
@@ -1098,7 +1132,10 @@ class _SubtaskSectionState extends ConsumerState<_SubtaskSection> {
         final taskSubtasks = subtasks
             .where((s) => s.entry.type == 'task')
             .toList();
-        if (taskSubtasks.isEmpty) return const SizedBox.shrink();
+        if (taskSubtasks.isEmpty) {
+          // Nur Quick-Add anzeigen
+          return _buildAddRow();
+        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1155,44 +1192,22 @@ class _SubtaskSectionState extends ConsumerState<_SubtaskSection> {
             }),
             // Quick-Add Teilaufgabe
             const SizedBox(height: 6),
-            Row(children: [
-              const Icon(Icons.radio_button_unchecked_rounded,
-                  size: 18, color: MFColors.border),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _addCtrl,
-                  style: const TextStyle(
-                      fontSize: 14, color: MFColors.textPrimary),
-                  decoration: const InputDecoration(
-                    hintText: 'Teilaufgabe hinzufügen…',
-                    hintStyle: TextStyle(fontSize: 14, color: MFColors.textMuted),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    isDense: true,
-                  ),
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _addSubtask(),
-                ),
-              ),
-              if (_adding)
-                const SizedBox(
-                  width: 14, height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 1.5, color: MFColors.teal),
-                )
-              else
-                GestureDetector(
-                  onTap: _addSubtask,
-                  child: const Icon(Icons.add_circle_outline_rounded,
-                      size: 18, color: MFColors.teal),
-                ),
-            ]),
+            _buildAddRow(),
           ],
         );
       },
     );
   }
 }
+
+/// Entfernt Block-Refs, Task-Syntax und Wikilinks aus einer Body-Vorschau.
+String _cleanPreview(String text) => text
+    .replaceAll(RegExp(r'\s*\^[a-zA-Z0-9_-]+', multiLine: true), '')
+    .replaceAll(RegExp(r'^- \[[ xX]\] ', multiLine: true), '')
+    .replaceAll(RegExp(r'\[\[([^\]]+)\]\]'), r'\1')
+    .replaceAll(RegExp(r'[#*`_>]'), '')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
 
 // ── Hilfswidget: Property-Zeile ───────────────────────────────────────────────
 

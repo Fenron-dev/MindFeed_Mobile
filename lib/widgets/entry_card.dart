@@ -49,14 +49,15 @@ class EntryCard extends ConsumerWidget {
           child: Row(children: [
             if (entry.type == 'task')
               GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => ref.read(entryRepositoryProvider).toggleTaskStatus(entry.id),
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: 10),
                   child: Icon(
                     isDone
                         ? Icons.check_circle_rounded
                         : Icons.radio_button_unchecked_rounded,
-                    size: 16,
+                    size: 20,
                     color: isDone ? MFColors.teal : MFColors.textMuted,
                   ),
                 ),
