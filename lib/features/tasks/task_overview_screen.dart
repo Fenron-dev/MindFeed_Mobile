@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import '../../core/constants.dart';
 import '../../core/theme.dart';
-import '../../widgets/app_shell.dart' show navigateToTask;
+import '../../widgets/app_shell.dart' show navigateToTask, navigateToNewTask;
 import 'task_provider.dart';
 import 'widgets/task_list_item.dart';
 
@@ -118,7 +116,7 @@ class TaskOverviewScreen extends ConsumerWidget {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push(AppRoutes.taskNew),
+        onPressed: () => navigateToNewTask(context, ref),
         backgroundColor: MFColors.teal,
         foregroundColor: MFColors.bg,
         child: const Icon(Icons.add_task_rounded),

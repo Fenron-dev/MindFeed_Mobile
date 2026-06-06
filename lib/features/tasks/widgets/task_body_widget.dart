@@ -93,8 +93,11 @@ class TaskBodyWidget extends ConsumerWidget {
 
   Widget _buildPlainText(
       BuildContext context, WidgetRef ref, String text) {
+    // Block-Refs am Zeilenende ausblenden (z.B. ^abc123 die durch Parsing
+    // nicht als Task-Zeile erkannt wurden)
+    final cleaned = text.replaceAll(RegExp(r'\s*\^[a-zA-Z0-9_-]+\s*$', multiLine: true), '');
     return WikilinkText(
-      text: text,
+      text: cleaned,
       onTag: (_) {},
       onWikilink: (title) async {
         onWikilink?.call(title);

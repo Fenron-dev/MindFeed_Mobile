@@ -121,7 +121,8 @@ class _AppShellState extends State<AppShell> {
 final desktopSelectedContainerProvider = StateProvider<String?>((ref) => null);
 // Provider für geöffneten Eintrag (Desktop inline-Ansicht)
 final desktopSelectedEntryProvider = StateProvider<String?>((ref) => null);
-// Provider für geöffneten Task (Desktop inline-Ansicht)
+// Provider für geöffneten Task (Desktop inline-Ansicht).
+// Sonderwert 'new' = neuer Task-Erstellungs-Screen.
 final desktopSelectedTaskProvider = StateProvider<String?>((ref) => null);
 // Provider für Sidebar-Pin (true = permanent sichtbar)
 final desktopSidebarPinnedProvider = StateProvider<bool>((ref) => true);
@@ -157,6 +158,15 @@ void navigateToTask(BuildContext context, WidgetRef ref, String taskId) {
     ref.read(desktopSelectedTaskProvider.notifier).state = taskId;
   } else {
     context.push(AppRoutes.taskDetailPath(taskId));
+  }
+}
+
+/// Öffnet den Neuer-Task-Screen: auf Desktop inline, auf Mobile per Route.
+void navigateToNewTask(BuildContext context, WidgetRef ref) {
+  if (_isDesktop) {
+    ref.read(desktopSelectedTaskProvider.notifier).state = 'new';
+  } else {
+    context.push(AppRoutes.taskNew);
   }
 }
 
@@ -286,7 +296,8 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
       );
     } else if (selectedTask != null) {
       mainContent = _DesktopTaskView(
-        taskId: selectedTask,
+        // 'new' = Erstellen-Screen, sonst vorhandene Task-ID
+        taskId: selectedTask == 'new' ? null : selectedTask,
         onClose: () => ref.read(desktopSelectedTaskProvider.notifier).state = null,
       );
     } else if (selectedContainer != null) {
@@ -304,13 +315,12 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
         bindings: {
           // ESC = zurück/abbrechen (wie in Desktop-Apps üblich)
           const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
-          // Cmd+T = Neuer Task
+          // Cmd+T = Neuer Task (inline im rechten Frame)
           SingleActivator(LogicalKeyboardKey.keyT, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
             ref.read(desktopCaptureProvider.notifier).state = null;
             ref.read(desktopSelectedEntryProvider.notifier).state = null;
-            ref.read(desktopSelectedTaskProvider.notifier).state = null;
+            ref.read(desktopSelectedTaskProvider.notifier).state = 'new';
             widget.shell.goBranch(1); // Tasks-Tab
-            context.push(AppRoutes.taskNew);
           },
           // Cmd+N = Neuer Eintrag (bestehender Shortcut, explizit dokumentiert)
           SingleActivator(LogicalKeyboardKey.keyN, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
@@ -959,7 +969,8 @@ class _DesktopCaptureView extends StatelessWidget {
 // ── Desktop: Task inline anzeigen ────────────────────────────────────────────
 
 class _DesktopTaskView extends StatelessWidget {
-  final String taskId;
+  /// null = neuer Task (Erstellen-Screen), non-null = vorhandener Task
+  final String? taskId;
   final VoidCallback onClose;
 
   const _DesktopTaskView({required this.taskId, required this.onClose});

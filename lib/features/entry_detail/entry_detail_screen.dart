@@ -791,15 +791,25 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                       final gallery = imageAtts
                           .map((a) => GalleryImage(a.localPath))
                           .toList();
+                      // Bilder als kompakter Wrap (Thumbnails), andere Anhänge als Liste
+                      final imageAttachments = item.attachments.where((a) => a.type == 'image').toList();
+                      final otherAttachments = item.attachments.where((a) => a.type != 'image').toList();
                       return Column(
-                        children: item.attachments.map((a) {
-                          final gi = a.type == 'image'
-                              ? imageAtts.indexWhere((x) => x.id == a.id)
-                              : 0;
-                          return _AttachmentTile(a,
-                              gallery: a.type == 'image' ? gallery : const [],
-                              galleryIndex: gi < 0 ? 0 : gi);
-                        }).toList(),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (imageAttachments.isNotEmpty)
+                            Wrap(
+                              spacing: 0,
+                              runSpacing: 8,
+                              children: imageAttachments.map((a) {
+                                final gi = imageAtts.indexWhere((x) => x.id == a.id);
+                                return _AttachmentTile(a,
+                                    gallery: gallery,
+                                    galleryIndex: gi < 0 ? 0 : gi);
+                              }).toList(),
+                            ),
+                          ...otherAttachments.map((a) => _AttachmentTile(a)),
+                        ],
                       );
                     }),
                   ),
@@ -993,17 +1003,22 @@ class _LinkPreview extends StatelessWidget {
   }
 }
 
-class _PropertiesTable extends ConsumerStatefulWidget {
+/// Öffentlich zugänglicher Properties-Wrapper — kann von anderen Screens genutzt werden.
+class EntryPropertiesTable extends ConsumerStatefulWidget {
   final List<EntryProperty> properties;
   final String entryId;
-
-  const _PropertiesTable({required this.properties, required this.entryId});
-
+  const EntryPropertiesTable({super.key, required this.properties, required this.entryId});
   @override
-  ConsumerState<_PropertiesTable> createState() => _PropertiesTableState();
+  ConsumerState<EntryPropertiesTable> createState() => _PropertiesTableState();
 }
 
-class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
+class _PropertiesTable extends EntryPropertiesTable {
+  const _PropertiesTable({required super.properties, required super.entryId});
+  @override
+  ConsumerState<EntryPropertiesTable> createState() => _PropertiesTableState();
+}
+
+class _PropertiesTableState extends ConsumerState<EntryPropertiesTable> {
   bool _collapsed = false;
 
   // Technische interne Properties verstecken
@@ -1013,7 +1028,7 @@ class _PropertiesTableState extends ConsumerState<_PropertiesTable> {
     'genres', 'media_type', 'domain', 'url_author', '_template', 'parent_entry_id',
   };
   static const _hiddenPrefixes = [
-    'bgg_', 'github_', 'youtube_',
+    'bgg_', 'github_', 'youtube_', 'task_',
   ];
 
   static bool _isHidden(String key) {
@@ -2119,7 +2134,7 @@ class _ImageTile extends StatelessWidget {
   const _ImageTile(this.att, {this.gallery = const [], this.galleryIndex = 0});
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: 8, right: 8),
         child: GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
             fullscreenDialog: true,
@@ -2132,10 +2147,11 @@ class _ImageTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             child: Image.file(
               File(att.localPath),
-              width: double.infinity,
+              height: 120,
+              width: 120,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Container(
-                height: 60,
+                height: 60, width: 60,
                 color: MFColors.surface,
                 child: const Icon(Icons.broken_image_outlined,
                     color: MFColors.textMuted),

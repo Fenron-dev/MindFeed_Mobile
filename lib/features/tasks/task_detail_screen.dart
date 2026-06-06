@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/di.dart';
@@ -6,6 +8,7 @@ import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/recurrence_calculator.dart';
 import '../../features/entry_detail/entry_detail_provider.dart';
+import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable;
 import '../../widgets/app_shell.dart' show navigateToEntry;
 import 'task_provider.dart' show subtasksByParentProvider;
 import 'widgets/recurrence_picker.dart';
@@ -62,13 +65,38 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.taskId == null) {
-      _isEditing = true;
+    if (widget.taskId == null) _isEditing = true;
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      HardwareKeyboard.instance.addHandler(_onKeyEvent);
     }
   }
 
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final modifier = Platform.isMacOS
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (modifier && event.logicalKey == LogicalKeyboardKey.enter) {
+      if (_isEditing && !_saving && _titleCtrl.text.trim().isNotEmpty) {
+        // Wird nach dem async-Gap ausgeführt
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            final task = _lastTask;
+            _save(task);
+          }
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Letzten geladenen Task merken für Keyboard-Handler
+  EntryWithDetails? _lastTask;
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _titleCtrl.dispose();
     _bodyCtrl.dispose();
     super.dispose();
@@ -302,6 +330,7 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
             ),
           );
         }
+        _lastTask = task;
         // Sync-Controller nur außerhalb Edit-Mode
         _syncControllersFrom(task);
         if (!_isEditing) {
@@ -692,6 +721,15 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                   fontStyle: FontStyle.italic),
             ),
 
+          // ─── Eigenschaften ──────────────────────────────────────────
+          const SizedBox(height: 16),
+          const Divider(color: MFColors.border),
+          const SizedBox(height: 12),
+          EntryPropertiesTable(
+            properties: task.properties,
+            entryId: task.entry.id,
+          ),
+
           // ─── Subtasks ────────────────────────────────────────────────
           _SubtaskSection(parentId: task.entry.id),
         ],
@@ -1008,20 +1046,29 @@ class _PropertyRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 110,
-            child: Row(
-              children: [
-                Icon(icon, size: 14, color: MFColors.textMuted),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: const TextStyle(
-                      fontSize: 13, color: MFColors.textMuted),
-                ),
-              ],
+          // Flexible statt SizedBox: passt sich kleinen Screens an
+          Flexible(
+            flex: 0,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 90, maxWidth: 130),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 14, color: MFColors.textMuted),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                          fontSize: 13, color: MFColors.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(child: child),
         ],
       ),

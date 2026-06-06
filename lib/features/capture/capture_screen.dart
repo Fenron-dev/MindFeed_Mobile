@@ -777,14 +777,21 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
             );
             if (result.tags.isNotEmpty || result.title != null) {
-              final tagLine = result.tags.map((t) => '#$t').join(' ');
+              // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)
               await ref.read(entryRepositoryProvider).updateEntry(
                     createdEntry.entry.id,
                     title: result.title ?? createdEntry.entry.title,
-                    body: result.tags.isNotEmpty
-                        ? '${createdEntry.entry.body}\n$tagLine'
-                        : createdEntry.entry.body,
                   );
+              // KI-Tags direkt in die Tag-Relation schreiben (nicht in den Body)
+              if (result.tags.isNotEmpty) {
+                final existingTags = await ref
+                    .read(tagDaoProvider)
+                    .getTagNamesForEntry(createdEntry.entry.id);
+                final merged = {...existingTags, ...result.tags}.toList();
+                await ref
+                    .read(tagDaoProvider)
+                    .setEntryTags(createdEntry.entry.id, merged);
+              }
             }
           } catch (_) {
             // KI-Fehler still ignorieren — Eintrag ist gespeichert
