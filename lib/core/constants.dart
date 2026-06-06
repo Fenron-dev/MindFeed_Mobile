@@ -9,10 +9,14 @@ abstract class AppRoutes {
   static const containerEdit = '/container-edit/:id';
   static const vaultSetup = '/vault-setup';
   static const vaultSwitcher = '/vault-switcher';
+  static const tasks = '/tasks';
+  static const taskNew = '/task-new';
+  static const taskDetail = '/task/:id';
   static const trash = '/trash';
   static const history = '/history';
 
   static String entryDetailPath(String id) => '/entry/$id';
+  static String taskDetailPath(String id) => '/task/$id';
   static String containerDetailPath(String id) => '/container/$id';
   static String containerEditPath(String id) => '/container-edit/$id';
 }

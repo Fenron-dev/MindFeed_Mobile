@@ -52,7 +52,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -85,6 +85,12 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 5) {
             await m.addColumn(changeLog, changeLog.afterJson);
+          }
+          if (from < 6) {
+            await customStatement(
+                'CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type)');
+            await customStatement(
+                'CREATE INDEX IF NOT EXISTS idx_entries_reminder ON entries(reminder_at)');
           }
         },
         beforeOpen: (details) async {

@@ -13,6 +13,7 @@ import '../features/capture/capture_screen.dart';
 import '../features/containers/container_detail_screen.dart';
 import '../features/containers/container_provider.dart';
 import '../features/entry_detail/entry_detail_screen.dart';
+import '../features/tasks/task_detail_screen.dart';
 import '../services/app_settings.dart';
 
 bool get _isDesktop =>
@@ -41,8 +42,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   bool _handleScroll(ScrollNotification notification) {
-    // Auf dem Settings-Tab (Index 2) immer sichtbar lassen
-    if (widget.shell.currentIndex == 2) return false;
+    // Auf dem Settings-Tab (Index 3) immer sichtbar lassen
+    if (widget.shell.currentIndex == 3) return false;
 
     if (notification is ScrollUpdateNotification) {
       final delta = notification.scrollDelta ?? 0;
@@ -91,6 +92,11 @@ class _AppShellState extends State<AppShell> {
                   label: 'Feed',
                 ),
                 NavigationDestination(
+                  icon: Icon(Icons.task_alt_outlined),
+                  selectedIcon: Icon(Icons.task_alt_rounded),
+                  label: 'Aufgaben',
+                ),
+                NavigationDestination(
                   icon: Icon(Icons.search_outlined),
                   selectedIcon: Icon(Icons.search),
                   label: 'Suche',
@@ -115,6 +121,8 @@ class _AppShellState extends State<AppShell> {
 final desktopSelectedContainerProvider = StateProvider<String?>((ref) => null);
 // Provider für geöffneten Eintrag (Desktop inline-Ansicht)
 final desktopSelectedEntryProvider = StateProvider<String?>((ref) => null);
+// Provider für geöffneten Task (Desktop inline-Ansicht)
+final desktopSelectedTaskProvider = StateProvider<String?>((ref) => null);
 // Provider für Sidebar-Pin (true = permanent sichtbar)
 final desktopSidebarPinnedProvider = StateProvider<bool>((ref) => true);
 // Provider für inline Capture (Desktop)
@@ -140,6 +148,15 @@ void navigateToEntry(BuildContext context, WidgetRef ref, String entryId) {
     ref.read(desktopSelectedEntryProvider.notifier).state = entryId;
   } else {
     context.push(AppRoutes.entryDetailPath(entryId));
+  }
+}
+
+/// Navigiert zu einem Task: auf Desktop inline, auf Mobile per Route.
+void navigateToTask(BuildContext context, WidgetRef ref, String taskId) {
+  if (_isDesktop) {
+    ref.read(desktopSelectedTaskProvider.notifier).state = taskId;
+  } else {
+    context.push(AppRoutes.taskDetailPath(taskId));
   }
 }
 
@@ -189,6 +206,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
     // Alle Detail-Overlays schließen, damit der Tab-Wechsel sofort sichtbar ist
     ref.read(desktopSelectedContainerProvider.notifier).state = null;
     ref.read(desktopSelectedEntryProvider.notifier).state = null;
+    ref.read(desktopSelectedTaskProvider.notifier).state = null;
     ref.read(desktopCaptureProvider.notifier).state = null;
     widget.shell.goBranch(index);
   }
@@ -196,11 +214,13 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
   /// Geht einen Schritt zurück: schließt das oberste Overlay bzw. poppt die
   /// Route. Wird von der Zwei-Finger-Swipe-Geste UND der ESC-Taste genutzt.
   void _handleBack() {
-    // Capture → Entry → Container → Router-Pop
+    // Capture → Entry → Task → Container → Router-Pop
     if (ref.read(desktopCaptureProvider) != null) {
       ref.read(desktopCaptureProvider.notifier).state = null;
     } else if (ref.read(desktopSelectedEntryProvider) != null) {
       ref.read(desktopSelectedEntryProvider.notifier).state = null;
+    } else if (ref.read(desktopSelectedTaskProvider) != null) {
+      ref.read(desktopSelectedTaskProvider.notifier).state = null;
     } else if (ref.read(desktopSelectedContainerProvider) != null) {
       ref.read(desktopSelectedContainerProvider.notifier).state = null;
     } else if (context.canPop()) {
@@ -236,6 +256,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
     final pinned = ref.watch(desktopSidebarPinnedProvider);
     final selectedContainer = ref.watch(desktopSelectedContainerProvider);
     final selectedEntry = ref.watch(desktopSelectedEntryProvider);
+    final selectedTask = ref.watch(desktopSelectedTaskProvider);
     final captureArgs = ref.watch(desktopCaptureProvider);
 
     final sidebar = AnimatedContainer(
@@ -251,7 +272,7 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
           : null,
     );
 
-    // Hauptinhalt: Capture > Eintrag > Container > Shell
+    // Hauptinhalt: Capture > Eintrag > Task > Container > Shell
     Widget mainContent;
     if (captureArgs != null) {
       mainContent = _DesktopCaptureView(
@@ -262,6 +283,11 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
       mainContent = _DesktopEntryView(
         entryId: selectedEntry,
         onClose: () => ref.read(desktopSelectedEntryProvider.notifier).state = null,
+      );
+    } else if (selectedTask != null) {
+      mainContent = _DesktopTaskView(
+        taskId: selectedTask,
+        onClose: () => ref.read(desktopSelectedTaskProvider.notifier).state = null,
       );
     } else if (selectedContainer != null) {
       mainContent = _DesktopContainerView(
@@ -278,6 +304,18 @@ class _DesktopShellState extends ConsumerState<_DesktopShell> {
         bindings: {
           // ESC = zurück/abbrechen (wie in Desktop-Apps üblich)
           const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
+          // Cmd+T = Neuer Task
+          SingleActivator(LogicalKeyboardKey.keyT, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
+            ref.read(desktopCaptureProvider.notifier).state = null;
+            ref.read(desktopSelectedEntryProvider.notifier).state = null;
+            ref.read(desktopSelectedTaskProvider.notifier).state = null;
+            widget.shell.goBranch(1); // Tasks-Tab
+            context.push(AppRoutes.taskNew);
+          },
+          // Cmd+N = Neuer Eintrag (bestehender Shortcut, explizit dokumentiert)
+          SingleActivator(LogicalKeyboardKey.keyN, meta: Platform.isMacOS, control: !Platform.isMacOS): () {
+            navigateToCapture(context, ref);
+          },
         },
         child: Scaffold(
       key: appScaffoldKey,
@@ -482,11 +520,18 @@ class _DesktopSidebar extends ConsumerWidget {
             onTap: () { onDestinationSelected(0); if (!pinned) Navigator.of(context).maybePop(); },
           ),
           _SidebarNavItem(
+            icon: Icons.task_alt_outlined,
+            selectedIcon: Icons.task_alt_rounded,
+            label: 'Aufgaben',
+            selected: currentIndex == 1,
+            onTap: () { onDestinationSelected(1); if (!pinned) Navigator.of(context).maybePop(); },
+          ),
+          _SidebarNavItem(
             icon: Icons.search_outlined,
             selectedIcon: Icons.search,
             label: 'Suche',
-            selected: currentIndex == 1,
-            onTap: () { onDestinationSelected(1); if (!pinned) Navigator.of(context).maybePop(); },
+            selected: currentIndex == 2,
+            onTap: () { onDestinationSelected(2); if (!pinned) Navigator.of(context).maybePop(); },
           ),
 
           const SizedBox(height: 8),
@@ -532,8 +577,8 @@ class _DesktopSidebar extends ConsumerWidget {
             icon: Icons.settings_outlined,
             selectedIcon: Icons.settings,
             label: 'Einstellungen',
-            selected: currentIndex == 2,
-            onTap: () { onDestinationSelected(2); if (!pinned) Navigator.of(context).maybePop(); },
+            selected: currentIndex == 3,
+            onTap: () { onDestinationSelected(3); if (!pinned) Navigator.of(context).maybePop(); },
           ),
           const SizedBox(height: 8),
         ],
@@ -908,6 +953,20 @@ class _DesktopCaptureView extends StatelessWidget {
       parentEntryId: args.parentEntryId,
       onBack: onClose,
     );
+  }
+}
+
+// ── Desktop: Task inline anzeigen ────────────────────────────────────────────
+
+class _DesktopTaskView extends StatelessWidget {
+  final String taskId;
+  final VoidCallback onClose;
+
+  const _DesktopTaskView({required this.taskId, required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    return TaskDetailScreen(taskId: taskId, onBack: onClose);
   }
 }
 

@@ -7,7 +7,7 @@ class Entries extends Table {
   DateTimeColumn get updatedAt =>
       dateTime().clientDefault(() => DateTime.now().toUtc())();
 
-  // 'text' | 'link' | 'image' | 'audio'
+  // 'text' | 'link' | 'image' | 'audio' | 'task'
   TextColumn get type =>
       text().withDefault(const Constant('text'))();
   TextColumn get title => text().nullable()();

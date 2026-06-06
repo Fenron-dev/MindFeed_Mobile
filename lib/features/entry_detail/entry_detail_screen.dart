@@ -19,9 +19,9 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
+import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry;
 import '../../widgets/entry_card.dart';
-import '../../widgets/wikilink_text.dart';
 import 'entry_detail_provider.dart';
 
 const _keyApiKey = 'openrouter_api_key';
@@ -727,9 +727,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                             ),
                         ],
                       )
-                    : WikilinkText(
-                        text: entry.body,
-                        onTag: (_) {},
+                    : TaskBodyWidget(
+                        body: entry.body,
+                        noteId: entry.id,
                         onWikilink: (title) async {
                           final results = await ref
                               .read(entryRepositoryProvider)

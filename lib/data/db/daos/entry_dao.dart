@@ -123,6 +123,24 @@ class EntryDao extends DatabaseAccessor<AppDatabase> with _$EntryDaoMixin {
         .write(EntriesCompanion(syncUpdatedAt: Value(e.updatedAt)));
   }
 
+  // ── Tasks ──────────────────────────────────────────────────────────────────
+
+  /// Alle Tasks (type='task'), nicht gelöscht, nach Fälligkeit sortiert.
+  /// NULLs (kein Datum) kommen ans Ende.
+  Stream<List<Entry>> watchTasks() {
+    return db.customSelect(
+      '''
+      SELECT * FROM entries
+      WHERE type = 'task' AND deleted_at IS NULL
+      ORDER BY
+        CASE WHEN reminder_at IS NULL THEN 1 ELSE 0 END,
+        reminder_at ASC,
+        created_at DESC
+      ''',
+      readsFrom: {db.entries},
+    ).watch().map((rows) => rows.map((r) => Entry.fromJson(r.data)).toList());
+  }
+
   // ── Papierkorb ──────────────────────────────────────────────────────────────
 
   /// Alle soft-gelöschten Einträge (Papierkorb), neueste zuerst.

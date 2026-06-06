@@ -156,6 +156,24 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _bodyFocus.requestFocus();
   }
 
+  void _insertTaskLine() {
+    final ctrl = _bodyCtrl;
+    final text = ctrl.text;
+    final sel = ctrl.selection;
+    final pos = sel.isValid ? sel.start : text.length;
+
+    // Zeilenumbruch nur wenn nicht bereits am Anfang einer neuen Zeile
+    final prefix = (pos > 0 && text[pos - 1] != '\n') ? '\n' : '';
+    final insert = '${prefix}- [ ] ';
+
+    final newText = text.replaceRange(pos, pos, insert);
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: pos + insert.length),
+    );
+    _bodyFocus.requestFocus();
+  }
+
   void _onBodyChanged() {
     setState(() {
       _parsedTags = TagParser.parse(_bodyCtrl.text);
@@ -714,6 +732,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         await ref.read(entryRepositoryProvider).updateEntry(createdEntry.entry.id);
       }
 
+      // ── Inline-Tasks verarbeiten ─────────────────────────────────────────
+      final updatedBody = await ref
+          .read(entryRepositoryProvider)
+          .processInlineTasks(createdEntry.entry.id, finalBody);
+      if (updatedBody != finalBody) {
+        await ref.read(entryRepositoryProvider).updateEntry(
+              createdEntry.entry.id,
+              body: updatedBody,
+            );
+      }
+
       // ── Auto-Template für AniList & YouTube ─────────────────────────────
       final mediaType = _urlPreview?.mediaType;
       if (mediaType != null) {
@@ -1191,6 +1220,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             onTagInsert: () => _insertAtCursor('#'),
             onLinkInsert: () => _insertAtCursor('https://'),
             onMicTap: _toggleRecording,
+            onTaskInsert: _insertTaskLine,
             isRecording: _isRecording,
             hasAudio: _recordedAudioPath != null,
           ),
@@ -1227,6 +1257,7 @@ class _CaptureToolbar extends StatelessWidget {
   final VoidCallback onTagInsert;
   final VoidCallback onLinkInsert;
   final VoidCallback onMicTap;
+  final VoidCallback? onTaskInsert;
   final bool isRecording;
   final bool hasAudio;
   const _CaptureToolbar({
@@ -1236,6 +1267,7 @@ class _CaptureToolbar extends StatelessWidget {
     required this.onTagInsert,
     required this.onLinkInsert,
     required this.onMicTap,
+    this.onTaskInsert,
     this.isRecording = false,
     this.hasAudio = false,
   });
@@ -1251,6 +1283,8 @@ class _CaptureToolbar extends StatelessWidget {
           _TBtn(Icons.image_outlined, 'Bild', onImagePick),
           _TBtn(Icons.attach_file_rounded, 'Datei', onFilePick),
           _TBtn(Icons.link_rounded, 'Link', onLinkInsert),
+          if (onTaskInsert != null)
+            _TBtn(Icons.add_task_rounded, 'Aufgabe', onTaskInsert!),
           IconButton(
             icon: Icon(
               isRecording

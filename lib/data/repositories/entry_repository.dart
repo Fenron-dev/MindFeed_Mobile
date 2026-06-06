@@ -8,6 +8,8 @@ import '../db/daos/attachment_dao.dart';
 import '../db/daos/property_dao.dart';
 import 'package:drift/drift.dart';
 import '../../domain/tag_parser.dart';
+import '../../domain/task_parser.dart';
+import '../../domain/recurrence_calculator.dart';
 import '../../domain/wikilink_parser.dart';
 
 const _uuid = Uuid();
@@ -75,6 +77,88 @@ class EntryRepository {
             'letzten Stand: $e');
         return lastGood;
       }
+    });
+  }
+
+  /// Alle Tasks die aus einer bestimmten Notiz (inline) erstellt wurden.
+  Stream<List<EntryWithDetails>> watchTasksBySourceNote(String noteId) {
+    return db.customSelect(
+      '''
+      SELECT DISTINCT e.*
+      FROM entries e
+      INNER JOIN entry_properties ep ON ep.entry_id = e.id
+      WHERE ep.key = 'task_source_entry_id' AND ep.value = ?
+        AND e.type = 'task' AND e.deleted_at IS NULL
+      ORDER BY e.created_at ASC
+      ''',
+      variables: [Variable.withString(noteId)],
+      readsFrom: {db.entries, db.entryProperties},
+    ).watch().asyncMap((rows) async {
+      final ids = rows.map((r) => r.read<String>('id')).toList();
+      final list = await Future.wait(ids.map(entryDao.getById));
+      return _bulkEnrich(list.whereType<Entry>().toList());
+    });
+  }
+
+  /// Verarbeitet Inline-Task-Zeilen nach dem Speichern einer Notiz:
+  /// Erstellt Task-Entries für neue Zeilen und injiziert Block-Refs in den Body.
+  /// Gibt den aktualisierten Body zurück (oder den originalen wenn keine Änderung).
+  Future<String> processInlineTasks(String entryId, String body) async {
+    final lines = TaskParser.parse(body);
+    if (lines.isEmpty) return body;
+
+    // Nur neue Zeilen ohne Block-Ref verarbeiten
+    final newLines = lines.where((l) => l.blockRef == null).toList();
+    if (newLines.isEmpty) return body;
+
+    String updatedBody = body;
+
+    for (final line in newLines) {
+      final task = await createTask(
+        title: line.title.isEmpty ? 'Aufgabe' : line.title,
+        dueAt: line.dueDate,
+        priority: line.priority,
+        sourceEntryId: entryId,
+      );
+      // Block-Ref injizieren (Position relativ zu updatedBody aktualisieren)
+      final freshLines = TaskParser.parse(updatedBody);
+      final matchLine = freshLines.firstWhere(
+        (l) =>
+            l.blockRef == null &&
+            l.title == line.title &&
+            l.isDone == line.isDone,
+        orElse: () => line,
+      );
+      updatedBody =
+          TaskParser.injectBlockRef(updatedBody, matchLine, task.entry.id);
+    }
+
+    return updatedBody;
+  }
+
+  /// Reaktiver Stream aller Tasks (type='task'), nach Fälligkeit sortiert.
+  Stream<List<EntryWithDetails>> watchTasks() {
+    return db.customSelect(
+      '''
+      SELECT * FROM entries
+      WHERE type = 'task' AND deleted_at IS NULL
+      ORDER BY
+        CASE WHEN reminder_at IS NULL THEN 1 ELSE 0 END,
+        reminder_at ASC,
+        created_at DESC
+      ''',
+      readsFrom: {
+        db.entries, db.entryProperties, db.tags,
+        db.entryTags, db.entryContainers,
+      },
+    ).watch().asyncMap((rows) async {
+      final ids = rows.map((r) => r.read<String>('id')).toList();
+      final entryList = await Future.wait(ids.map(entryDao.getById));
+      final filtered = entryList
+          .whereType<Entry>()
+          .where((e) => e.deletedAt == null)
+          .toList();
+      return _bulkEnrich(filtered);
     });
   }
 
@@ -506,6 +590,206 @@ class EntryRepository {
         );
       }
     });
+  }
+
+  // ─── Task-spezifische Methoden ────────────────────────────────────────────────
+
+  /// Erstellt einen neuen Task-Entry mit optionalen Task-Properties.
+  Future<EntryWithDetails> createTask({
+    required String title,
+    String body = '',
+    DateTime? dueAt,
+    String? priority,
+    List<String> containerIds = const [],
+    String? sourceEntryId,
+  }) async {
+    final id = 'e-${_uuid.v4()}';
+    final now = DateTime.now().toUtc();
+
+    final companion = EntriesCompanion(
+      id: Value(id),
+      body: Value(body),
+      title: Value(title.trim().isEmpty ? null : title.trim()),
+      type: const Value('task'),
+      status: const Value('inbox'),
+      reminderAt: Value(dueAt?.toUtc()),
+      createdAt: Value(now),
+      updatedAt: Value(now),
+    );
+    await entryDao.upsert(companion);
+
+    // Tags aus Body parsen
+    if (body.isNotEmpty) {
+      await tagDao.setEntryTags(id, TagParser.parse(body));
+    }
+
+    // Task-Properties speichern
+    final props = <EntryPropertiesCompanion>[];
+    void addProp(String key, String? val, String type) {
+      if (val != null && val.isNotEmpty) {
+        props.add(EntryPropertiesCompanion(
+          id: Value('prop-$id-$key'),
+          entryId: Value(id),
+          key: Value(key),
+          value: Value(val),
+          type: Value(type),
+        ));
+      }
+    }
+    addProp('task_priority', priority, 'select');
+    addProp('task_source_entry_id', sourceEntryId, 'text');
+    if (props.isNotEmpty) await propertyDao.setProperties(id, props);
+
+    if (containerIds.isNotEmpty) {
+      await entryDao.setContainers(id, containerIds);
+    }
+
+    return (await getById(id))!;
+  }
+
+  /// Wechselt den Status eines Tasks zwischen offen (inbox) und erledigt (done).
+  /// Bei wiederkehrenden Tasks wird automatisch die nächste Instanz erstellt.
+  Future<void> toggleTaskStatus(String id) async {
+    final existing = await entryDao.getById(id);
+    if (existing == null || existing.type != 'task') return;
+
+    final isDone = existing.status == 'done';
+    final newStatus = isDone ? 'inbox' : 'done';
+    final completedAt = isDone ? null : DateTime.now().toUtc().toIso8601String();
+
+    final logId = await _logChange(id, 'status',
+        isDone ? 'Aufgabe wieder geöffnet' : 'Aufgabe erledigt');
+
+    await entryDao.upsert(EntriesCompanion(
+      id: Value(id),
+      status: Value(newStatus),
+      updatedAt: Value(DateTime.now().toUtc()),
+    ));
+
+    await db.into(db.entryProperties).insertOnConflictUpdate(
+      EntryPropertiesCompanion(
+        id: Value('prop-$id-task_completed_at'),
+        entryId: Value(id),
+        key: const Value('task_completed_at'),
+        value: Value(completedAt),
+        type: const Value('date'),
+      ),
+    );
+
+    // Wiederkehrende Task: nächste Instanz erstellen wenn gerade erledigt
+    if (!isDone && existing.reminderAt != null) {
+      final enriched = await getById(id);
+      if (enriched != null) {
+        final rrule = getTaskProperty(enriched, 'task_recurrence');
+        final seriesId = getTaskProperty(enriched, 'task_series_id') ??
+            RecurrenceHelper.generateSeriesId();
+        final nextDue =
+            RecurrenceHelper.nextDueDate(existing.reminderAt!, rrule);
+        if (nextDue != null) {
+          await _createRecurringInstance(enriched, nextDue, seriesId);
+          // Aktuelle Instanz mit seriesId markieren falls noch nicht vorhanden
+          if (getTaskProperty(enriched, 'task_series_id') == null) {
+            await setTaskProperty(id, 'task_series_id', seriesId, type: 'text');
+          }
+        }
+      }
+    }
+
+    await _finalizeLog(logId, id);
+  }
+
+  /// Erstellt eine neue Instanz eines wiederkehrenden Tasks.
+  Future<void> _createRecurringInstance(
+      EntryWithDetails template, DateTime dueAt, String seriesId) async {
+    final title = template.entry.title ?? 'Aufgabe';
+    final priority = getTaskProperty(template, 'task_priority');
+    final rrule = getTaskProperty(template, 'task_recurrence');
+    final sourceNoteId = getTaskProperty(template, 'task_source_entry_id');
+
+    final newTask = await createTask(
+      title: title,
+      body: template.entry.body,
+      dueAt: dueAt,
+      priority: priority,
+      containerIds: template.containerIds,
+      sourceEntryId: sourceNoteId,
+    );
+
+    // Series-ID + Wiederholungsregel übertragen
+    await setTaskProperty(newTask.entry.id, 'task_series_id', seriesId,
+        type: 'text');
+    if (rrule != null) {
+      await setTaskProperty(newTask.entry.id, 'task_recurrence', rrule,
+          type: 'text');
+    }
+  }
+
+  /// Löscht einen Task: optional alle folgenden Instanzen der Series.
+  Future<void> deleteTask(String id, {bool andFollowing = false}) async {
+    if (!andFollowing) {
+      await deleteEntry(id);
+      return;
+    }
+
+    // Task laden um Series-ID und Fälligkeitsdatum zu lesen
+    final task = await getById(id);
+    if (task == null) {
+      await deleteEntry(id);
+      return;
+    }
+    final seriesId = getTaskProperty(task, 'task_series_id');
+    if (seriesId == null) {
+      await deleteEntry(id);
+      return;
+    }
+
+    // Alle Instanzen der Serie mit dueDate >= dieser Instanz löschen
+    final currentDue = task.entry.reminderAt;
+    final allSeries = await db.customSelect(
+      '''
+      SELECT DISTINCT e.id, e.reminder_at
+      FROM entries e
+      INNER JOIN entry_properties ep ON ep.entry_id = e.id
+      WHERE ep.key = 'task_series_id' AND ep.value = ?
+        AND e.deleted_at IS NULL
+      ''',
+      variables: [Variable.withString(seriesId)],
+      readsFrom: {db.entries, db.entryProperties},
+    ).get();
+
+    for (final row in allSeries) {
+      final rowId = row.read<String>('id');
+      final rowDue = row.readNullable<DateTime>('reminder_at');
+      if (currentDue == null || rowDue == null || !rowDue.isBefore(currentDue)) {
+        await deleteEntry(rowId);
+      }
+    }
+  }
+
+  /// Setzt eine einzelne Task-Property (z.B. task_priority, task_recurrence).
+  Future<void> setTaskProperty(String entryId, String key, String? value,
+      {String type = 'text'}) async {
+    await db.into(db.entryProperties).insertOnConflictUpdate(
+      EntryPropertiesCompanion(
+        id: Value('prop-$entryId-$key'),
+        entryId: Value(entryId),
+        key: Value(key),
+        value: Value(value),
+        type: Value(type),
+      ),
+    );
+    await entryDao.upsert(EntriesCompanion(
+      id: Value(entryId),
+      updatedAt: Value(DateTime.now().toUtc()),
+    ));
+  }
+
+  /// Liest einen Task-Property-Wert aus einer bereits geladenen EntryWithDetails.
+  static String? getTaskProperty(EntryWithDetails task, String key) {
+    return task.properties
+        .where((p) => p.key == key)
+        .map((p) => p.value)
+        .firstOrNull;
   }
 
   /// Stellt einen Eintrag aus dem Papierkorb wieder her.
