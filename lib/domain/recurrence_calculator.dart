@@ -3,16 +3,21 @@ import 'package:uuid/uuid.dart';
 const _uuid = Uuid();
 
 /// Unterstützte Wiederholungsfrequenzen.
-enum RecurrenceFrequency { daily, weekly, monthly, yearly }
+enum RecurrenceFrequency { minutely, hourly, daily, weekly, monthly, yearly }
 
-/// Einfache RRULE-ähnliche Wiederholungsregel.
+/// RRULE-kompatible Wiederholungsregel mit Intervall, Tageszeit und Wochentags-Muster.
 /// Intern als kompakter String gespeichert, z.B.:
-///   DAILY           → täglich
-///   WEEKLY;BYDAY=MO,WE,FR → jeden Mo, Mi, Fr
-///   MONTHLY;BYMONTHDAY=15 → jeden 15. des Monats
-///   YEARLY          → jährlich
+///   DAILY                           → täglich
+///   WEEKLY;INTERVAL=2;BYDAY=MO,WE   → jeden 2. Montag und Mittwoch
+///   MONTHLY;BYMONTHDAY=15           → jeden 15. des Monats
+///   MONTHLY;BYDAY=1MO               → erster Montag im Monat
+///   HOURLY;INTERVAL=2               → alle 2 Stunden
+///   MINUTELY;INTERVAL=30            → alle 30 Minuten
 class RecurrenceRule {
   final RecurrenceFrequency frequency;
+
+  /// Intervall: 1=jede, 2=jede zweite, usw.
+  final int interval;
 
   /// Für WEEKLY: Wochentage (0=Mo, 1=Di, ..., 6=So). Leer = gleicher Wochentag.
   final List<int> weekdays;
@@ -20,139 +25,217 @@ class RecurrenceRule {
   /// Für MONTHLY: Tag des Monats (1-31). Null = gleicher Tag wie Fälligkeitsdatum.
   final int? monthDay;
 
+  /// Für MONTHLY: Nth weekday (z.B. 1=erster, -1=letzter). Kombiniert mit [nthWeekday].
+  final int? nthOccurrence;
+
+  /// Für MONTHLY: Wochentag (0=Mo, ..., 6=So) des nth-Patterns.
+  final int? nthWeekday;
+
+  /// Uhrzeit (Stunde 0-23, Minute 0-59). Null = keine Uhrzeit.
+  final int? timeHour;
+  final int? timeMinute;
+
   const RecurrenceRule({
     required this.frequency,
+    this.interval = 1,
     this.weekdays = const [],
     this.monthDay,
+    this.nthOccurrence,
+    this.nthWeekday,
+    this.timeHour,
+    this.timeMinute,
   });
 
-  /// Gibt eine menschenlesbare Beschreibung zurück.
   String get label {
+    final ivLabel = interval > 1 ? 'Alle $interval ' : '';
     switch (frequency) {
+      case RecurrenceFrequency.minutely:
+        return interval == 1 ? 'Jede Minute' : 'Alle $interval Minuten';
+      case RecurrenceFrequency.hourly:
+        return interval == 1 ? 'Stündlich' : 'Alle $interval Stunden';
       case RecurrenceFrequency.daily:
-        return 'Täglich';
+        return interval == 1 ? 'Täglich' : '${ivLabel}Tage';
       case RecurrenceFrequency.weekly:
-        if (weekdays.isEmpty) return 'Wöchentlich';
-        final names = weekdays.map(_dayName).join(', ');
-        return 'Wöchentlich ($names)';
+        final days = weekdays.isEmpty ? '' : ' (${weekdays.map(_dayName).join(', ')})';
+        return interval == 1 ? 'Wöchentlich$days' : '${ivLabel}Wochen$days';
       case RecurrenceFrequency.monthly:
-        if (monthDay != null) return 'Monatlich (am $monthDay.)';
-        return 'Monatlich';
+        if (nthOccurrence != null && nthWeekday != null) {
+          final nth = _nthLabel(nthOccurrence!);
+          return '${interval == 1 ? 'Monatlich' : '${ivLabel}Monate'} ($nth ${_dayName(nthWeekday!)})';
+        }
+        if (monthDay != null) return '${interval == 1 ? 'Monatlich' : '${ivLabel}Monate'} (am $monthDay.)';
+        return interval == 1 ? 'Monatlich' : '${ivLabel}Monate';
       case RecurrenceFrequency.yearly:
-        return 'Jährlich';
+        return interval == 1 ? 'Jährlich' : '${ivLabel}Jahre';
     }
   }
 
-  /// Serialisiert in einen kompakten String (z.B. für task_recurrence Property).
+  static String _nthLabel(int n) => switch (n) {
+        1 => '1.',
+        2 => '2.',
+        3 => '3.',
+        4 => '4.',
+        -1 => 'letzten',
+        _ => '$n.',
+      };
+
   String toRrule() {
     final parts = <String>[];
     switch (frequency) {
-      case RecurrenceFrequency.daily:
-        parts.add('DAILY');
+      case RecurrenceFrequency.minutely: parts.add('MINUTELY');
+      case RecurrenceFrequency.hourly:   parts.add('HOURLY');
+      case RecurrenceFrequency.daily:    parts.add('DAILY');
       case RecurrenceFrequency.weekly:
         parts.add('WEEKLY');
-        if (weekdays.isNotEmpty) {
-          final days = weekdays.map(_dayCode).join(',');
-          parts.add('BYDAY=$days');
-        }
+        if (weekdays.isNotEmpty) parts.add('BYDAY=${weekdays.map(_dayCode).join(',')}');
       case RecurrenceFrequency.monthly:
         parts.add('MONTHLY');
-        if (monthDay != null) parts.add('BYMONTHDAY=$monthDay');
-      case RecurrenceFrequency.yearly:
-        parts.add('YEARLY');
+        if (nthOccurrence != null && nthWeekday != null) {
+          parts.add('BYDAY=$nthOccurrence${_dayCode(nthWeekday!)}');
+        } else if (monthDay != null) {
+          parts.add('BYMONTHDAY=$monthDay');
+        }
+      case RecurrenceFrequency.yearly: parts.add('YEARLY');
+    }
+    if (interval > 1) parts.add('INTERVAL=$interval');
+    if (timeHour != null && timeMinute != null) {
+      parts.add('BYHOUR=$timeHour');
+      parts.add('BYMINUTE=$timeMinute');
     }
     return parts.join(';');
   }
 
-  /// Parst einen RRULE-String zurück in eine RecurrenceRule.
   static RecurrenceRule? fromRrule(String? rrule) {
     if (rrule == null || rrule.isEmpty) return null;
     final parts = rrule.split(';');
-    final freq = parts.first.trim().toUpperCase();
+    final freqStr = parts.first.trim().toUpperCase();
 
     RecurrenceFrequency? frequency;
-    List<int> weekdays = [];
-    int? monthDay;
-
-    switch (freq) {
-      case 'DAILY':
-        frequency = RecurrenceFrequency.daily;
-      case 'WEEKLY':
-        frequency = RecurrenceFrequency.weekly;
-        final byday = parts
-            .where((p) => p.startsWith('BYDAY='))
-            .map((p) => p.substring(6))
-            .firstOrNull;
-        if (byday != null) {
-          weekdays = byday
-              .split(',')
-              .map(_dayCodeToIndex)
-              .where((d) => d >= 0)
-              .toList();
-        }
-      case 'MONTHLY':
-        frequency = RecurrenceFrequency.monthly;
-        final bymonthday = parts
-            .where((p) => p.startsWith('BYMONTHDAY='))
-            .map((p) => int.tryParse(p.substring(11)))
-            .where((d) => d != null)
-            .firstOrNull;
-        monthDay = bymonthday;
-      case 'YEARLY':
-        frequency = RecurrenceFrequency.yearly;
+    switch (freqStr) {
+      case 'MINUTELY': frequency = RecurrenceFrequency.minutely;
+      case 'HOURLY':   frequency = RecurrenceFrequency.hourly;
+      case 'DAILY':    frequency = RecurrenceFrequency.daily;
+      case 'WEEKLY':   frequency = RecurrenceFrequency.weekly;
+      case 'MONTHLY':  frequency = RecurrenceFrequency.monthly;
+      case 'YEARLY':   frequency = RecurrenceFrequency.yearly;
       default:
-        // Obsidian-Kurzformen
-        switch (freq.toLowerCase()) {
-          case 'daily' || 'täglich':
-            frequency = RecurrenceFrequency.daily;
-          case 'weekly' || 'wöchentlich':
-            frequency = RecurrenceFrequency.weekly;
-          case 'monthly' || 'monatlich':
-            frequency = RecurrenceFrequency.monthly;
-          case 'yearly' || 'jährlich':
-            frequency = RecurrenceFrequency.yearly;
+        switch (freqStr.toLowerCase()) {
+          case 'daily'   || 'täglich':    frequency = RecurrenceFrequency.daily;
+          case 'weekly'  || 'wöchentlich': frequency = RecurrenceFrequency.weekly;
+          case 'monthly' || 'monatlich':  frequency = RecurrenceFrequency.monthly;
+          case 'yearly'  || 'jährlich':   frequency = RecurrenceFrequency.yearly;
         }
     }
     if (frequency == null) return null;
+
+    int interval = 1;
+    List<int> weekdays = [];
+    int? monthDay;
+    int? nthOccurrence;
+    int? nthWeekday;
+    int? timeHour;
+    int? timeMinute;
+
+    for (final part in parts.skip(1)) {
+      if (part.startsWith('INTERVAL=')) {
+        interval = int.tryParse(part.substring(9)) ?? 1;
+      } else if (part.startsWith('BYMONTHDAY=')) {
+        monthDay = int.tryParse(part.substring(11));
+      } else if (part.startsWith('BYHOUR=')) {
+        timeHour = int.tryParse(part.substring(7));
+      } else if (part.startsWith('BYMINUTE=')) {
+        timeMinute = int.tryParse(part.substring(9));
+      } else if (part.startsWith('BYDAY=')) {
+        final byday = part.substring(6);
+        // Nth weekday: e.g., '1MO' or '-1FR'
+        final nthRe = RegExp(r'^(-?\d+)([A-Z]{2})$');
+        if (byday.split(',').length == 1 && nthRe.hasMatch(byday)) {
+          final m = nthRe.firstMatch(byday)!;
+          nthOccurrence = int.tryParse(m.group(1)!);
+          nthWeekday = _dayCodeToIndex(m.group(2)!);
+        } else {
+          weekdays = byday.split(',').map(_dayCodeToIndex)
+              .where((d) => d >= 0).toList();
+        }
+      }
+    }
+
     return RecurrenceRule(
-        frequency: frequency, weekdays: weekdays, monthDay: monthDay);
+      frequency: frequency,
+      interval: interval,
+      weekdays: weekdays,
+      monthDay: monthDay,
+      nthOccurrence: nthOccurrence,
+      nthWeekday: nthWeekday,
+      timeHour: timeHour,
+      timeMinute: timeMinute,
+    );
   }
 
-  /// Berechnet das nächste Fälligkeitsdatum ausgehend von [from].
   DateTime nextDate(DateTime from) {
+    final eff = interval < 1 ? 1 : interval;
     switch (frequency) {
+      case RecurrenceFrequency.minutely:
+        return from.add(Duration(minutes: eff));
+      case RecurrenceFrequency.hourly:
+        return from.add(Duration(hours: eff));
       case RecurrenceFrequency.daily:
-        return from.add(const Duration(days: 1));
+        return from.add(Duration(days: eff));
 
       case RecurrenceFrequency.weekly:
         if (weekdays.isEmpty) {
-          return from.add(const Duration(days: 7));
+          return from.add(Duration(days: 7 * eff));
         }
-        // Nächsten passenden Wochentag finden
-        for (var i = 1; i <= 7; i++) {
+        // Nächsten passenden Wochentag finden (innerhalb eff Wochen)
+        for (var i = 1; i <= 7 * eff; i++) {
           final candidate = from.add(Duration(days: i));
-          // weekday: DateTime.monday=1, ..., DateTime.sunday=7
-          // unsere Kodierung: 0=Mo, ..., 6=So
-          final wd = candidate.weekday - 1;
+          final wd = candidate.weekday - 1; // 0=Mo..6=So
           if (weekdays.contains(wd)) return candidate;
         }
-        return from.add(const Duration(days: 7));
+        return from.add(Duration(days: 7 * eff));
 
       case RecurrenceFrequency.monthly:
-        final targetDay = monthDay ?? from.day;
         var year = from.year;
-        var month = from.month + 1;
-        if (month > 12) {
-          month = 1;
-          year++;
+        var month = from.month + eff;
+        while (month > 12) { month -= 12; year++; }
+        if (nthOccurrence != null && nthWeekday != null) {
+          return _nthWeekdayOfMonth(year, month, nthOccurrence!, nthWeekday!);
         }
+        final targetDay = monthDay ?? from.day;
         final lastDay = DateTime(year, month + 1, 0).day;
-        final day = targetDay.clamp(1, lastDay);
-        return DateTime(year, month, day);
+        return DateTime(year, month, targetDay.clamp(1, lastDay));
 
       case RecurrenceFrequency.yearly:
-        return DateTime(from.year + 1, from.month, from.day);
+        return DateTime(from.year + eff, from.month, from.day);
     }
+  }
+
+  /// Berechnet den nth Wochentag eines Monats (z.B. 1. Montag, -1. Freitag).
+  static DateTime _nthWeekdayOfMonth(int year, int month, int nth, int wd) {
+    if (nth > 0) {
+      // nth >= 1: vorwärts suchen
+      var day = DateTime(year, month, 1);
+      int count = 0;
+      while (day.month == month) {
+        if (day.weekday - 1 == wd) {
+          count++;
+          if (count == nth) return day;
+        }
+        day = day.add(const Duration(days: 1));
+      }
+    } else {
+      // nth < 0: rückwärts suchen (-1 = letzter)
+      var day = DateTime(year, month + 1, 0); // letzter Tag
+      int count = 0;
+      while (day.month == month) {
+        if (day.weekday - 1 == wd) {
+          count--;
+          if (count == nth) return day;
+        }
+        day = day.subtract(const Duration(days: 1));
+      }
+    }
+    return DateTime(year, month, 1);
   }
 
   // ── Hilfsmethoden ────────────────────────────────────────────────────────────

@@ -2694,14 +2694,17 @@ class _SubNotesSection extends ConsumerWidget {
   }
 }
 
-// Provider für Sub-Notizen
-final _subNotesProvider =
+// Provider für Sub-Notizen (öffentlich für task_detail_screen)
+final subNotesProvider =
     StreamProvider.autoDispose.family<List<EntryWithDetails>, String>(
   (ref, parentEntryId) {
     ref.keepAlive();
     return ref.watch(entryRepositoryProvider).watchSubNotes(parentEntryId);
   },
 );
+
+// Alias für interne Nutzung
+final _subNotesProvider = subNotesProvider;
 
 // ─── Medien-Header (Cover/Bild oben) ─────────────────────────────────────────
 

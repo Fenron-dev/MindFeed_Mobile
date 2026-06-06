@@ -14,7 +14,7 @@ import '../../sync/dto/sync_dto.dart';
 import '../../sync/server/sync_server.dart';
 import '../../sync/sync_provider.dart';
 import '../../sync/ui/conflict_resolution_screen.dart';
-import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToCapture, navigateToEntry;
+import '../../widgets/app_shell.dart' show appScaffoldKey, navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
 import 'feed_provider.dart';
 
@@ -261,8 +261,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (ctx, i) => _GridCard(
                         item: entries[i],
-                        onTap: () => navigateToEntry(
-                            context, ref, entries[i].entry.id),
+                        onTap: () => entries[i].entry.type == 'task'
+                            ? navigateToTask(context, ref, entries[i].entry.id)
+                            : navigateToEntry(context, ref, entries[i].entry.id),
                       ),
                       childCount: entries.length,
                     ),
@@ -334,7 +335,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       child: EntryCard(
                         item: item,
                         compact: _viewMode == 'view_list',
-                        onTap: () => navigateToEntry(context, ref, item.entry.id),
+                        onTap: () => item.entry.type == 'task'
+                            ? navigateToTask(context, ref, item.entry.id)
+                            : navigateToEntry(context, ref, item.entry.id),
                       ),
                     );
                   },

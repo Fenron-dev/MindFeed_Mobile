@@ -560,13 +560,13 @@ class AppSettings {
     }
   }
 
-  static bool getSyncAutoEnabled() => _prefs?.getBool('sync_auto_enabled') ?? false;
+  static bool getSyncAutoEnabled() => _prefs?.getBool('sync_auto_enabled') ?? true;
 
   static Future<void> saveSyncAutoEnabled(bool v) async =>
       _prefs?.setBool('sync_auto_enabled', v);
 
   static int getSyncAutoIntervalMinutes() =>
-      _prefs?.getInt('sync_auto_interval_minutes') ?? 15;
+      _prefs?.getInt('sync_auto_interval_minutes') ?? 5;
 
   static Future<void> saveSyncAutoIntervalMinutes(int v) async =>
       _prefs?.setInt('sync_auto_interval_minutes', v);
@@ -581,7 +581,7 @@ class AppSettings {
   static Future<void> saveSyncOnResume(bool v) async =>
       _prefs?.setBool('sync_on_resume', v);
 
-  static bool getSyncAttachments() => _prefs?.getBool('sync_attachments') ?? false;
+  static bool getSyncAttachments() => _prefs?.getBool('sync_attachments') ?? true;
 
   static Future<void> saveSyncAttachments(bool v) async =>
       _prefs?.setBool('sync_attachments', v);

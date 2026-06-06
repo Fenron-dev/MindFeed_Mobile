@@ -8,8 +8,8 @@ import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/recurrence_calculator.dart';
 import '../../features/entry_detail/entry_detail_provider.dart';
-import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable;
-import '../../widgets/app_shell.dart' show navigateToEntry;
+import '../../features/entry_detail/entry_detail_screen.dart' show EntryPropertiesTable, subNotesProvider;
+import '../../widgets/app_shell.dart' show navigateToEntry, navigateToCapture, navigateToTask;
 import 'task_provider.dart' show subtasksByParentProvider;
 import 'widgets/recurrence_picker.dart';
 
@@ -730,6 +730,9 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
             entryId: task.entry.id,
           ),
 
+          // ─── Unternotizen ───────────────────────────────────────────
+          _TaskSubNotesSection(parentId: task.entry.id),
+
           // ─── Subtasks ────────────────────────────────────────────────
           _SubtaskSection(parentId: task.entry.id),
         ],
@@ -947,15 +950,146 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   }
 }
 
+// ── Unternotizen-Sektion (normale Notizen, die mit diesem Task verlinkt sind) ─
+
+class _TaskSubNotesSection extends ConsumerWidget {
+  final String parentId;
+  const _TaskSubNotesSection({required this.parentId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notesAsync = ref.watch(subNotesProvider(parentId));
+    return notesAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (all) {
+        final notes = all.where((n) => n.entry.type != 'task').toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 16),
+            const Divider(color: MFColors.border),
+            const SizedBox(height: 8),
+            Row(children: [
+              const Icon(Icons.sticky_note_2_outlined,
+                  size: 13, color: MFColors.textMuted),
+              const SizedBox(width: 6),
+              const Text('NOTIZEN',
+                  style: TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.bold,
+                      color: MFColors.textMuted, letterSpacing: 1.2)),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: MFColors.tealBg,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text('${notes.length}',
+                      style: const TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.bold,
+                          color: MFColors.teal)),
+                ),
+              ],
+              const Spacer(),
+              GestureDetector(
+                onTap: () => navigateToCapture(context, ref,
+                    parentEntryId: parentId),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: MFColors.tealBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF0F766E)),
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.add_rounded, size: 13, color: MFColors.teal),
+                    SizedBox(width: 4),
+                    Text('Notiz',
+                        style: TextStyle(fontSize: 11, color: MFColors.teal,
+                            fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ]),
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ...notes.map((note) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: GestureDetector(
+                      onTap: () => navigateToEntry(context, ref, note.entry.id),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: MFColors.surface,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: MFColors.border),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.notes_rounded,
+                              size: 12, color: MFColors.textMuted),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              note.entry.title ?? note.entry.body,
+                              style: const TextStyle(
+                                  fontSize: 13, color: MFColors.textPrimary),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  )),
+            ],
+            const SizedBox(height: 8),
+          ],
+        );
+      },
+    );
+  }
+}
+
 // ── Subtask-Sektion ────────────────────────────────────────────────────────────
 
-class _SubtaskSection extends ConsumerWidget {
+class _SubtaskSection extends ConsumerStatefulWidget {
   final String parentId;
   const _SubtaskSection({required this.parentId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final subtasksAsync = ref.watch(subtasksByParentProvider(parentId));
+  ConsumerState<_SubtaskSection> createState() => _SubtaskSectionState();
+}
+
+class _SubtaskSectionState extends ConsumerState<_SubtaskSection> {
+  final _addCtrl = TextEditingController();
+  bool _adding = false;
+
+  @override
+  void dispose() {
+    _addCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addSubtask() async {
+    final title = _addCtrl.text.trim();
+    if (title.isEmpty) return;
+    setState(() => _adding = true);
+    try {
+      final repo = ref.read(entryRepositoryProvider);
+      final subtask = await repo.createTask(title: title, sourceEntryId: null);
+      await repo.setTaskProperty(
+          subtask.entry.id, 'parent_entry_id', widget.parentId, type: 'text');
+      _addCtrl.clear();
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  Widget build(BuildContext context) {
+    final subtasksAsync = ref.watch(subtasksByParentProvider(widget.parentId));
 
     return subtasksAsync.when(
       loading: () => const SizedBox.shrink(),
@@ -1002,16 +1136,16 @@ class _SubtaskSection extends ConsumerWidget {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        sub.entry.title ?? sub.entry.body,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: isDone
-                              ? MFColors.textMuted
-                              : MFColors.textPrimary,
-                          decoration:
-                              isDone ? TextDecoration.lineThrough : null,
-                          decorationColor: MFColors.textMuted,
+                      child: GestureDetector(
+                        onTap: () => navigateToTask(context, ref, sub.entry.id),
+                        child: Text(
+                          sub.entry.title ?? sub.entry.body,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDone ? MFColors.textMuted : MFColors.textPrimary,
+                            decoration: isDone ? TextDecoration.lineThrough : null,
+                            decorationColor: MFColors.textMuted,
+                          ),
                         ),
                       ),
                     ),
@@ -1019,6 +1153,40 @@ class _SubtaskSection extends ConsumerWidget {
                 ),
               );
             }),
+            // Quick-Add Teilaufgabe
+            const SizedBox(height: 6),
+            Row(children: [
+              const Icon(Icons.radio_button_unchecked_rounded,
+                  size: 18, color: MFColors.border),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _addCtrl,
+                  style: const TextStyle(
+                      fontSize: 14, color: MFColors.textPrimary),
+                  decoration: const InputDecoration(
+                    hintText: 'Teilaufgabe hinzufügen…',
+                    hintStyle: TextStyle(fontSize: 14, color: MFColors.textMuted),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _addSubtask(),
+                ),
+              ),
+              if (_adding)
+                const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 1.5, color: MFColors.teal),
+                )
+              else
+                GestureDetector(
+                  onTap: _addSubtask,
+                  child: const Icon(Icons.add_circle_outline_rounded,
+                      size: 18, color: MFColors.teal),
+                ),
+            ]),
           ],
         );
       },

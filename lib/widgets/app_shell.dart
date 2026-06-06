@@ -208,9 +208,42 @@ class _DesktopShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopShellState extends ConsumerState<_DesktopShell> {
-  // Trackpad-Swipe-Akkumulator für Zwei-Finger-Zurück-Geste
   double _swipeAccX = 0;
   DateTime? _lastSwipeEvent;
+
+  // HardwareKeyboard-Handler für globale Desktop-Shortcuts
+  bool _onHwKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final isMac = Platform.isMacOS;
+    final modifier = isMac
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (!modifier) return false;
+    if (event.logicalKey == LogicalKeyboardKey.keyN) {
+      navigateToCapture(context, ref);
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyT) {
+      ref.read(desktopCaptureProvider.notifier).state = null;
+      ref.read(desktopSelectedEntryProvider.notifier).state = null;
+      ref.read(desktopSelectedTaskProvider.notifier).state = 'new';
+      widget.shell.goBranch(1);
+      return true;
+    }
+    return false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onHwKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHwKey);
+    super.dispose();
+  }
 
   void _go(int index) {
     // Alle Detail-Overlays schließen, damit der Tab-Wechsel sofort sichtbar ist

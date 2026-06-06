@@ -11,7 +11,7 @@ import '../services/app_settings.dart';
 bool get _isDesktop =>
     Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 
-class EntryCard extends StatelessWidget {
+class EntryCard extends ConsumerWidget {
   final EntryWithDetails item;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -26,7 +26,7 @@ class EntryCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final entry = item.entry;
     final isPinned = entry.pinned;
     final isInbox = entry.status == 'inbox';
@@ -47,8 +47,24 @@ class EntryCard extends StatelessWidget {
             ),
           ),
           child: Row(children: [
-            _TypeIcon(entry.type),
-            const SizedBox(width: 8),
+            if (entry.type == 'task')
+              GestureDetector(
+                onTap: () => ref.read(entryRepositoryProvider).toggleTaskStatus(entry.id),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Icon(
+                    isDone
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    size: 16,
+                    color: isDone ? MFColors.teal : MFColors.textMuted,
+                  ),
+                ),
+              )
+            else ...[
+              _TypeIcon(entry.type),
+              const SizedBox(width: 8),
+            ],
             Expanded(
               child: Text(
                 entry.title ?? _stripMarkdown(entry.body),
@@ -179,7 +195,10 @@ class EntryCard extends StatelessWidget {
   }
 
   static String _stripMarkdown(String text) =>
-      text.replaceAll(RegExp(r'[#*`_\[\]\(\)>|\-]'), ' ')
+      text
+          .replaceAll(RegExp(r'\s*\^[a-zA-Z0-9_-]+', multiLine: true), '')
+          .replaceAll(RegExp(r'^- \[[ xX]\] ', multiLine: true), '☐ ')
+          .replaceAll(RegExp(r'[#*`_\[\]\(\)>|]'), ' ')
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
 }
@@ -344,6 +363,7 @@ class _TypeIcon extends StatelessWidget {
       'link' => (Icons.link_rounded, const Color(0xFF60A5FA)),
       'image' => (Icons.image_outlined, const Color(0xFFA78BFA)),
       'audio' => (Icons.mic_outlined, const Color(0xFFC084FC)),
+      'task' => (Icons.task_alt_rounded, MFColors.teal),
       _ => (Icons.notes_rounded, MFColors.textMuted),
     };
     return Icon(icon, size: 12, color: color);
