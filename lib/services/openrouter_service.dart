@@ -23,16 +23,24 @@ class OpenRouterService {
   static const defaultModel =
       'meta-llama/llama-3.2-3b-instruct:free';
 
+  /// Standard-Zeichenlimit für den an das Modell übertragenen Inhalt.
+  static const defaultMaxInputChars = 1500;
+
   final String apiKey;
   final String model;
   final double temperature;
   final int maxTokens;
+
+  /// Max. Zeichen des übertragenen Inhalts (Body). Bei größeren Modellen höher
+  /// setzen für besseren Kontext. Der Zusatzkontext bekommt anteilig ein Drittel.
+  final int maxInputChars;
 
   const OpenRouterService({
     required this.apiKey,
     this.model = defaultModel,
     this.temperature = 0.3,
     this.maxTokens = 400,
+    this.maxInputChars = defaultMaxInputChars,
   });
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
@@ -40,39 +48,40 @@ class OpenRouterService {
   Future<AiEnrichment> enrichEntry(String body,
       {String? existingTitle, String? extraContext}) async {
     // Gesamtinhalt aus allen verfügbaren Quellen zusammensetzen
+    final bodyLimit = maxInputChars < 200 ? 200 : maxInputChars;
+    final ctxLimit = (bodyLimit ~/ 3).clamp(200, 4000);
     final parts = <String>[];
     if (existingTitle?.isNotEmpty == true) parts.add('Titel: $existingTitle');
     if (body.trim().isNotEmpty) {
-      parts.add(body.length > 1500 ? body.substring(0, 1500) : body);
+      parts.add(body.length > bodyLimit ? body.substring(0, bodyLimit) : body);
     }
     if (extraContext?.trim().isNotEmpty == true) {
       final ctx = extraContext!.trim();
-      parts.add(ctx.length > 500 ? ctx.substring(0, 500) : ctx);
+      parts.add(ctx.length > ctxLimit ? ctx.substring(0, ctxLimit) : ctx);
     }
 
     if (parts.isEmpty) throw Exception('Kein Inhalt für KI-Anreicherung vorhanden');
 
     final content = parts.join('\n\n');
 
-    final prompt = '''Du bist ein persönlicher Wissensassistent. Analysiere den folgenden Inhalt und antworte NUR mit einem JSON-Objekt (kein Markdown, kein Code-Block).
+    final prompt = '''Du bist ein präziser Wissensassistent. Analysiere den INHALT unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück (kein Markdown, kein Code-Block, kein Text davor/danach).
 
-Inhalt:
+INHALT:
 $content
 
-Antworte AUSSCHLIESSLICH mit diesem JSON-Format:
-{
-  "tags": ["tag1", "tag2", "tag3"],
-  "title": "Kurzer aussagekräftiger Titel (max 60 Zeichen) oder null",
-  "summary": "1-2 Satz Zusammenfassung",
-  "lang": "de"
-}
+Erzeuge ein JSON-Objekt mit GENAU diesen Schlüsseln. Befülle jeden Wert mit deiner EIGENEN Analyse des INHALTS — gib NIEMALS die Feldbeschreibung oder einen Beispieltext wörtlich zurück:
 
-Wichtige Regeln:
-- tags: 2-5 sinnvolle thematische Tags, lowercase, nur Buchstaben, Zahlen und Bindestriche
-- tags NIEMALS: "leer", "fehler", "kein", "kein-inhalt", "keine-tags", "unknown", "n-a" o.ä.
-- Falls wenig Inhalt: leite Tags aus Titel und Kontext ab
-- title: null wenn Titel bereits gut ist, sonst verbesserten Titel
-- lang: 2-Buchstaben ISO-Code der Hauptsprache''';
+- "title": Verbesserter, konkreter Titel des Themas/Tools/Projekts (max 70 Zeichen). null, wenn der vorhandene Titel bereits gut ist.
+- "summary": 2-4 vollständige, eigene Sätze, die konkret beschreiben, worum es geht, was es kann/macht und für wen es nützlich ist. Bezieh dich auf konkrete Inhalte, keine Floskeln.
+- "tags": 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen). Kleingeschrieben, nur Buchstaben/Zahlen/Bindestriche.
+- "lang": ISO-639-1-Sprachcode des Hauptinhalts (z.B. "de", "en").
+
+Beispiel für das FORMAT (Inhalt ignorieren, nur Struktur):
+{"title": null, "summary": "…", "tags": ["…","…"], "lang": "de"}
+
+Regeln:
+- summary niemals leer und niemals dieser Beschreibungstext; bei dünnem INHALT aus Titel/Kontext ableiten.
+- tags niemals Platzhalter wie "tag1", "leer", "kein", "unknown", "n-a".''';
 
     final prompt_tokens = prompt.length ~/ 3; // Grobe Schätzung
     // Reasoning-Modelle verbrauchen viele Tokens fürs "Denken", bevor das JSON
@@ -163,16 +172,35 @@ Wichtige Regeln:
     final rawTitle = parsed['title'] as String?;
     final title = (rawTitle?.isNotEmpty == true &&
             rawTitle != 'null' &&
+            !_looksLikePlaceholder(rawTitle!) &&
             (existingTitle == null || existingTitle.isEmpty))
         ? rawTitle
+        : null;
+
+    final rawSummary = parsed['summary'] as String?;
+    final summary = (rawSummary != null && !_looksLikePlaceholder(rawSummary))
+        ? rawSummary
         : null;
 
     return AiEnrichment(
       tags: tags,
       title: title,
-      summary: parsed['summary'] as String?,
+      summary: summary,
       lang: parsed['lang'] as String?,
     );
+  }
+
+  /// Erkennt, ob das Modell statt echtem Inhalt den Platzhalter-/Beschreibungs-
+  /// text aus dem Prompt zurückgegeben hat (typisch für schwache Modelle).
+  static bool _looksLikePlaceholder(String s) {
+    final t = s.trim().toLowerCase();
+    if (t.isEmpty) return true;
+    const markers = [
+      'satz zusammenfassung', '1-2 satz', '2-4 vollständige',
+      'aussagekräftiger titel', 'max 60 zeichen', 'max 70 zeichen',
+      'iso-639', 'feldbeschreibung', 'beispieltext', 'worum es geht',
+    ];
+    return markers.any(t.contains);
   }
 
   /// Extrahiert ein JSON-Objekt aus der Modell-Antwort. Entfernt

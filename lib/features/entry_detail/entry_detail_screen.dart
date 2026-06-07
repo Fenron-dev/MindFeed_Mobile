@@ -219,11 +219,14 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       final model = await secureRead(_keyAiModel) ?? '';
       final tempStr = await secureRead('openrouter_temperature');
       final tokStr = await secureRead('openrouter_max_tokens');
+      final charStr = await secureRead('openrouter_max_input_chars');
       final svc = OpenRouterService(
         apiKey: apiKey,
         model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
         temperature: double.tryParse(tempStr ?? '') ?? 0.3,
         maxTokens: int.tryParse(tokStr ?? '') ?? 400,
+        maxInputChars: int.tryParse(charStr ?? '') ??
+            OpenRouterService.defaultMaxInputChars,
       );
 
       final result = await svc.enrichEntry(

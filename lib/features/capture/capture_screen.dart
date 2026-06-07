@@ -708,11 +708,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             final model = await _storage.read(key: _keyAiModel) ?? '';
             final tempStr = await _storage.read(key: 'openrouter_temperature');
             final tokStr = await _storage.read(key: 'openrouter_max_tokens');
+            final charStr = await _storage.read(key: 'openrouter_max_input_chars');
             final svc = OpenRouterService(
               apiKey: apiKey,
               model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
               temperature: double.tryParse(tempStr ?? '') ?? 0.3,
               maxTokens: int.tryParse(tokStr ?? '') ?? 400,
+              maxInputChars: int.tryParse(charStr ?? '') ??
+                  OpenRouterService.defaultMaxInputChars,
             );
             // Zusätzlichen Kontext aus URL-Metadaten aufbauen
             final extraParts = <String>[];

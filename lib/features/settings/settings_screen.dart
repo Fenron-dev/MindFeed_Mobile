@@ -25,6 +25,7 @@ const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
 const _keyTemperature = 'openrouter_temperature';
 const _keyMaxTokens = 'openrouter_max_tokens';
+const _keyMaxInputChars = 'openrouter_max_input_chars';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -47,6 +48,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _selectedModel = '';
   double _temperature = 0.3;
   int _maxTokens = 400;
+  int _maxInputChars = 1500;
 
   // Modell-Picker
   List<Map<String, dynamic>> _models = [];
@@ -81,6 +83,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final model = await secureRead(_keyAiModel) ?? '';
     final tempStr = await secureRead(_keyTemperature);
     final tokStr = await secureRead(_keyMaxTokens);
+    final charStr = await secureRead(_keyMaxInputChars);
     if (mounted) {
       setState(() {
         _apiKeyCtrl.text = key;
@@ -88,6 +91,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _selectedModel = model;
         _temperature = double.tryParse(tempStr ?? '') ?? 0.3;
         _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
+        _maxInputChars = int.tryParse(charStr ?? '') ?? 1500;
       });
     }
   }
@@ -97,6 +101,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await secureWrite(_keyAiModel, _selectedModel);
     await secureWrite(_keyTemperature, _temperature.toString());
     await secureWrite(_keyMaxTokens, _maxTokens.toString());
+    await secureWrite(_keyMaxInputChars, _maxInputChars.toString());
     if (mounted) {
       setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1043,6 +1048,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   decoration: InputDecoration(
                     hintText: '400',
                     helperText: 'Erhöhen wenn Antworten abgeschnitten werden',
+                    helperStyle: const TextStyle(
+                        fontSize: 10, color: MFColors.textMuted),
+                    filled: true, fillColor: MFColors.bg,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.teal)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // ── Max Input-Zeichen (übertragener Kontext) ───────────────
+                const Text('Max Input-Zeichen',
+                    style: TextStyle(fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: MFColors.textSecondary)),
+                const SizedBox(height: 6),
+                TextFormField(
+                  initialValue: _maxInputChars.toString(),
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(fontSize: 13,
+                      color: MFColors.textPrimary, fontFamily: 'monospace'),
+                  onChanged: (v) {
+                    final n = int.tryParse(v);
+                    if (n != null && n >= 200) setState(() => _maxInputChars = n);
+                  },
+                  decoration: InputDecoration(
+                    hintText: '1500',
+                    helperText: 'Wie viel Inhalt an die KI geht. Größere Modelle '
+                        'verstehen mit mehr Zeichen oft besser (z.B. 4000–8000).',
+                    helperMaxLines: 2,
                     helperStyle: const TextStyle(
                         fontSize: 10, color: MFColors.textMuted),
                     filled: true, fillColor: MFColors.bg,
