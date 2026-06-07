@@ -421,9 +421,18 @@ class UrlMetadataService {
       String thumb = 'https://img.youtube.com/vi/$vid/hqdefault.jpg';
 
       if (oRes.statusCode == 200) {
-        title = _jsonStr(oRes.body, 'title') ?? title;
-        author = _jsonStr(oRes.body, 'author_name') ?? author;
-        thumb = _jsonStr(oRes.body, 'thumbnail_url') ?? thumb;
+        // oEmbed ist sauberes JSON → korrekt dekodieren (Umlaute/Sonderzeichen)
+        try {
+          final o = jsonDecode(oRes.body) as Map<String, dynamic>;
+          title = (o['title'] as String?)?.trim().isNotEmpty == true
+              ? (o['title'] as String).trim() : title;
+          author = (o['author_name'] as String?) ?? author;
+          thumb = (o['thumbnail_url'] as String?) ?? thumb;
+        } catch (_) {
+          title = _jsonStr(oRes.body, 'title') ?? title;
+          author = _jsonStr(oRes.body, 'author_name') ?? author;
+          thumb = _jsonStr(oRes.body, 'thumbnail_url') ?? thumb;
+        }
       }
 
       // Beschreibung, Laufzeit und Datum aus der Seite extrahieren
@@ -678,6 +687,17 @@ class UrlMetadataService {
     return host;
   }
 
-  static String? _jsonStr(String json, String key) =>
-      RegExp('"$key"\\s*:\\s*"([^"]+)"').firstMatch(json)?.group(1);
+  /// Extrahiert einen JSON-String-Wert per Regex UND dekodiert Escapes
+  /// (\uXXXX, \", \/, \n …) — sonst landet z.B. "für" wörtlich im Titel.
+  static String? _jsonStr(String json, String key) {
+    final m = RegExp('"$key"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"').firstMatch(json);
+    if (m == null) return null;
+    final raw = m.group(1);
+    if (raw == null) return null;
+    try {
+      return jsonDecode('"$raw"') as String;
+    } catch (_) {
+      return raw;
+    }
+  }
 }

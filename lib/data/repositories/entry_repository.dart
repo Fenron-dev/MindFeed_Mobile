@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
+import '../../core/vault_manager.dart';
 import '../db/app_database.dart';
 import '../db/daos/entry_dao.dart';
 import '../db/daos/tag_dao.dart';
@@ -931,6 +934,60 @@ class EntryRepository {
       final entries = rows.map((r) => db.entries.map(r.data)).toList();
       return _bulkEnrich(entries);
     });
+  }
+
+  /// Kopiert eine Datei ins Vault und hängt sie als Attachment an [entryId].
+  /// Wiederverwendbar für nachträgliches Hinzufügen (Detail-Screen, Drag&Drop).
+  Future<void> addAttachment(String entryId, String sourcePath,
+      {String? fileName}) async {
+    final src = File(sourcePath);
+    if (!src.existsSync()) return;
+    final base = await VaultManager.getAttachmentsPath();
+    final now = DateTime.now();
+    final subDir = Directory(
+        p.join(base, '${now.year}', now.month.toString().padLeft(2, '0')));
+    await subDir.create(recursive: true);
+    final ext = p.extension(sourcePath).toLowerCase();
+    final dest = p.join(subDir.path, '${now.millisecondsSinceEpoch}$ext');
+    await src.copy(dest);
+
+    final mime = _mimeForExt(ext.replaceFirst('.', ''));
+    final type = _attachmentType(mime);
+    await attachmentDao.upsert(AttachmentsCompanion(
+      id: Value('att-${_uuid.v4()}'),
+      entryId: Value(entryId),
+      type: Value(type),
+      mimeType: Value(mime),
+      localPath: Value(dest),
+      fileName: Value(fileName ?? p.basename(sourcePath)),
+      fileSize: Value(await File(dest).length()),
+    ));
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  static String _mimeForExt(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'jpg': case 'jpeg': return 'image/jpeg';
+      case 'png': return 'image/png';
+      case 'gif': return 'image/gif';
+      case 'webp': return 'image/webp';
+      case 'heic': return 'image/heic';
+      case 'mp4': case 'm4v': return 'video/mp4';
+      case 'mov': return 'video/quicktime';
+      case 'mp3': return 'audio/mpeg';
+      case 'm4a': return 'audio/mp4';
+      case 'wav': return 'audio/wav';
+      case 'pdf': return 'application/pdf';
+      default: return 'application/octet-stream';
+    }
+  }
+
+  static String _attachmentType(String mime) {
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('audio/')) return 'audio';
+    return 'document';
   }
 
   /// Stellt einen Eintrag aus dem Papierkorb wieder her.

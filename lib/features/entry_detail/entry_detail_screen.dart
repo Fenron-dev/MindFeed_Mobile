@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
@@ -306,6 +307,17 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         );
     if (mounted) {
       setState(() => _isEditing = false);
+    }
+  }
+
+  Future<void> _addAttachment(String entryId) async {
+    final res = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (res == null) return;
+    final repo = ref.read(entryRepositoryProvider);
+    for (final f in res.files) {
+      if (f.path != null) {
+        await repo.addAttachment(entryId, f.path!, fileName: f.name);
+      }
     }
   }
 
@@ -668,12 +680,45 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     entryId: entry.id,
                     assignedIds: item.containerIds),
 
-                // Anhänge
+                // Anhänge — immer mit Hinzufügen-Button
+                const SizedBox(height: 16),
+                Row(children: [
+                  const Text('ANHÄNGE',
+                      style: TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.bold,
+                          color: MFColors.textMuted, letterSpacing: 1.2)),
+                  if (item.attachments.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: MFColors.tealBg, borderRadius: BorderRadius.circular(99)),
+                      child: Text('${item.attachments.length}',
+                          style: const TextStyle(fontSize: 9, color: MFColors.teal,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => _addAttachment(entry.id),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: MFColors.tealBg,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF0F766E))),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.attach_file_rounded, size: 13, color: MFColors.teal),
+                        SizedBox(width: 4),
+                        Text('Anhang', style: TextStyle(fontSize: 11, color: MFColors.teal,
+                            fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                ]),
                 if (item.attachments.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _Section(
-                    label: 'Anhänge',
-                    child: Builder(builder: (_) {
+                  const SizedBox(height: 8),
+                  Builder(builder: (_) {
                       // Bild-Galerie für Fullscreen-Swipe vorbereiten
                       final imageAtts = item.attachments
                           .where((a) => a.type == 'image')
@@ -702,7 +747,6 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                         ],
                       );
                     }),
-                  ),
                 ],
 
                 // Verlinkte Aufgaben (per Einstellung ein-/ausschaltbar)

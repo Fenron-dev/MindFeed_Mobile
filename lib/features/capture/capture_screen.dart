@@ -19,6 +19,7 @@ import '../../services/app_settings.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
 import '../../sync/sync_provider.dart';
+import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/wikilink_text_field.dart';
 
 const _storage = FlutterSecureStorage();
@@ -755,10 +756,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       }
 
       if (mounted) {
+        // Bei Link-Einträgen (angereichert) direkt das Detail öffnen, damit
+        // Container/Tags ohne erneutes Suchen+Anklicken gesetzt werden können.
+        final openDetail = detectedUrl != null && widget.parentEntryId == null;
         if (widget.onBack != null) {
+          if (openDetail) navigateToEntry(context, ref, createdEntry.entry.id);
           widget.onBack!();
         } else {
           Navigator.pop(context);
+          if (openDetail) navigateToEntry(context, ref, createdEntry.entry.id);
         }
       }
     } catch (e) {
