@@ -75,7 +75,9 @@ Wichtige Regeln:
 - lang: 2-Buchstaben ISO-Code der Hauptsprache''';
 
     final prompt_tokens = prompt.length ~/ 3; // Grobe Schätzung
-    final needed_tokens = (maxTokens < 200) ? 200 : maxTokens;
+    // Reasoning-Modelle verbrauchen viele Tokens fürs "Denken", bevor das JSON
+    // kommt → großzügiger Boden, sonst wird die Antwort abgeschnitten.
+    final needed_tokens = (maxTokens < 800) ? 800 : maxTokens;
 
     final reqBody = jsonEncode({
       'model': model,
@@ -123,18 +125,27 @@ Wichtige Regeln:
       throw Exception('OpenRouter ${res.statusCode}: $errMsg');
     }
 
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    final responseText =
-        data['choices']?[0]?['message']?['content'] as String? ?? '';
-
-    // JSON aus der Antwort extrahieren (auch wenn Modell trotzdem Markdown schreibt)
-    final jsonMatch =
-        RegExp(r'\{[\s\S]*\}', multiLine: true).firstMatch(responseText);
-    if (jsonMatch == null) {
-      throw Exception('Ungültige KI-Antwort: kein JSON gefunden');
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    // Manche (Reasoning-)Modelle liefern leeren content und schreiben in
+    // 'reasoning'; dann dort nach dem JSON suchen.
+    var responseText = (msg?['content'] as String?) ?? '';
+    if (_extractJson(responseText) == null) {
+      final reasoning = (msg?['reasoning'] as String?) ?? '';
+      if (reasoning.isNotEmpty) responseText = '$responseText\n$reasoning';
     }
 
-    final parsed = jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>;
+    final jsonStr = _extractJson(responseText);
+    if (jsonStr == null) {
+      final snippet = responseText.trim().isEmpty
+          ? '(leere Antwort – evtl. max_tokens zu niedrig oder Modell ungeeignet)'
+          : responseText.trim().substring(
+              0, responseText.trim().length.clamp(0, 200));
+      throw Exception('Ungültige KI-Antwort: kein JSON gefunden. $snippet');
+    }
+
+    final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
 
     const _blockedTags = {
       'leer', 'fehler', 'kein', 'keine', 'kein-inhalt', 'keine-tags',
@@ -162,6 +173,51 @@ Wichtige Regeln:
       summary: parsed['summary'] as String?,
       lang: parsed['lang'] as String?,
     );
+  }
+
+  /// Extrahiert ein JSON-Objekt aus der Modell-Antwort. Entfernt
+  /// `<think>`-Blöcke und ```-Fences, findet das erste balancierte `{…}` und
+  /// repariert ein durch max_tokens abgeschnittenes Objekt (fehlende `}`).
+  static String? _extractJson(String text) {
+    if (text.trim().isEmpty) return null;
+    var t = text
+        .replaceAll(RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'```(?:json)?', caseSensitive: false), '');
+
+    final start = t.indexOf('{');
+    if (start == -1) return null;
+
+    int depth = 0;
+    bool inStr = false, esc = false;
+    int end = -1;
+    for (int i = start; i < t.length; i++) {
+      final c = t[i];
+      if (inStr) {
+        if (esc) { esc = false; }
+        else if (c == '\\') { esc = true; }
+        else if (c == '"') { inStr = false; }
+        continue;
+      }
+      if (c == '"') { inStr = true; }
+      else if (c == '{') { depth++; }
+      else if (c == '}') { depth--; if (depth == 0) { end = i; break; } }
+    }
+
+    if (end != -1) {
+      final candidate = t.substring(start, end + 1);
+      try { jsonDecode(candidate); return candidate; } catch (_) {}
+    }
+
+    // Abgeschnitten: fehlende schließende Klammern ergänzen und versuchen
+    var partial = t.substring(start).trimRight();
+    if (inStr) partial += '"';
+    // dangling Komma/Doppelpunkt entfernen
+    partial = partial.replaceFirst(RegExp(r'[,:]\s*$'), '');
+    for (int i = 0; i < depth + 1 && i < 5; i++) {
+      try { jsonDecode(partial); return partial; } catch (_) {}
+      partial += '}';
+    }
+    return null;
   }
 
   /// Testet die Verbindung mit einem einfachen Ping (kein JSON-Parsing).
