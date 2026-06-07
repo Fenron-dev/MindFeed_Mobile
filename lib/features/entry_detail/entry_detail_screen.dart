@@ -281,10 +281,23 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
 
       if (mounted) {
+        // Existiert ein Transkript? Dann nach der Auswertung das Löschen anbieten
+        // (nicht automatisch — die Notiz soll vorher geprüft werden können).
+        final hasTranscript = props.any((p) => p.key == '_transcript');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(changes > 0 ? 'KI fertig: $changes Felder aktualisiert' : 'Keine Änderungen nötig'),
+          content: Text(changes > 0
+              ? 'KI fertig: $changes Felder aktualisiert${hasTranscript ? ' — Transkript prüfen & ggf. löschen' : ''}'
+              : 'Keine Änderungen nötig'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: MFColors.teal,
+          duration: Duration(seconds: hasTranscript ? 7 : 4),
+          action: hasTranscript
+              ? SnackBarAction(
+                  label: 'Transkript löschen',
+                  textColor: Colors.white,
+                  onPressed: () => _deleteTranscript(entryId),
+                )
+              : null,
         ));
       }
     } catch (e) {
@@ -331,39 +344,62 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       transcript = pasted.trim();
     }
 
-    await _appendTranscript(entryId, transcript);
+    await _storeTranscript(entryId, transcript);
   }
 
-  Future<void> _appendTranscript(String entryId, String transcript) async {
-    final current =
-        (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? '';
-    if (current.contains('## Transkript')) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Transkript bereits vorhanden.'),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-      return;
-    }
-    final sep = current.trim().isEmpty ? '' : '\n\n';
-    final newBody = '$current$sep## Transkript\n\n$transcript';
-    await ref.read(entryRepositoryProvider).updateEntry(entryId, body: newBody);
-    if (_isEditing) _bodyCtrl.text = newBody;
-    if (mounted) {
-      final title =
-          (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.title;
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Transkript hinzugefügt.'),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: MFColors.teal,
-        duration: const Duration(seconds: 6),
-        action: SnackBarAction(
-          label: 'Mit KI auswerten',
-          textColor: Colors.white,
-          onPressed: () => _enrichWithAi(entryId, newBody, title),
+  /// Speichert das Transkript als (versteckte) Property '_transcript' statt im
+  /// Body — so wird die Notiz nicht zugespammt und es ist leicht löschbar.
+  Future<void> _storeTranscript(String entryId, String transcript) async {
+    await ref
+        .read(entryRepositoryProvider)
+        .setPropertyByKey(entryId, '_transcript', transcript, 'text');
+    if (!mounted) return;
+    final title =
+        (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.title;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text('Transkript gespeichert (einklappbar unter der Notiz).'),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: MFColors.teal,
+      duration: const Duration(seconds: 6),
+      action: SnackBarAction(
+        label: 'Mit KI auswerten',
+        textColor: Colors.white,
+        onPressed: () => _enrichWithAi(entryId, transcript, title),
+      ),
+    ));
+  }
+
+  Future<void> _deleteTranscript(String entryId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Transkript löschen?',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 17)),
+        content: const Text(
+          'Das gespeicherte Transkript wird entfernt. Die ausgewerteten '
+          'Inhalte (Titel, Tags, Zusammenfassung, Notiz) bleiben erhalten.',
+          style: TextStyle(color: MFColors.textSecondary, fontSize: 13),
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(entryRepositoryProvider).removePropertyByKey(entryId, '_transcript');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Transkript gelöscht.'),
+        behavior: SnackBarBehavior.floating,
       ));
     }
   }
@@ -816,6 +852,25 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                           }
                         },
                       ),
+
+                // Transkript (einklappbar) — nur wenn vorhanden
+                Builder(builder: (_) {
+                  final t = item.properties
+                      .where((p) => p.key == '_transcript')
+                      .firstOrNull;
+                  if (t == null || (t.value ?? '').trim().isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: _TranscriptSection(
+                      transcript: t.value!,
+                      onDelete: () => _deleteTranscript(entry.id),
+                      onEnrich: () => _enrichWithAi(
+                          entry.id, t.value!, entry.title),
+                    ),
+                  );
+                }),
 
                 // Source-Link-Preview
                 if (entry.sourceUrl != null) ...[
@@ -3213,6 +3268,110 @@ class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Einklappbare Transkript-Sektion ────────────────────────────────────────
+class _TranscriptSection extends StatefulWidget {
+  final String transcript;
+  final VoidCallback onDelete;
+  final VoidCallback onEnrich;
+
+  const _TranscriptSection({
+    required this.transcript,
+    required this.onDelete,
+    required this.onEnrich,
+  });
+
+  @override
+  State<_TranscriptSection> createState() => _TranscriptSectionState();
+}
+
+class _TranscriptSectionState extends State<_TranscriptSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chars = widget.transcript.length;
+    return Container(
+      decoration: BoxDecoration(
+        color: MFColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: MFColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Kopfzeile (klickbar = ein-/ausklappen)
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.keyboard_arrow_right_rounded,
+                    size: 20,
+                    color: MFColors.textSecondary,
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.subtitles_outlined,
+                      size: 15, color: Color(0xFFEF4444)),
+                  const SizedBox(width: 6),
+                  const Text('Transkript',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: MFColors.textPrimary)),
+                  const SizedBox(width: 6),
+                  Text('${(chars / 1000).toStringAsFixed(chars < 1000 ? 1 : 0)}k Z.',
+                      style: const TextStyle(
+                          fontSize: 10, color: MFColors.textMuted)),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Mit KI auswerten',
+                    onPressed: widget.onEnrich,
+                    icon: const Icon(Icons.auto_awesome_outlined,
+                        size: 17, color: Color(0xFF8B5CF6)),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                  ),
+                  IconButton(
+                    tooltip: 'Transkript löschen',
+                    onPressed: widget.onDelete,
+                    icon: const Icon(Icons.delete_outline,
+                        size: 17, color: Colors.redAccent),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    widget.transcript,
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.5,
+                        color: MFColors.textSecondary),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

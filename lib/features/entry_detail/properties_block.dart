@@ -36,7 +36,7 @@ class _PropertiesBlockState extends ConsumerState<PropertiesBlock> {
   static const _hidden = {
     'og_image', 'og_title', 'og_description', 'domain', 'genres',
     'media_type', 'url_author', 'score', '_template', 'parent_entry_id',
-    'cover', 'cover_image', 'bild',
+    'cover', 'cover_image', 'bild', '_transcript',
   };
   static const _hiddenPrefixes = ['bgg_', 'github_', 'youtube_', 'anilist_',
     'vgg_', 'rpg_', 'task_'];
