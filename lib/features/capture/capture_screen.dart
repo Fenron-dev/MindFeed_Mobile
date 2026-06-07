@@ -63,7 +63,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   final List<XFile> _pendingImages = [];
 
   // Audio-Aufnahme
-  final _recorder = AudioRecorder();
+  // Lazy: Recorder erst bei der ersten Aufnahme erzeugen. Verhindert, dass das
+  // native `record`-Plugin schon beim Öffnen/Schließen des Capture-Screens
+  // initialisiert/disposed wird (führte auf Windows zum Absturz nach dem
+  // Speichern, wenn der Screen geschlossen wird).
+  AudioRecorder? _recorder;
   bool _isRecording = false;
   String? _recordedAudioPath;
   Duration _recordingDuration = Duration.zero;
@@ -126,7 +130,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _urlDebounce?.cancel();
     _autoSaveDebounce?.cancel();
     _recordingTimer?.cancel();
-    _recorder.dispose();
+    try { _recorder?.dispose(); } catch (_) {}
     _bodyCtrl.removeListener(_onBodyChanged);
     _bodyCtrl.dispose();
     _titleCtrl.dispose();
@@ -274,17 +278,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Future<void> _toggleRecording() async {
+    final rec = _recorder ??= AudioRecorder();
     if (_isRecording) {
       // Aufnahme stoppen
       _recordingTimer?.cancel();
-      final path = await _recorder.stop();
+      final path = await rec.stop();
       setState(() {
         _isRecording = false;
         _recordedAudioPath = path;
       });
     } else {
       // Aufnahme starten
-      final hasPermission = await _recorder.hasPermission();
+      final hasPermission = await rec.hasPermission();
       if (!hasPermission) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -301,7 +306,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       await subDir.create(recursive: true);
       final audioPath = p.join(subDir.path, '${now.millisecondsSinceEpoch}.m4a');
 
-      await _recorder.start(
+      await rec.start(
         const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000),
         path: audioPath,
       );

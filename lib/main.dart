@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -25,7 +26,10 @@ import 'services/app_settings.dart';
 /// Globaler Callback — nach einem Restore aufgerufen, um die App neu zu starten.
 Future<void> Function()? onRestartApp;
 
-void main() async {
+void main() {
+  // runZonedGuarded fängt unbehandelte (auch asynchrone) Fehler ab, damit ein
+  // einzelner Fehler die App auf Desktop nicht hart beendet.
+  runZonedGuarded(() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
@@ -55,6 +59,9 @@ void main() async {
   }
 
   runApp(const _AppRoot());
+  }, (error, stack) {
+    debugPrint('[Uncaught] $error\n$stack');
+  });
 }
 
 // ─── App-Root mit Restart-Fähigkeit ──────────────────────────────────────────
