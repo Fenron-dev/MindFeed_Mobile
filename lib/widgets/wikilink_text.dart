@@ -57,7 +57,7 @@ class _WikilinkTextState extends State<WikilinkText> {
     final pattern = RegExp(
         r'\[\[([^\]]+)\]\]'   // [[Wikilink]] (intern)
         r'|\*\*([^*]+)\*\*'   // **bold**
-        r'|#([a-zA-Z][a-zA-Z0-9_/äöüÄÖÜß]*)' // #tag
+        r'|#([a-zA-Z][a-zA-Z0-9_\-/äöüÄÖÜß]*)' // #tag (inkl. Bindestrich)
         r'|(https?://\S+)',   // URL (extern)
     );
 

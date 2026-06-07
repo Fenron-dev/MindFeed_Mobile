@@ -25,8 +25,11 @@ class _PairingFlowScreenState extends ConsumerState<PairingFlowScreen>
   @override
   void initState() {
     super.initState();
-    // Default zu QR-Scan (Tab 1) – die häufigste Client-Aktion auf Mobile
-    _tabs = TabController(length: 4, vsync: this, initialIndex: 1);
+    // Server: direkt zu "QR zeigen" (Tab 2) – Server fügt i.d.R. Clients per
+    // QR hinzu. Client: zu "QR scannen" (Tab 1).
+    final isServer = AppSettings.getSyncRole() == SyncRole.server;
+    _tabs = TabController(
+        length: 4, vsync: this, initialIndex: isServer ? 2 : 1);
     _deviceNameCtrl = TextEditingController(text: AppSettings.getDeviceName());
   }
 

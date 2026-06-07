@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -647,9 +648,11 @@ class _AddPropertySheetState extends ConsumerState<_AddPropertySheet> {
 
   @override
   Widget build(BuildContext context) {
+    // Mobile: weniger Vorschläge, damit die Tastatur nicht zu viel verdrängt
+    final isDesktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
     final keySuggestions = widget.existingKeys
         .where((k) => _keyQuery.isEmpty || k.toLowerCase().contains(_keyQuery.toLowerCase()))
-        .take(12)
+        .take(isDesktop ? 12 : 6)
         .toList();
     return Padding(
       padding: EdgeInsets.only(
