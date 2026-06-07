@@ -21,6 +21,7 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
+import '../../services/youtube_transcript_service.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../features/tasks/task_provider.dart' show tasksBySourceNoteProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
@@ -47,6 +48,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _isEditing = false;
   bool _showPreview = false;
   bool _enriching = false;
+  bool _fetchingTranscript = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
   // ScrollController bleibt über Stream-Re-Emits hinweg erhalten → Position springt nicht
@@ -299,6 +301,138 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     }
   }
 
+  static bool _isYoutube(String? url) {
+    if (url == null || url.isEmpty) return false;
+    final u = url.toLowerCase();
+    return u.contains('youtube.com/watch') ||
+        u.contains('youtu.be/') ||
+        u.contains('youtube.com/shorts/');
+  }
+
+  /// Holt das YouTube-Transkript automatisch; bei Fehlschlag öffnet sich der
+  /// manuelle Einfüge-Dialog. Das Ergebnis wird unter "## Transkript" an die
+  /// Notiz angehängt.
+  Future<void> _fetchTranscript(String entryId, String? url, String body) async {
+    if (url == null) return;
+    setState(() => _fetchingTranscript = true);
+    String? transcript;
+    try {
+      transcript = await YoutubeTranscriptService.fetch(url);
+    } catch (_) {
+      transcript = null;
+    }
+    if (!mounted) return;
+    setState(() => _fetchingTranscript = false);
+
+    if (transcript == null || transcript.trim().isEmpty) {
+      // Fallback: manuell einfügen
+      final pasted = await _showTranscriptPasteDialog(url);
+      if (pasted == null || pasted.trim().isEmpty) return;
+      transcript = pasted.trim();
+    }
+
+    await _appendTranscript(entryId, transcript);
+  }
+
+  Future<void> _appendTranscript(String entryId, String transcript) async {
+    final current =
+        (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? '';
+    if (current.contains('## Transkript')) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Transkript bereits vorhanden.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    final sep = current.trim().isEmpty ? '' : '\n\n';
+    final newBody = '$current$sep## Transkript\n\n$transcript';
+    await ref.read(entryRepositoryProvider).updateEntry(entryId, body: newBody);
+    if (_isEditing) _bodyCtrl.text = newBody;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Transkript hinzugefügt.'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: MFColors.teal,
+      ));
+    }
+  }
+
+  Future<String?> _showTranscriptPasteDialog(String url) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: MFColors.border),
+        ),
+        title: const Text('Transkript einfügen',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 17)),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Der automatische Abruf hat nicht geklappt (keine Untertitel '
+                'verfügbar oder blockiert). Öffne das Transkript auf YouTube '
+                '(„… mehr" → „Transkript anzeigen"), kopiere es und füge es hier ein.',
+                style: TextStyle(color: MFColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () async {
+                  final uri = Uri.tryParse(url);
+                  if (uri != null && await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('Video öffnen'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                maxLines: 10,
+                minLines: 6,
+                autofocus: true,
+                style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Transkript hier einfügen…',
+                  hintStyle: const TextStyle(color: MFColors.textMuted),
+                  filled: true,
+                  fillColor: MFColors.bg,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: MFColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: MFColors.border),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Hinzufügen'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _save() async {
     await ref.read(entryRepositoryProvider).updateEntry(
           widget.entryId,
@@ -489,6 +623,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 onSelected: (v) async {
                   if (v == 'delete') await _delete();
                   if (v == 'ai') await _enrichWithAi(entry.id, entry.body, entry.title);
+                  if (v == 'transcript') {
+                    await _fetchTranscript(entry.id, entry.sourceUrl, entry.body);
+                  }
                   if (v == 'done' || v == 'inbox' || v == 'archive') {
                     await ref.read(entryRepositoryProvider).updateEntry(
                         entry.id, status: v == 'archive' ? 'archived' : v);
@@ -499,6 +636,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     _enriching ? Icons.hourglass_top_rounded : Icons.auto_awesome_outlined,
                     _enriching ? 'KI läuft…' : 'KI anreichern',
                     color: const Color(0xFF8B5CF6)),
+                  if (_isYoutube(entry.sourceUrl))
+                    _popItem('transcript',
+                      _fetchingTranscript
+                          ? Icons.hourglass_top_rounded
+                          : Icons.subtitles_outlined,
+                      _fetchingTranscript ? 'Transkript läuft…' : 'Transkript holen',
+                      color: const Color(0xFFEF4444)),
                   const PopupMenuDivider(),
                   if (entry.status != 'done')
                     _popItem('done', Icons.check_circle_outline, 'Erledigt'),

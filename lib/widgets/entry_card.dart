@@ -440,6 +440,7 @@ class _TypeIcon extends StatelessWidget {
       'link' => (Icons.link_rounded, const Color(0xFF60A5FA)),
       'image' => (Icons.image_outlined, const Color(0xFFA78BFA)),
       'audio' => (Icons.mic_outlined, const Color(0xFFC084FC)),
+      'video' => (Icons.play_circle_outline_rounded, const Color(0xFFEF4444)),
       'task' => (Icons.task_alt_rounded, MFColors.teal),
       _ => (Icons.notes_rounded, MFColors.textMuted),
     };

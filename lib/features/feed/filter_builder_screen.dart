@@ -308,7 +308,7 @@ class _ConditionEditorState extends ConsumerState<_ConditionEditor> {
     } else if (_field == FilterField.status) {
       s = ['inbox', 'active', 'done', 'archived'];
     } else if (_field == FilterField.type) {
-      s = ['text', 'link', 'image', 'audio', 'task'];
+      s = ['text', 'link', 'image', 'audio', 'video', 'task'];
     }
     if (mounted) setState(() => _suggestions = s);
   }

@@ -254,7 +254,9 @@ class EntryRepository {
     final now = DateTime.now().toUtc();
 
     final hasUrl = sourceUrl != null && sourceUrl.isNotEmpty;
-    final resolvedType = hasUrl ? 'link' : type;
+    // Video-Plattformen → eigener Typ 'video', sonst 'link'
+    final isVideoUrl = hasUrl && _isVideoUrl(sourceUrl, urlDomain, urlMediaType);
+    final resolvedType = hasUrl ? (isVideoUrl ? 'video' : 'link') : type;
 
     // Titel: explizit, dann URL-Titel — nie automatisch aus Body extrahieren
     final resolvedTitle = (title != null && title.trim().isNotEmpty)
@@ -964,6 +966,17 @@ class EntryRepository {
     ));
     await entryDao.upsert(EntriesCompanion(
         id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  static bool _isVideoUrl(String url, String? domain, String? mediaType) {
+    if (mediaType != null &&
+        (mediaType.toLowerCase().contains('video') ||
+         mediaType.toLowerCase() == 'youtube')) {
+      return true;
+    }
+    final u = url.toLowerCase();
+    return u.contains('youtube.com/watch') || u.contains('youtu.be/') ||
+        u.contains('vimeo.com/') || (domain == 'youtube.com');
   }
 
   static String _mimeForExt(String ext) {
