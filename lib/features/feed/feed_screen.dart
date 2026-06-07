@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
@@ -38,7 +36,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   String _sortField = 'created';
   bool _sortAsc = false;
   // Schnellfilter (lokal, Tri-State): '' = alle. Keys:
-  // 'inbox'|'pinned'|'done'|'archived'|'task'. _quickExcept = "alle außer".
+  // 'inbox'|'pinned'|'done'|'archived'|'task'|'video'. _quickExcept = "alle außer".
   String _quickKey = '';
   bool _quickExcept = false;
   // IDs von gerade gewischten Einträgen – sofort aus der Liste entfernen,
@@ -120,6 +118,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       'done'     => e.entry.status == 'done',
       'archived' => e.entry.status == 'archived',
       'task'     => e.entry.type == 'task',
+      'video'    => e.entry.type == 'video',
       _          => true,
     };
     // Sub-Notizen grundsätzlich ausblenden (außer sie wären explizit gemeint)
@@ -720,6 +719,7 @@ class _QuickFilterBar extends ConsumerWidget {
     (key: 'done',     icon: Icons.check_circle_outline,  tip: 'Erledigt'),
     (key: 'archived', icon: Icons.archive_outlined,      tip: 'Archiviert'),
     (key: 'task',     icon: Icons.task_alt_outlined,     tip: 'Aufgaben'),
+    (key: 'video',    icon: Icons.play_circle_outline,   tip: 'Videos'),
   ];
 
   bool get _isDesktop =>
