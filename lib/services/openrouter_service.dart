@@ -337,6 +337,105 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     return text.isEmpty ? null : text;
   }
 
+  /// Erzeugt eine recherchierte, strukturierte Markdown-Notiz zu einem Link.
+  ///
+  /// [searchContext] sind verdichtete Web-Treffer (z.B. aus SearXNG) und
+  /// dienen als faktische Basis für Alternativen, Referenzen, Videos und FAQ
+  /// — so halluziniert das Modell keine URLs. Liefert portables Markdown
+  /// (OHNE YAML-Frontmatter, da MindFeed Metadaten als Properties verwaltet).
+  Future<String?> generateResearchedNote({
+    required String title,
+    String? sourceUrl,
+    String? knownDescription,
+    String searchContext = '',
+  }) async {
+    final research = searchContext.trim().length > 9000
+        ? searchContext.trim().substring(0, 9000)
+        : searchContext.trim();
+    final desc = (knownDescription ?? '').trim();
+
+    final meta = [
+      'Titel: $title',
+      if (sourceUrl?.isNotEmpty == true) 'Quelle: $sourceUrl',
+      if (desc.isNotEmpty) 'Bekannte Beschreibung: ${desc.length > 1200 ? desc.substring(0, 1200) : desc}',
+    ].join('\n');
+
+    final prompt =
+        '''Du erstellst eine sachliche, gut strukturierte deutsche Markdown-Notiz zu einem Link/Thema für ein persönliches Wissenssystem (Obsidian-kompatibel).
+
+$meta
+
+WEB-RECHERCHE (nummerierte Treffer — NUR diese und allgemein bekannten Kontext als Quelle verwenden; keine URLs erfinden):
+${research.isEmpty ? '(keine Recherche-Treffer verfügbar)' : research}
+
+REGELN:
+- Sachlich, neutral, präzise. Keine Marketing-Sprache, keine Emojis.
+- Keine Referenz-Hinweise wie [web:1] o.ä.
+- Echte Markdown-Überschriften (##), Listen und Tabellen.
+- Optionale Abschnitte nur, wenn inhaltlich sinnvoll; sonst weglassen.
+- Links als Markdown: [Name](https://…). Nur URLs aus der Recherche oder der Quelle verwenden.
+- KEIN YAML-Frontmatter ausgeben (Metadaten verwaltet das System separat).
+
+STRUKTUR (passende Abschnitte wählen):
+Beginne mit 2-4 Sätzen Zusammenfassung (ohne Überschrift), dann:
+## Beschreibung
+(10-30 Sätze: worum geht es, was kann/macht es, was hebt es hervor. Bei Medien: spoilerfreie Inhaltsangabe.)
+## Systemvoraussetzungen   (nur bei Software, wenn sinnvoll)
+## Installation             (nur bei Software, wenn sinnvoll)
+## Mögliche Risiken         (nur wenn relevant)
+## Mögliche Alternativen
+(3-10 Alternativen als Markdown-Tabelle: Name als Link, kurze Beschreibung, ggf. Preis in Euro / Vor- & Nachteile.)
+## Referenzen & weiterführende Informationen
+(Nummerierte Liste: **Titel** in Fett, darunter kurze Beschreibung und Link.)
+## Video & Audio            (passende YouTube-/Podcast-Treffer, falls vorhanden, max 10)
+## FAQ                       (häufige Fragen, nummeriert: **Frage** + Antwort darunter)
+## Begriffe                  (nur falls Fachbegriffe erklärt werden müssen)
+
+Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
+
+    final needed = maxTokens < 2500 ? 2500 : maxTokens;
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {'role': 'user', 'content': prompt},
+      ],
+      'max_tokens': needed,
+      'temperature': temperature,
+    });
+
+    var res = await http
+        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode == 429) {
+      await Future.delayed(const Duration(seconds: 6));
+      res = await http
+          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .timeout(const Duration(seconds: 90));
+    }
+    if (res.statusCode != 200) {
+      throw Exception('OpenRouter ${res.statusCode}');
+    }
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    var text = (msg?['content'] as String?) ?? '';
+    if (text.trim().isEmpty) text = (msg?['reasoning'] as String?) ?? '';
+    text = text
+        .replaceAll(
+            RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'^\s*```(?:markdown|md)?\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s*```\s*$'), '')
+        .trim();
+    return text.isEmpty ? null : text;
+  }
+
   /// Extrahiert ein JSON-Objekt aus der Modell-Antwort. Entfernt
   /// `<think>`-Blöcke und ```-Fences, findet das erste balancierte `{…}` und
   /// repariert ein durch max_tokens abgeschnittenes Objekt (fehlende `}`).

@@ -16,6 +16,7 @@ import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
+import '../../services/searxng_service.dart';
 import '../settings/sync_settings_screen.dart';
 import '../../core/constants.dart';
 import '../../sync/sync_provider.dart';
@@ -26,6 +27,7 @@ const _keyAiModel = 'openrouter_model';
 const _keyTemperature = 'openrouter_temperature';
 const _keyMaxTokens = 'openrouter_max_tokens';
 const _keyMaxInputChars = 'openrouter_max_input_chars';
+const _keySearxngUrl = 'searxng_base_url';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -63,6 +65,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _testState = 'idle'; // idle | loading | ok | error
   String _testError = '';
 
+  // SearXNG (eigene Recherche-Schicht)
+  final _searxngUrlCtrl = TextEditingController();
+  String _searxTestState = 'idle'; // idle | loading | ok | error
+  String _searxTestError = '';
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +82,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
+    _searxngUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -84,6 +92,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final tempStr = await secureRead(_keyTemperature);
     final tokStr = await secureRead(_keyMaxTokens);
     final charStr = await secureRead(_keyMaxInputChars);
+    final searx = await secureRead(_keySearxngUrl) ?? '';
     if (mounted) {
       setState(() {
         _apiKeyCtrl.text = key;
@@ -92,6 +101,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _temperature = double.tryParse(tempStr ?? '') ?? 0.3;
         _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
         _maxInputChars = int.tryParse(charStr ?? '') ?? 1500;
+        _searxngUrlCtrl.text = searx;
       });
     }
   }
@@ -102,6 +112,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await secureWrite(_keyTemperature, _temperature.toString());
     await secureWrite(_keyMaxTokens, _maxTokens.toString());
     await secureWrite(_keyMaxInputChars, _maxInputChars.toString());
+    await secureWrite(_keySearxngUrl, _searxngUrlCtrl.text.trim());
     if (mounted) {
       setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -152,6 +163,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         });
       }
     }
+  }
+
+  Future<void> _testSearxng() async {
+    final url = _searxngUrlCtrl.text.trim();
+    if (url.isEmpty) {
+      setState(() { _searxTestState = 'error'; _searxTestError = 'Keine URL eingegeben'; });
+      return;
+    }
+    setState(() { _searxTestState = 'loading'; _searxTestError = ''; });
+    final err = await SearxngService(baseUrl: url).testConnection();
+    if (!mounted) return;
+    setState(() {
+      _searxTestState = err == null ? 'ok' : 'error';
+      _searxTestError = err == null
+          ? ''
+          : (err.length > 150 ? '${err.substring(0, 150)}…' : err);
+    });
   }
 
   List<Map<String, dynamic>> get _filteredModels {
@@ -1178,6 +1206,133 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const Text(
                   'Kostenloser Account auf openrouter.ai reicht aus. '
                   'Free-Tier Modelle haben ein Rate-Limit.',
+                  style: TextStyle(fontSize: 10, color: MFColors.textMuted),
+                ),
+              ],
+            ),
+          ),
+
+          // ─── SearXNG (Recherche) ───────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('WEB-RECHERCHE (SEARXNG)'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: MFColors.teal.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.travel_explore_outlined,
+                        size: 18, color: MFColors.teal),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text('Eigene SearXNG-Instanz',
+                        style: TextStyle(fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: MFColors.textPrimary)),
+                  ),
+                ]),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _searxngUrlCtrl,
+                  style: const TextStyle(fontSize: 13,
+                      color: MFColors.textPrimary, fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    labelText: 'Basis-URL',
+                    labelStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
+                    hintText: 'http://192.168.x.x:8080',
+                    hintStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
+                    filled: true, fillColor: MFColors.bg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.teal)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _searxTestState == 'loading' ? null : _testSearxng,
+                      icon: _searxTestState == 'loading'
+                          ? const SizedBox(width: 14, height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 1.5))
+                          : Icon(
+                              _searxTestState == 'ok'
+                                  ? Icons.check_circle_outline
+                                  : _searxTestState == 'error'
+                                      ? Icons.error_outline
+                                      : Icons.wifi_tethering,
+                              size: 15),
+                      label: Text(
+                        _searxTestState == 'loading'
+                            ? 'Teste…'
+                            : _searxTestState == 'ok'
+                                ? 'Verbunden ✓'
+                                : _searxTestState == 'error'
+                                    ? 'Fehlgeschlagen'
+                                    : 'Verbindung testen',
+                        style: const TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _searxTestState == 'ok'
+                            ? MFColors.teal
+                            : _searxTestState == 'error'
+                                ? Colors.redAccent
+                                : MFColors.textSecondary,
+                        side: BorderSide(
+                          color: _searxTestState == 'ok'
+                              ? MFColors.teal
+                              : _searxTestState == 'error'
+                                  ? Colors.redAccent
+                                  : MFColors.border),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saveAiSettings,
+                      icon: const Icon(Icons.save_outlined, size: 15),
+                      label: const Text('Speichern',
+                          style: TextStyle(fontSize: 12)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: MFColors.teal,
+                        foregroundColor: MFColors.bg,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                ]),
+                if (_searxTestState == 'error' && _searxTestError.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(_searxTestError,
+                      style: const TextStyle(fontSize: 10, color: Colors.redAccent)),
+                ],
+                const SizedBox(height: 6),
+                const Text(
+                  'Selbst gehostete SearXNG-Instanz für Web-Recherche bei der '
+                  'KI-Anreicherung. JSON-Format muss aktiv sein '
+                  '(settings.yml: search.formats: [html, json]). HTTP-Adressen '
+                  'im LAN sind nur im Heimnetz erreichbar.',
                   style: TextStyle(fontSize: 10, color: MFColors.textMuted),
                 ),
               ],

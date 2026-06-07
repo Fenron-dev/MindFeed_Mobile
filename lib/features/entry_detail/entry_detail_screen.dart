@@ -28,9 +28,11 @@ import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 import 'properties_block.dart';
 import '../../domain/tag_parser.dart';
+import '../../services/searxng_service.dart';
 
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
+const _keySearxngUrl = 'searxng_base_url';
 
 class EntryDetailScreen extends ConsumerStatefulWidget {
   final String entryId;
@@ -46,6 +48,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _isEditing = false;
   bool _showPreview = false;
   bool _enriching = false;
+  bool _researching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
   // ScrollController bleibt über Stream-Re-Emits hinweg erhalten → Position springt nicht
@@ -337,6 +340,105 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     } finally {
       if (mounted) setState(() => _enriching = false);
     }
+  }
+
+  static const _rechercheStart = '<!-- mf:recherche:start -->';
+  static const _rechercheEnd = '<!-- mf:recherche:end -->';
+
+  static String _mergeRecherche(String current, String note) {
+    final block = '$_rechercheStart\n$note\n$_rechercheEnd';
+    final re = RegExp(
+        '${RegExp.escape(_rechercheStart)}[\\s\\S]*?${RegExp.escape(_rechercheEnd)}');
+    if (re.hasMatch(current)) return current.replaceFirst(re, block);
+    final base = current.trim();
+    return base.isEmpty ? block : '$base\n\n$block';
+  }
+
+  /// Recherchiert einen Link über SearXNG und erzeugt daraus per LLM eine
+  /// strukturierte Notiz, die als eigener Block in den Body eingefügt wird.
+  Future<void> _researchLink(String entryId, String? url, String? title) async {
+    final apiKey = await secureRead(_keyApiKey) ?? '';
+    final searxUrl = (await secureRead(_keySearxngUrl) ?? '').trim();
+    if (!mounted) return;
+    if (apiKey.isEmpty) {
+      _snack('Kein OpenRouter API-Key in Einstellungen gesetzt.');
+      return;
+    }
+    if (searxUrl.isEmpty) {
+      _snack('Keine SearXNG-URL gesetzt (Einstellungen → Web-Recherche).');
+      return;
+    }
+
+    setState(() => _researching = true);
+    try {
+      // Suchbegriff: Titel, sonst Domain der Quelle.
+      final query = (title?.trim().isNotEmpty == true)
+          ? title!.trim()
+          : (url != null ? Uri.tryParse(url)?.host ?? url : '');
+      if (query.isEmpty) throw Exception('Kein Suchbegriff (Titel/URL fehlt)');
+
+      // Recherche
+      final results =
+          await SearxngService(baseUrl: searxUrl).search(query, language: 'de');
+      final context = SearxngService.resultsToContext(results);
+
+      // Bekannte Beschreibung aus Properties (z.B. OG/AniList)
+      final props = await ref.read(propertyDaoProvider).watchByEntry(entryId).first;
+      final descProp = props
+          .where((p) =>
+              p.key.toLowerCase() == 'og_description' ||
+              p.key.toLowerCase() == 'description')
+          .firstOrNull;
+
+      final model = await secureRead(_keyAiModel) ?? '';
+      final tempStr = await secureRead('openrouter_temperature');
+      final tokStr = await secureRead('openrouter_max_tokens');
+      final charStr = await secureRead('openrouter_max_input_chars');
+      final svc = OpenRouterService(
+        apiKey: apiKey,
+        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
+        temperature: double.tryParse(tempStr ?? '') ?? 0.3,
+        maxTokens: int.tryParse(tokStr ?? '') ?? 400,
+        maxInputChars: int.tryParse(charStr ?? '') ??
+            OpenRouterService.defaultMaxInputChars,
+      );
+
+      final note = await svc.generateResearchedNote(
+        title: query,
+        sourceUrl: url,
+        knownDescription: descProp?.value,
+        searchContext: context,
+      );
+      if (note == null || note.trim().isEmpty) {
+        throw Exception('Modell lieferte keine Notiz');
+      }
+
+      final cur =
+          (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ??
+              '';
+      await ref
+          .read(entryRepositoryProvider)
+          .updateEntry(entryId, body: _mergeRecherche(cur, note.trim()));
+
+      if (mounted) {
+        _snack('Recherche-Notiz erstellt (${results.length} Treffer).',
+            error: false);
+      }
+    } catch (e) {
+      if (mounted) {
+        _snack(e.toString().replaceFirst('Exception: ', ''));
+      }
+    } finally {
+      if (mounted) setState(() => _researching = false);
+    }
+  }
+
+  void _snack(String msg, {bool error = true}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg.length > 160 ? '${msg.substring(0, 160)}…' : msg),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: error ? Colors.red.shade900 : MFColors.teal,
+    ));
   }
 
   static bool _isYoutube(String? url) {
@@ -736,6 +838,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 onSelected: (v) async {
                   if (v == 'delete') await _delete();
                   if (v == 'ai') await _enrichWithAi(entry.id, entry.body, entry.title);
+                  if (v == 'research') {
+                    await _researchLink(entry.id, entry.sourceUrl, entry.title);
+                  }
                   if (v == 'transcript') {
                     await _fetchTranscript(entry.id, entry.sourceUrl, entry.body);
                   }
@@ -749,6 +854,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     _enriching ? Icons.hourglass_top_rounded : Icons.auto_awesome_outlined,
                     _enriching ? 'KI läuft…' : 'KI anreichern',
                     color: const Color(0xFF8B5CF6)),
+                  if (entry.sourceUrl != null && entry.sourceUrl!.isNotEmpty)
+                    _popItem('research',
+                      _researching ? Icons.hourglass_top_rounded : Icons.travel_explore_outlined,
+                      _researching ? 'Recherche läuft…' : 'Link recherchieren (Web)',
+                      color: MFColors.teal),
                   if (_isYoutube(entry.sourceUrl))
                     _popItem('transcript', Icons.subtitles_outlined,
                       'Transkript einfügen',

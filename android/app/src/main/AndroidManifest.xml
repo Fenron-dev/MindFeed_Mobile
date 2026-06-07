@@ -9,7 +9,8 @@
     <application
         android:label="mindfeed_mobile"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:usesCleartextTraffic="true"><!-- erlaubt HTTP zu LAN-Diensten (z.B. selbst gehostetes SearXNG) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
