@@ -17,12 +17,21 @@ class PropertiesBlock extends ConsumerStatefulWidget {
   final List<String> tags;
   final bool editable;
 
+  /// Wenn gesetzt, wird Tag-Hinzufügen/-Entfernen über diese Callbacks
+  /// abgewickelt (z.B. direkt im Body-Editor), statt über das Repository.
+  /// So bleibt der Tag erhalten, wenn beim Speichern die Tags aus dem Body
+  /// neu geparst werden. Null → bisheriges Repository-Verhalten.
+  final void Function(String tag)? onAddTag;
+  final void Function(String tag)? onRemoveTag;
+
   const PropertiesBlock({
     super.key,
     required this.entryId,
     required this.properties,
     required this.tags,
     this.editable = true,
+    this.onAddTag,
+    this.onRemoveTag,
   });
 
   @override
@@ -94,7 +103,9 @@ class _PropertiesBlockState extends ConsumerState<PropertiesBlock> {
                 _TagsRow(
                     entryId: widget.entryId,
                     tags: widget.tags,
-                    editable: widget.editable),
+                    editable: widget.editable,
+                    onAddTag: widget.onAddTag,
+                    onRemoveTag: widget.onRemoveTag),
                 for (final p in visible) ...[
                   const Divider(height: 1, color: MFColors.border),
                   _PropRow(
@@ -161,7 +172,15 @@ class _TagsRow extends ConsumerWidget {
   final String entryId;
   final List<String> tags;
   final bool editable;
-  const _TagsRow({required this.entryId, required this.tags, required this.editable});
+  final void Function(String tag)? onAddTag;
+  final void Function(String tag)? onRemoveTag;
+  const _TagsRow({
+    required this.entryId,
+    required this.tags,
+    required this.editable,
+    this.onAddTag,
+    this.onRemoveTag,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -188,12 +207,15 @@ class _TagsRow extends ConsumerWidget {
                 ...tags.map((t) => _TagChip(
                       tag: t,
                       onRemove: editable
-                          ? () => ref.read(entryRepositoryProvider)
-                              .removeTag(entryId, t)
+                          ? () => onRemoveTag != null
+                              ? onRemoveTag!(t)
+                              : ref.read(entryRepositoryProvider)
+                                  .removeTag(entryId, t)
                           : null,
                     )),
                 if (editable)
-                  _AddTagButton(entryId: entryId, existing: tags),
+                  _AddTagButton(
+                      entryId: entryId, existing: tags, onAdd: onAddTag),
               ],
             ),
           ),
@@ -237,7 +259,9 @@ class _TagChip extends StatelessWidget {
 class _AddTagButton extends ConsumerStatefulWidget {
   final String entryId;
   final List<String> existing;
-  const _AddTagButton({required this.entryId, required this.existing});
+  final void Function(String tag)? onAdd;
+  const _AddTagButton(
+      {required this.entryId, required this.existing, this.onAdd});
   @override
   ConsumerState<_AddTagButton> createState() => _AddTagButtonState();
 }
@@ -261,7 +285,11 @@ class _AddTagButtonState extends ConsumerState<_AddTagButton> {
       ),
     );
     if (picked != null && picked.trim().isNotEmpty) {
-      await ref.read(entryRepositoryProvider).addTag(widget.entryId, picked);
+      if (widget.onAdd != null) {
+        widget.onAdd!(picked);
+      } else {
+        await ref.read(entryRepositoryProvider).addTag(widget.entryId, picked);
+      }
     }
   }
 

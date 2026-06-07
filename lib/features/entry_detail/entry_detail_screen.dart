@@ -27,6 +27,7 @@ import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 import 'properties_block.dart';
+import '../../domain/tag_parser.dart';
 
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
@@ -356,6 +357,45 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     final pasted = await _showTranscriptPasteDialog(url);
     if (pasted == null || pasted.trim().isEmpty) return;
     await _storeTranscript(entryId, pasted.trim());
+  }
+
+  /// Tag im Edit-Modus als `#tag` in den Body schreiben. Tags werden beim
+  /// Speichern aus dem Body geparst (TagParser), daher muss der Tag dort
+  /// stehen, sonst geht er verloren. Spiegelt das Verhalten des Tippens.
+  void _addTagToBody(String raw) {
+    final clean =
+        raw.trim().replaceAll(RegExp(r'^#'), '').toLowerCase();
+    if (clean.isEmpty) return;
+    if (TagParser.parse(_bodyCtrl.text).contains(clean)) return;
+    final body = _bodyCtrl.text;
+    final sep = body.isEmpty
+        ? ''
+        : (body.endsWith('\n') || body.endsWith(' ') ? '' : ' ');
+    final next = '$body$sep#$clean';
+    setState(() {
+      _bodyCtrl.text = next;
+      _bodyCtrl.selection =
+          TextSelection.collapsed(offset: next.length);
+    });
+  }
+
+  /// Entfernt genau diesen Tag aus dem Body, ohne hierarchische Geschwister
+  /// (z.B. `#buch/sachbuch`) zu treffen.
+  void _removeTagFromBody(String tag) {
+    final clean = tag.toLowerCase();
+    final re = RegExp(
+        '#${RegExp.escape(clean)}(?![A-Za-z0-9_\\-/äöüÄÖÜß])',
+        caseSensitive: false);
+    var body = _bodyCtrl.text.replaceAll(re, '');
+    // Doppelte Leerzeichen / Leerzeichen vor Zeilenumbruch aufräumen.
+    body = body
+        .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .trimRight();
+    setState(() {
+      _bodyCtrl.text = body;
+      _bodyCtrl.selection = TextSelection.collapsed(offset: body.length);
+    });
   }
 
   static const _auswStart = '<!-- mf:auswertung:start -->';
@@ -785,8 +825,15 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                 PropertiesBlock(
                   entryId: entry.id,
                   properties: item.properties,
-                  tags: item.tags,
+                  // Im Edit-Modus die Tags aus dem (ungespeicherten) Body
+                  // ableiten, damit Hinzufügen/Entfernen sofort sichtbar ist
+                  // und beim Speichern (Tags = parse(Body)) erhalten bleibt.
+                  tags: _isEditing
+                      ? TagParser.parse(_bodyCtrl.text)
+                      : item.tags,
                   editable: _isEditing,
+                  onAddTag: _addTagToBody,
+                  onRemoveTag: _removeTagFromBody,
                 ),
 
                 const SizedBox(height: 14),

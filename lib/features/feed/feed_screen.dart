@@ -785,8 +785,11 @@ class _QuickFilterBar extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Row(children: [
-        // Typ/Status-Dropdown (Tri-State via Einträge)
-        PopupMenuButton<String>(
+        // Typ/Status-Dropdown (Tri-State via Einträge) – schrumpft bei
+        // langen Labels (z.B. "Archiviert (außer)"), damit nichts überläuft.
+        Flexible(
+          fit: FlexFit.loose,
+          child: PopupMenuButton<String>(
           onSelected: onQuick,
           color: MFColors.surface,
           shape: RoundedRectangleBorder(
@@ -816,19 +819,22 @@ class _QuickFilterBar extends ConsumerWidget {
             quickKey.isEmpty ? 'Typ/Status'
                 : (quickExcept ? '${activeDef.tip} (außer)' : activeDef.tip),
             quickKey.isNotEmpty,
+            flex: true,
           ),
         ),
-        const SizedBox(width: 8),
+        ),
+        const SizedBox(width: 6),
         _SavedFiltersButton(),
-        const Spacer(),
+        const SizedBox(width: 6),
         _miniButton(Icons.tune_rounded, 'Filter', onOpenBuilder),
       ]),
     );
   }
 
-  static Widget _dropdownChip(IconData icon, String label, bool active) =>
+  static Widget _dropdownChip(IconData icon, String label, bool active,
+          {bool flex = false}) =>
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: active ? MFColors.tealBg : MFColors.surface,
           borderRadius: BorderRadius.circular(99),
@@ -837,8 +843,19 @@ class _QuickFilterBar extends ConsumerWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 15, color: active ? MFColors.teal : MFColors.textSecondary),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12,
-              color: active ? MFColors.teal : MFColors.textSecondary)),
+          // Bei flex: Label darf schrumpfen/abschneiden, statt überzulaufen.
+          if (flex)
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12,
+                      color: active ? MFColors.teal : MFColors.textSecondary)),
+            )
+          else
+            Text(label, style: TextStyle(fontSize: 12,
+                color: active ? MFColors.teal : MFColors.textSecondary)),
           const Icon(Icons.expand_more, size: 16, color: MFColors.textMuted),
         ]),
       );
