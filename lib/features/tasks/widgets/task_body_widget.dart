@@ -5,7 +5,7 @@ import '../../../core/theme.dart';
 import '../../../data/repositories/entry_repository.dart';
 import '../../../domain/task_parser.dart';
 import '../../../widgets/app_shell.dart' show navigateToTask;
-import '../../../widgets/wikilink_text.dart';
+import '../../../widgets/markdown_note.dart';
 import '../task_provider.dart';
 
 /// Rendert den Body einer Notiz mit live-interaktiven Task-Checkboxen.
@@ -96,8 +96,8 @@ class TaskBodyWidget extends ConsumerWidget {
     // Block-Refs am Zeilenende ausblenden (z.B. ^abc123 die durch Parsing
     // nicht als Task-Zeile erkannt wurden)
     final cleaned = text.replaceAll(RegExp(r'\s*\^[a-zA-Z0-9_-]+\s*$', multiLine: true), '');
-    return WikilinkText(
-      text: cleaned,
+    return MarkdownNote(
+      data: cleaned,
       onTag: (_) {},
       onWikilink: (title) async {
         onWikilink?.call(title);

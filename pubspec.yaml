@@ -47,6 +47,7 @@ dependencies:
 
   # ─── Markdown ────────────────────────────────────────────────────
   flutter_markdown: ^0.7.6
+  markdown: ^7.3.1                  # eigene Inline-Syntax ([[wikilinks]], #tags)
 
   # ─── File & Storage ──────────────────────────────────────────────
   path_provider: ^2.1.4
