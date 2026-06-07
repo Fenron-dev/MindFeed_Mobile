@@ -17,6 +17,8 @@ class EntryCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onToggleTask;
   final bool compact;
+  final bool selectionMode;
+  final bool selected;
 
   const EntryCard({
     super.key,
@@ -25,10 +27,41 @@ class EntryCard extends StatelessWidget {
     this.onLongPress,
     this.onToggleTask,
     this.compact = false,
+    this.selectionMode = false,
+    this.selected = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final card = _buildCard(context);
+    if (!selectionMode) return card;
+    // Auswahlmodus: Karte mit Auswahl-Rahmen + Checkbox-Overlay
+    return Stack(children: [
+      Opacity(opacity: selected ? 1 : 0.7, child: card),
+      Positioned.fill(
+        child: IgnorePointer(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(compact ? 8 : 14),
+              border: Border.all(
+                  color: selected ? MFColors.teal : Colors.transparent, width: 2),
+              color: selected ? MFColors.teal.withValues(alpha: 0.08) : null,
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        top: 6, right: 6,
+        child: Icon(
+          selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+          size: 22,
+          color: selected ? MFColors.teal : MFColors.textMuted,
+        ),
+      ),
+    ]);
+  }
+
+  Widget _buildCard(BuildContext context) {
     final entry = item.entry;
     final isPinned = entry.pinned;
     final isInbox = entry.status == 'inbox';

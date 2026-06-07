@@ -456,6 +456,38 @@ class EntryRepository {
         id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
   }
 
+  /// Setzt eine Property per Key (für Sammelbearbeitung). [append]=true hängt
+  /// an den bestehenden Wert an (komma-getrennt), sonst ersetzen. Fehlt der Key,
+  /// wird er angelegt.
+  Future<void> setPropertyByKey(
+      String entryId, String key, String? value, String type,
+      {bool append = false}) async {
+    final existing = await (db.select(db.entryProperties)
+          ..where((p) => p.entryId.equals(entryId) & p.key.equals(key)))
+        .getSingleOrNull();
+    if (existing == null) {
+      await addProperty(entryId, key, value, type);
+      return;
+    }
+    final newVal = append
+        ? [existing.value ?? '', value ?? '']
+            .where((s) => s.trim().isNotEmpty)
+            .join(', ')
+        : value;
+    await propertyDao.updateValue(existing.id, newVal);
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
+  /// Entfernt eine Property per Key (für Sammelbearbeitung).
+  Future<void> removePropertyByKey(String entryId, String key) async {
+    await (db.delete(db.entryProperties)
+          ..where((p) => p.entryId.equals(entryId) & p.key.equals(key)))
+        .go();
+    await entryDao.upsert(EntriesCompanion(
+        id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
+  }
+
   /// Löscht eine einzelne Property anhand ihrer ID.
   Future<void> deletePropertyById(String entryId, String propId) async {
     await (db.delete(db.entryProperties)..where((p) => p.id.equals(propId))).go();

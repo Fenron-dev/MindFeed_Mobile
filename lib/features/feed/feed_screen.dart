@@ -10,6 +10,8 @@ import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
 import '../../services/app_settings.dart';
+import '../selection/selection_provider.dart';
+import '../selection/bulk_action_bar.dart';
 import 'filter_builder_screen.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/server/sync_server.dart';
@@ -285,8 +287,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   Widget build(BuildContext context) {
     final feedAsync = ref.watch(feedProvider);
     final filter   = ref.watch(feedFilterProvider);
+    final selectionMode = ref.watch(selectionModeProvider);
+    final selectedIds = ref.watch(selectedIdsProvider);
 
     return Scaffold(
+      bottomNavigationBar: const BulkActionBar(),
       body: RefreshIndicator(
         onRefresh: Platform.isMacOS || Platform.isWindows || Platform.isLinux
             ? () async {} // Desktop: kein Pull-to-Refresh (kein Touch)
@@ -418,12 +423,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       childAspectRatio: 0.78,
                     ),
                     delegate: SliverChildBuilderDelegate(
-                      (ctx, i) => _GridCard(
-                        item: entries[i],
-                        onTap: () => entries[i].entry.type == 'task'
-                            ? navigateToTask(context, ref, entries[i].entry.id)
-                            : navigateToEntry(context, ref, entries[i].entry.id),
-                      ),
+                      (ctx, i) {
+                        final id = entries[i].entry.id;
+                        return _GridCard(
+                          item: entries[i],
+                          selected: selectionMode && selectedIds.contains(id),
+                          onLongPress: () => ref.enterSelection(id),
+                          onTap: () {
+                            if (selectionMode) { ref.toggleSelected(id); return; }
+                            entries[i].entry.type == 'task'
+                                ? navigateToTask(context, ref, id)
+                                : navigateToEntry(context, ref, id);
+                          },
+                        );
+                      },
                       childCount: entries.length,
                     ),
                   ),
@@ -436,9 +449,34 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (ctx, i) {
                     final item = entries[i];
-                    final isSubtask = subtaskIds.contains(item.entry.id);
+                    final id = item.entry.id;
+                    final isSubtask = subtaskIds.contains(id);
+                    final card = EntryCard(
+                      item: item,
+                      compact: _viewMode == 'view_list',
+                      selectionMode: selectionMode,
+                      selected: selectedIds.contains(id),
+                      onTap: () {
+                        if (selectionMode) { ref.toggleSelected(id); return; }
+                        item.entry.type == 'task'
+                            ? navigateToTask(context, ref, id)
+                            : navigateToEntry(context, ref, id);
+                      },
+                      onLongPress: () => ref.enterSelection(id),
+                      onToggleTask: item.entry.type == 'task'
+                          ? () => ref.read(entryRepositoryProvider).toggleTaskStatus(id)
+                          : null,
+                    );
+                    // Im Auswahlmodus kein Wischen (Konflikt mit Auswahl)
+                    if (selectionMode) {
+                      return Padding(
+                        key: ValueKey('feed-$id'),
+                        padding: EdgeInsets.only(left: isSubtask ? 24 : 0),
+                        child: card,
+                      );
+                    }
                     return Padding(
-                      key: ValueKey('feed-${item.entry.id}'),
+                      key: ValueKey('feed-$id'),
                       padding: EdgeInsets.only(left: isSubtask ? 24 : 0),
                       child: Dismissible(
                       key: ValueKey(item.entry.id),
@@ -495,16 +533,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                           ));
                         }
                       },
-                      child: EntryCard(
-                        item: item,
-                        compact: _viewMode == 'view_list',
-                        onTap: () => item.entry.type == 'task'
-                            ? navigateToTask(context, ref, item.entry.id)
-                            : navigateToEntry(context, ref, item.entry.id),
-                        onToggleTask: item.entry.type == 'task'
-                            ? () => ref.read(entryRepositoryProvider).toggleTaskStatus(item.entry.id)
-                            : null,
-                      ),
+                      child: card,
                     ),
                     );
                   },
@@ -925,7 +954,9 @@ class _SavedFiltersButton extends ConsumerWidget {
 class _GridCard extends StatelessWidget {
   final EntryWithDetails item;
   final VoidCallback onTap;
-  const _GridCard({required this.item, required this.onTap});
+  final VoidCallback? onLongPress;
+  final bool selected;
+  const _GridCard({required this.item, required this.onTap, this.onLongPress, this.selected = false});
 
   @override
   Widget build(BuildContext context) {
@@ -944,14 +975,17 @@ class _GridCard extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         decoration: BoxDecoration(
           color: MFColors.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: entry.pinned ? const Color(0xFF831843) : MFColors.border,
-            width: entry.pinned ? 1.5 : 1,
+            color: selected
+                ? MFColors.teal
+                : (entry.pinned ? const Color(0xFF831843) : MFColors.border),
+            width: selected ? 2 : (entry.pinned ? 1.5 : 1),
           ),
         ),
         child: Column(

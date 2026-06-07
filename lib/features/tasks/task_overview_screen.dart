@@ -4,6 +4,8 @@ import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../widgets/app_shell.dart' show navigateToTask, navigateToNewTask;
+import '../selection/selection_provider.dart';
+import '../selection/bulk_action_bar.dart';
 import 'task_provider.dart';
 import 'widgets/task_list_item.dart';
 
@@ -16,6 +18,7 @@ class TaskOverviewScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: MFColors.bg,
+      bottomNavigationBar: const BulkActionBar(),
       appBar: AppBar(
         backgroundColor: MFColors.bg,
         elevation: 0,
@@ -91,20 +94,35 @@ class TaskOverviewScreen extends ConsumerWidget {
 
 List<Widget> _buildNodeList(
     BuildContext context, WidgetRef ref, List<TaskNode> nodes) {
+  final selMode = ref.watch(selectionModeProvider);
+  final selIds = ref.watch(selectedIdsProvider);
   final widgets = <Widget>[];
   for (final node in nodes) {
+    final id = node.task.entry.id;
     widgets.add(TaskListItem(
-      key: ValueKey(node.task.entry.id),
+      key: ValueKey(id),
       task: node.task,
-      onTap: () => navigateToTask(context, ref, node.task.entry.id),
+      selectionMode: selMode,
+      selected: selIds.contains(id),
+      onLongPress: () => ref.enterSelection(id),
+      onTap: () {
+        if (selMode) { ref.toggleSelected(id); return; }
+        navigateToTask(context, ref, id);
+      },
     ));
-    // Subtasks eingerückt darunter
     for (final sub in node.subtasks) {
+      final sid = sub.entry.id;
       widgets.add(_SubtaskRow(
-        key: ValueKey(sub.entry.id),
+        key: ValueKey(sid),
         task: sub,
-        onTap: () => navigateToTask(context, ref, sub.entry.id),
-        onToggle: () => ref.read(entryRepositoryProvider).toggleTaskStatus(sub.entry.id),
+        selectionMode: selMode,
+        selected: selIds.contains(sid),
+        onLongPress: () => ref.enterSelection(sid),
+        onTap: () {
+          if (selMode) { ref.toggleSelected(sid); return; }
+          navigateToTask(context, ref, sid);
+        },
+        onToggle: () => ref.read(entryRepositoryProvider).toggleTaskStatus(sid),
       ));
     }
   }
@@ -115,7 +133,12 @@ class _SubtaskRow extends StatelessWidget {
   final EntryWithDetails task;
   final VoidCallback onTap;
   final VoidCallback onToggle;
-  const _SubtaskRow({super.key, required this.task, required this.onTap, required this.onToggle});
+  final VoidCallback? onLongPress;
+  final bool selectionMode;
+  final bool selected;
+  const _SubtaskRow({super.key, required this.task, required this.onTap,
+      required this.onToggle, this.onLongPress,
+      this.selectionMode = false, this.selected = false});
 
   @override
   Widget build(BuildContext context) {
@@ -123,11 +146,12 @@ class _SubtaskRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(left: 28, right: 12, bottom: 2),
       child: Material(
-        color: MFColors.surface,
+        color: selected ? MFColors.tealBg : MFColors.surface,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Row(children: [

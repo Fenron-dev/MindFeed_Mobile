@@ -15,8 +15,12 @@ Color _priorityColor(String? p) => switch (p) {
 class TaskListItem extends ConsumerWidget {
   final EntryWithDetails task;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final bool selectionMode;
+  final bool selected;
 
-  const TaskListItem({super.key, required this.task, this.onTap});
+  const TaskListItem({super.key, required this.task, this.onTap,
+      this.onLongPress, this.selectionMode = false, this.selected = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -29,11 +33,17 @@ class TaskListItem extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Material(
-        color: MFColors.surface,
+        color: selected ? MFColors.tealBg : MFColors.surface,
         borderRadius: BorderRadius.circular(10),
+        shape: selectionMode && selected
+            ? RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: const BorderSide(color: MFColors.teal, width: 2))
+            : null,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
             child: Row(
