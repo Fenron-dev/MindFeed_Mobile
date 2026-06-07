@@ -76,19 +76,19 @@ class _WikilinkTextState extends State<WikilinkText> {
             onTap: () => widget.onWikilink?.call(title),
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 1),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1B4B),
+                color: const Color(0xFF4C1D95),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFF4338CA), width: 0.5),
+                border: Border.all(color: const Color(0xFFA78BFA), width: 0.8),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.link_rounded, size: 11, color: Color(0xFFA78BFA)),
+                const Icon(Icons.link_rounded, size: 12, color: Color(0xFFC4B5FD)),
                 const SizedBox(width: 3),
                 Text(title,
                     style: const TextStyle(
-                        fontSize: 13, color: Color(0xFFA78BFA),
-                        fontWeight: FontWeight.w500)),
+                        fontSize: 13, color: Color(0xFFC4B5FD),
+                        fontWeight: FontWeight.w600)),
               ]),
             ),
           ),

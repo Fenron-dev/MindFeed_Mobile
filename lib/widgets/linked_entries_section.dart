@@ -92,7 +92,10 @@ class LinkedEntriesSection extends ConsumerWidget {
                       child: Text(
                         e.entry.title ?? e.entry.body,
                         style: const TextStyle(
-                            fontSize: 13, color: MFColors.textPrimary),
+                            fontSize: 13,
+                            color: Color(0xFFA78BFA),
+                            decoration: TextDecoration.underline,
+                            decorationColor: Color(0xFF7C6BB0)),
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                       ),
                     ),
