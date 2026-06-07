@@ -69,6 +69,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       setState(() => _isEditing = !_isEditing);
       return true;
     }
+    // Cmd/Ctrl+Enter speichert im Bearbeiten-Modus
+    if (event.logicalKey == LogicalKeyboardKey.enter && _isEditing) {
+      _save();
+      return true;
+    }
     return false;
   }
 
@@ -326,7 +331,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     );
     if (ok == true && mounted) {
       await ref.read(entryRepositoryProvider).deleteEntry(widget.entryId);
-      if (mounted) context.pop();
+      if (!mounted) return;
+      // Desktop-Inline (onBack) vs. Mobile-Route (pop)
+      if (widget.onBack != null) {
+        widget.onBack!();
+      } else if (context.canPop()) {
+        context.pop();
+      }
     }
   }
 

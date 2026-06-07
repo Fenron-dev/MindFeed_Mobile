@@ -40,16 +40,40 @@ class WikilinkTextField extends ConsumerStatefulWidget {
   ConsumerState<WikilinkTextField> createState() => _WikilinkTextFieldState();
 }
 
+/// Ein Vorschlagseintrag im Dropdown (Notiz/Aufgabe oder Tag).
+class _Sugg {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPick;
+  const _Sugg({required this.icon, required this.label, required this.onPick});
+}
+
 class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
   final _link = LayerLink();
   final _fieldKey = GlobalKey();
   final _portal = OverlayPortalController();
   Timer? _debounce;
-  List<EntryWithDetails> _suggestions = [];
+  List<_Sugg> _suggestions = [];
   bool _loading = false;
   String? _partial;
+  String _mode = 'wiki'; // 'wiki' | 'tag'
   int _highlight = 0;
   Offset _caretOffset = Offset.zero;
+  String _lastText = '';
+
+  /// Sauberer Anzeigetitel eines Eintrags (ohne Klammern/Blockrefs/Markdown).
+  static String _entryLabel(EntryWithDetails e) {
+    final t = e.entry.title;
+    if (t != null && t.trim().isNotEmpty) {
+      return t.trim().replaceAll(RegExp(r'[\[\]]'), '');
+    }
+    return e.entry.body
+        .replaceAll(RegExp(r'\[\[|\]\]'), '')
+        .replaceAll(RegExp(r'\^[a-zA-Z0-9_-]+'), '')
+        .replaceAll(RegExp(r'[#*`_>]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
 
   /// Berechnet die Cursor-Position (relativ zur Feld-Oberkante) via TextPainter,
   /// damit das Dropdown direkt unter der Eingabestelle erscheint statt am Rand.
@@ -79,6 +103,7 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
   @override
   void initState() {
     super.initState();
+    _lastText = widget.controller.text;
     widget.controller.addListener(_onChanged);
   }
 
@@ -89,30 +114,55 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
     super.dispose();
   }
 
-  /// Findet die aktive `[[`-Eingabe vor dem Cursor. Gibt null zurück, wenn
-  /// keine offene Wikilink-Eingabe vorliegt.
-  ({int openIdx, String partial})? _activeContext() {
+  /// Findet die aktive Eingabe (`[[` oder `#`) vor dem Cursor.
+  ({String kind, int openIdx, String partial})? _activeContext() {
     final text = widget.controller.text;
     final sel = widget.controller.selection;
     final cursor = sel.baseOffset < 0 ? text.length : sel.baseOffset;
     final before = text.substring(0, cursor.clamp(0, text.length));
-    final openIdx = before.lastIndexOf('[[');
-    if (openIdx == -1) return null;
-    final between = before.substring(openIdx + 2);
-    // Abbruch wenn die Klammer schon geschlossen ist oder ein Zeilenumbruch kam
-    if (between.contains(']]') || between.contains('\n')) return null;
-    return (openIdx: openIdx, partial: between.trim());
+
+    // Wikilink: letztes [[ ohne ]] / Zeilenumbruch danach
+    int wikiIdx = before.lastIndexOf('[[');
+    if (wikiIdx != -1) {
+      final between = before.substring(wikiIdx + 2);
+      if (between.contains(']]') || between.contains('\n')) wikiIdx = -1;
+    }
+
+    // Tag: # das einen Token beginnt (Start oder Whitespace davor)
+    int tagIdx = -1;
+    String tagPartial = '';
+    final tagMatch =
+        RegExp(r'(?:^|\s)#([a-zA-Z0-9_/äöüÄÖÜß-]*)$').firstMatch(before);
+    if (tagMatch != null) {
+      tagPartial = tagMatch.group(1) ?? '';
+      tagIdx = before.length - tagPartial.length - 1; // Position des '#'
+    }
+
+    // Näherer Trigger gewinnt
+    if (wikiIdx == -1 && tagIdx == -1) return null;
+    if (wikiIdx >= tagIdx) {
+      return (kind: 'wiki', openIdx: wikiIdx,
+          partial: before.substring(wikiIdx + 2).trim());
+    }
+    return (kind: 'tag', openIdx: tagIdx, partial: tagPartial);
   }
 
   void _onChanged() {
-    widget.onChanged?.call(widget.controller.text);
+    final text = widget.controller.text;
+    // Nur bei echter Textänderung reagieren — reine Cursor-/Auswahl-Bewegung
+    // (z.B. Klick in einen bestehenden [[Link]]) soll das Popup NICHT öffnen.
+    final textChanged = text != _lastText;
+    _lastText = text;
+    if (!textChanged) return;
+    widget.onChanged?.call(text);
     final ctx = _activeContext();
     if (ctx == null) {
       _hide();
       return;
     }
-    if (ctx.partial == _partial && _portal.isShowing) return;
+    if (ctx.partial == _partial && ctx.kind == _mode && _portal.isShowing) return;
     _partial = ctx.partial;
+    _mode = ctx.kind;
     _highlight = 0;
     _updateCaretOffset();
     setState(() => _loading = true);
@@ -120,13 +170,30 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
 
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 180), () async {
-      final results =
-          await ref.read(entryRepositoryProvider).search(ctx.partial);
+      List<_Sugg> sugg;
+      if (ctx.kind == 'tag') {
+        final all = await ref.read(tagDaoProvider).getAllTagNames();
+        final q = ctx.partial.toLowerCase();
+        sugg = all
+            .where((t) => q.isEmpty || t.toLowerCase().contains(q))
+            .take(8)
+            .map((t) => _Sugg(
+                icon: Icons.label_outline, label: '#$t',
+                onPick: () => _insertTag(t)))
+            .toList();
+      } else {
+        final results = await ref.read(entryRepositoryProvider).search(ctx.partial);
+        sugg = results.take(8).map((e) {
+          final label = _entryLabel(e);
+          return _Sugg(
+            icon: e.entry.type == 'task' ? Icons.task_alt_rounded : Icons.notes_rounded,
+            label: label,
+            onPick: () => _insertWiki(label),
+          );
+        }).toList();
+      }
       if (!mounted) return;
-      setState(() {
-        _suggestions = results.take(8).toList();
-        _loading = false;
-      });
+      setState(() { _suggestions = sugg; _loading = false; });
     });
   }
 
@@ -139,23 +206,25 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
     }
   }
 
-  void _insert(EntryWithDetails item) {
-    final title = item.entry.title ?? item.entry.body;
+  void _replaceRangeFromOpener(String replacement) {
     final text = widget.controller.text;
     final sel = widget.controller.selection;
     final cursor = sel.baseOffset < 0 ? text.length : sel.baseOffset;
     final ctx = _activeContext();
     if (ctx == null) return;
-    final newText =
-        text.replaceRange(ctx.openIdx, cursor, '[[$title]]');
-    final newCursor = ctx.openIdx + '[[$title]]'.length;
+    final newText = text.replaceRange(ctx.openIdx, cursor, replacement);
     widget.controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(offset: newCursor),
+      selection: TextSelection.collapsed(offset: ctx.openIdx + replacement.length),
     );
     _hide();
     setState(() {});
   }
+
+  void _insertWiki(String label) =>
+      _replaceRangeFromOpener('[[${label.replaceAll(RegExp(r'[\[\]]'), '')}]]');
+
+  void _insertTag(String name) => _replaceRangeFromOpener('#$name ');
 
   @override
   Widget build(BuildContext context) {
@@ -173,7 +242,6 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
               loading: _loading,
               suggestions: _suggestions,
               highlight: _highlight,
-              onPick: _insert,
             ),
           ),
         );
@@ -200,15 +268,13 @@ class _WikilinkTextFieldState extends ConsumerState<WikilinkTextField> {
 
 class _SuggestionList extends StatelessWidget {
   final bool loading;
-  final List<EntryWithDetails> suggestions;
+  final List<_Sugg> suggestions;
   final int highlight;
-  final void Function(EntryWithDetails) onPick;
 
   const _SuggestionList({
     required this.loading,
     required this.suggestions,
     required this.highlight,
-    required this.onPick,
   });
 
   @override
@@ -241,33 +307,19 @@ class _SuggestionList extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   itemCount: suggestions.length,
                   itemBuilder: (_, i) {
-                    final item = suggestions[i];
-                    final isTask = item.entry.type == 'task';
+                    final s = suggestions[i];
                     return InkWell(
-                      onTap: () => onPick(item),
+                      onTap: s.onPick,
                       child: Container(
-                        color: i == highlight
-                            ? MFColors.tealBg
-                            : Colors.transparent,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                        color: i == highlight ? MFColors.tealBg : Colors.transparent,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         child: Row(children: [
-                          Icon(
-                            isTask
-                                ? Icons.task_alt_rounded
-                                : Icons.notes_rounded,
-                            size: 14,
-                            color: isTask ? MFColors.teal : MFColors.textMuted,
-                          ),
+                          Icon(s.icon, size: 14, color: MFColors.textMuted),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(
-                              item.entry.title ?? item.entry.body,
-                              style: const TextStyle(
-                                  fontSize: 13, color: MFColors.textPrimary),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            child: Text(s.label,
+                                style: const TextStyle(fontSize: 13, color: MFColors.textPrimary),
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
                           ),
                         ]),
                       ),
