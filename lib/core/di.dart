@@ -67,3 +67,7 @@ final showTasksInNotesProvider =
 // ─── Feed-Filter ──────────────────────────────────────────────────────────────
 final feedFilterProvider =
     StateProvider<FeedFilter>((ref) => const FeedFilter());
+
+/// Gespeicherte Filter (reaktiv, init aus AppSettings).
+final savedFiltersProvider =
+    StateProvider<List<SavedFilter>>((ref) => AppSettings.loadSavedFilters());

@@ -10,6 +10,7 @@ import '../../core/di.dart';
 import '../../data/repositories/entry_repository.dart';
 import '../../domain/feed_filter.dart';
 import '../../services/app_settings.dart';
+import 'filter_builder_screen.dart';
 import '../../sync/dto/sync_dto.dart';
 import '../../sync/server/sync_server.dart';
 import '../../sync/sync_provider.dart';
@@ -31,14 +32,29 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   String _viewMode = 'view_cards';
   // Kachelgröße (max. Spaltenbreite) der Thumbnail-Ansicht
   double _gridTileSize = AppSettings.getGridTileSize();
-  // 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc'
-  String _sortBy = 'date_desc';
-  int _filterIndex = 0; // 0=Alle 1=Inbox 2=Angeheftet
+  // Sortierung: Feld + Richtung. Feld: 'created'|'updated'|'title'|'due'|'prop:<key>'
+  String _sortField = 'created';
+  bool _sortAsc = false;
+  // Schnellfilter (lokal, Tri-State): '' = alle. Keys:
+  // 'inbox'|'pinned'|'done'|'archived'|'task'. _quickExcept = "alle außer".
+  String _quickKey = '';
+  bool _quickExcept = false;
   // IDs von gerade gewischten Einträgen – sofort aus der Liste entfernen,
   // bevor die DB-Aktualisierung den Stream neu aufbaut.
   final _dismissedIds = <String>{};
 
-  static const _filterStatuses = ['all', 'inbox', 'pinned', 'done', 'archived', 'sub_note'];
+  /// Tri-State-Klick auf einen Schnellfilter-Chip: nur → außer → aus.
+  void _cycleQuick(String key) {
+    setState(() {
+      if (_quickKey != key) {
+        _quickKey = key; _quickExcept = false;
+      } else if (!_quickExcept) {
+        _quickExcept = true;
+      } else {
+        _quickKey = ''; _quickExcept = false;
+      }
+    });
+  }
 
 
   @override
@@ -80,70 +96,141 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         case 'view_list':  _viewMode = 'view_list'; break;
         case 'view_cards': _viewMode = 'view_cards'; break;
         case 'view_grid':  _viewMode = 'view_grid'; break;
-        // Toggle beim erneuten Tippen
+        // Sortierung: erneutes Tippen kehrt die Richtung um
         case 'sort_date':
-          _sortBy = _sortBy == 'date_desc' ? 'date_asc' : 'date_desc'; break;
+          if (_sortField == 'created') { _sortAsc = !_sortAsc; }
+          else { _sortField = 'created'; _sortAsc = false; }
+          break;
         case 'sort_name':
-          _sortBy = _sortBy == 'name_asc' ? 'name_desc' : 'name_asc'; break;
+          if (_sortField == 'title') { _sortAsc = !_sortAsc; }
+          else { _sortField = 'title'; _sortAsc = true; }
+          break;
       }
     });
   }
 
+  /// Prüft den lokalen Schnellfilter (Tri-State). '' = alle (außer Sub-Notizen).
+  bool _passesQuick(EntryWithDetails e) {
+    if (_quickKey.isEmpty) return e.entry.status != 'sub_note';
+    final match = switch (_quickKey) {
+      'inbox'    => e.entry.status == 'inbox',
+      'pinned'   => e.entry.pinned,
+      'done'     => e.entry.status == 'done',
+      'archived' => e.entry.status == 'archived',
+      'task'     => e.entry.type == 'task',
+      _          => true,
+    };
+    // Sub-Notizen grundsätzlich ausblenden (außer sie wären explizit gemeint)
+    if (e.entry.status == 'sub_note') return false;
+    return _quickExcept ? !match : match;
+  }
+
+  /// Wertet eine einzelne Bedingung gegen einen Eintrag aus.
+  bool _matchesCondition(EntryWithDetails e, FilterCondition c) {
+    final v = (c.value ?? '').toLowerCase();
+    switch (c.field) {
+      case FilterField.status:
+        final ok = e.entry.status == c.value;
+        return c.op == FilterOp.isNot ? !ok : ok;
+      case FilterField.type:
+        final ok = e.entry.type == c.value;
+        return c.op == FilterOp.isNot ? !ok : ok;
+      case FilterField.pinned:
+        final ok = e.entry.pinned;
+        return c.op == FilterOp.isNot ? !ok : ok;
+      case FilterField.tag:
+        final has = e.tags.any((t) => t.toLowerCase() == v);
+        return (c.op == FilterOp.isNot || c.op == FilterOp.notContains) ? !has : has;
+      case FilterField.container:
+        final has = e.containerIds.contains(c.value);
+        return c.op == FilterOp.isNot ? !has : has;
+      case FilterField.property:
+        final prop = e.properties
+            .where((p) => p.key.toLowerCase() == (c.key ?? '').toLowerCase())
+            .firstOrNull;
+        switch (c.op) {
+          case FilterOp.exists:    return prop != null;
+          case FilterOp.notExists: return prop == null;
+          case FilterOp.isNot:
+            return !(prop != null && (prop.value ?? '').toLowerCase() == v);
+          case FilterOp.notContains:
+            return !(prop != null && (prop.value ?? '').toLowerCase().contains(v));
+          case FilterOp.is_:
+            return prop != null && (prop.value ?? '').toLowerCase() == v;
+          default: // contains
+            return prop != null && (prop.value ?? '').toLowerCase().contains(v);
+        }
+      case FilterField.createdDate:
+        return _matchesDate(e.entry.createdAt, c);
+      case FilterField.dueDate:
+        return _matchesDate(e.entry.reminderAt, c);
+    }
+  }
+
+  bool _matchesDate(DateTime? d, FilterCondition c) {
+    if (d == null) return false;
+    final day = DateTime(d.year, d.month, d.day);
+    switch (c.op) {
+      case FilterOp.before:
+        return c.date1 != null && day.isBefore(_dayOf(c.date1!));
+      case FilterOp.after:
+        return c.date1 != null && day.isAfter(_dayOf(c.date1!));
+      case FilterOp.between:
+        if (c.date1 == null || c.date2 == null) return false;
+        return !day.isBefore(_dayOf(c.date1!)) && !day.isAfter(_dayOf(c.date2!));
+      default:
+        return true;
+    }
+  }
+
+  static DateTime _dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
+
   List<EntryWithDetails> _filterAndSort(
       List<EntryWithDetails> entries, FeedFilter filter) {
-    final status = _filterStatuses[_filterIndex];
     var result = entries.where((e) {
-      // Status-Filter
-      final statusOk = switch (status) {
-        'inbox'    => e.entry.status == 'inbox',
-        'pinned'   => e.entry.pinned,
-        'done'     => e.entry.status == 'done',
-        'archived' => e.entry.status == 'archived',
-        'sub_note' => e.entry.status == 'sub_note',
-        // 'all' zeigt alles AUSSER Sub-Notizen
-        _          => e.entry.status != 'sub_note',
-      };
-      if (!statusOk) return false;
-
-      // Entry-Typ-Filter
-      if (filter.entryType != null && e.entry.type != filter.entryType) {
-        return false;
-      }
-
-      // Tag-Filter (UND): alle gewählten Tags müssen vorhanden sein
-      for (final t in filter.tags) {
-        final tl = t.toLowerCase();
-        if (!e.tags.any((et) => et.toLowerCase() == tl)) return false;
-      }
-
-      // Property-Regeln
-      for (final rule in filter.propRules.entries) {
-        final match = e.properties.where((p) =>
-            p.key.toLowerCase() == rule.key.toLowerCase()).firstOrNull;
-        if (match == null) return false; // Key existiert nicht
-        if (rule.value != null &&
-            rule.value!.isNotEmpty &&
-            !(match.value ?? '').toLowerCase().contains(rule.value!.toLowerCase())) {
-          return false;
-        }
+      if (!_passesQuick(e)) return false;
+      // Erweiterter Filter (DNF): mind. eine Gruppe muss vollständig passen
+      if (filter.hasConditions) {
+        final anyGroup = filter.groups.any((g) =>
+            g.conditions.isNotEmpty &&
+            g.conditions.every((c) => _matchesCondition(e, c)));
+        if (!anyGroup) return false;
       }
       return true;
     }).toList();
 
-    switch (_sortBy) {
-      case 'date_asc':
-        result.sort((a, b) =>
-            a.entry.createdAt.compareTo(b.entry.createdAt));
-      case 'name_asc':
-        result.sort((a, b) =>
-            (a.entry.title ?? '').toLowerCase()
-                .compareTo((b.entry.title ?? '').toLowerCase()));
-      case 'name_desc':
-        result.sort((a, b) =>
-            (b.entry.title ?? '').toLowerCase()
-                .compareTo((a.entry.title ?? '').toLowerCase()));
-    }
+    _applySort(result);
     return result;
+  }
+
+  void _applySort(List<EntryWithDetails> result) {
+    int cmp(EntryWithDetails a, EntryWithDetails b) {
+      if (_sortField == 'title') {
+        return (a.entry.title ?? '').toLowerCase()
+            .compareTo((b.entry.title ?? '').toLowerCase());
+      }
+      if (_sortField == 'updated') {
+        return a.entry.updatedAt.compareTo(b.entry.updatedAt);
+      }
+      if (_sortField == 'due') {
+        final ad = a.entry.reminderAt, bd = b.entry.reminderAt;
+        if (ad == null && bd == null) return 0;
+        if (ad == null) return 1; // ohne Datum ans Ende
+        if (bd == null) return -1;
+        return ad.compareTo(bd);
+      }
+      if (_sortField.startsWith('prop:')) {
+        final key = _sortField.substring(5).toLowerCase();
+        final av = a.properties.where((p) => p.key.toLowerCase() == key).firstOrNull?.value ?? '';
+        final bv = b.properties.where((p) => p.key.toLowerCase() == key).firstOrNull?.value ?? '';
+        final an = num.tryParse(av), bn = num.tryParse(bv);
+        if (an != null && bn != null) return an.compareTo(bn);
+        return av.toLowerCase().compareTo(bv.toLowerCase());
+      }
+      // 'created' (default)
+      return a.entry.createdAt.compareTo(b.entry.createdAt);
+    }
+    result.sort((a, b) => _sortAsc ? cmp(a, b) : -cmp(a, b));
   }
 
   /// Ordnet die Liste so um, dass Subtasks direkt unter ihrem Parent-Task
@@ -179,16 +266,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return (result, subtaskIds);
   }
 
-  String get _sortDateLabel => _sortBy == 'date_asc'
+  bool get _sortByDate => _sortField == 'created';
+  bool get _sortByName => _sortField == 'title';
+  String get _sortDateLabel => (_sortByDate && _sortAsc)
       ? 'Datum ↑ (älteste zuerst)'
       : 'Datum ↓ (neueste zuerst)';
   String get _sortNameLabel =>
-      _sortBy == 'name_desc' ? 'Name Z → A' : 'Name A → Z';
+      (_sortByName && !_sortAsc) ? 'Name Z → A' : 'Name A → Z';
 
-  IconData get _sortDateIcon => _sortBy == 'date_asc'
+  IconData get _sortDateIcon => (_sortByDate && _sortAsc)
       ? Icons.arrow_upward_rounded
       : Icons.arrow_downward_rounded;
-  IconData get _sortNameIcon => _sortBy == 'name_desc'
+  IconData get _sortNameIcon => (_sortByName && !_sortAsc)
       ? Icons.text_rotation_angledown_outlined
       : Icons.sort_by_alpha_outlined;
 
@@ -253,7 +342,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   size: 22,
                 ),
                 tooltip: 'Filter',
-                onPressed: () => _showFilterSheet(context, filter),
+                onPressed: () => _showFilterBuilder(context, filter),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert,
@@ -270,8 +359,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   _menuItem('view_cards', Icons.dashboard_outlined,  'Kartenansicht',    _viewMode == 'view_cards'),
                   _menuItem('view_grid',  Icons.grid_view_outlined,  'Thumbnail-Ansicht',_viewMode == 'view_grid'),
                   const PopupMenuDivider(),
-                  _menuItem('sort_date', _sortDateIcon, _sortDateLabel, _sortBy.startsWith('date')),
-                  _menuItem('sort_name', _sortNameIcon, _sortNameLabel, _sortBy.startsWith('name')),
+                  _menuItem('sort_date', _sortDateIcon, _sortDateLabel, _sortByDate),
+                  _menuItem('sort_name', _sortNameIcon, _sortNameLabel, _sortByName),
                 ],
               ),
             ],
@@ -279,8 +368,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               preferredSize: Size.fromHeight(filter.isActive ? 88 : 44),
               child: Column(children: [
                 _QuickFilterBar(
-                  selectedIndex: _filterIndex,
-                  onChanged: (i) => setState(() => _filterIndex = i),
+                  quickKey: _quickKey,
+                  quickExcept: _quickExcept,
+                  onQuick: _cycleQuick,
+                  onOpenBuilder: () => _showFilterBuilder(context, filter),
                 ),
                 if (filter.isActive)
                   _ActiveFilterBar(filter: filter),
@@ -434,17 +525,36 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   // ── Filter-Sheet ────────────────────────────────────────────────────────────
-  Future<void> _showFilterSheet(BuildContext ctx, FeedFilter current) async {
-    await showModalBottomSheet(
-      context: ctx,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _FilterSheet(
-        current: current,
-        propertyDao: ref.read(propertyDaoProvider),
-        onApply: (f) => ref.read(feedFilterProvider.notifier).state = f,
-      ),
-    );
+  Future<void> _showFilterBuilder(BuildContext ctx, FeedFilter current) async {
+    final isDesktop =
+        Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    // Aktuelle Sortierung in den Filter übernehmen, damit der Builder sie zeigt
+    final start = current.copyWith(sortField: _sortField, sortAsc: _sortAsc);
+    FeedFilter? result;
+    if (isDesktop) {
+      result = await showDialog<FeedFilter>(
+        context: ctx,
+        builder: (_) => Dialog(
+          backgroundColor: MFColors.surface,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 80, vertical: 40),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+            child: FilterBuilderScreen(initial: start),
+          ),
+        ),
+      );
+    } else {
+      result = await Navigator.of(ctx).push<FeedFilter>(
+        MaterialPageRoute(builder: (_) => FilterBuilderScreen(initial: start)),
+      );
+    }
+    if (result != null) {
+      ref.read(feedFilterProvider.notifier).state = result;
+      setState(() {
+        _sortField = result!.sortField;
+        _sortAsc = result.sortAsc;
+      });
+    }
   }
 }
 
@@ -455,55 +565,27 @@ class _ActiveFilterBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final conds = filter.allConditions.toList();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
       child: Row(children: [
-        // Typ-Chip
-        if (filter.entryType != null)
-          _FilterChip(
-            label: _typeLabel(filter.entryType!),
-            onRemove: () => ref.read(feedFilterProvider.notifier).update(
-              (f) => f.copyWith(clearType: true),
-            ),
-          ),
-        // Tag-Chips
-        ...filter.tags.map((t) => _FilterChip(
-          label: '#$t',
-          onRemove: () => ref.read(feedFilterProvider.notifier).update(
-            (f) => f.copyWith(
-                tags: f.tags.where((x) => x != t).toList()),
-          ),
-        )),
-        // Property-Chips
-        ...filter.propRules.entries.map((r) => _FilterChip(
-          label: r.value != null && r.value!.isNotEmpty
-              ? '${r.key}: ${r.value}'
-              : r.key,
-          onRemove: () {
-            final rules = Map<String, String?>.from(filter.propRules)
-              ..remove(r.key);
-            ref.read(feedFilterProvider.notifier).update(
-              (f) => f.copyWith(propRules: rules),
-            );
-          },
-        )),
-        // Alle löschen
+        ...conds.map((c) => _FilterChip(
+              label: conditionLabel(c),
+              onRemove: () => ref.read(feedFilterProvider.notifier).update(
+                  (f) => f.removeWhere((x) => identical(x, c))),
+            )),
+        // (conditionLabel ist Top-Level in feed_filter.dart)
         const SizedBox(width: 4),
         GestureDetector(
-          onTap: () => ref.read(feedFilterProvider.notifier).state = const FeedFilter(),
+          onTap: () =>
+              ref.read(feedFilterProvider.notifier).state = const FeedFilter(),
           child: const Icon(Icons.close, size: 14, color: MFColors.textMuted),
         ),
       ]),
     );
   }
 
-  String _typeLabel(String t) => switch (t) {
-    'link'  => '🔗 Link',
-    'image' => '🖼️ Bild',
-    'audio' => '🎙️ Audio',
-    _       => '📝 Text',
-  };
 }
 
 class _FilterChip extends StatelessWidget {
@@ -530,283 +612,6 @@ class _FilterChip extends StatelessWidget {
       ),
     ]),
   );
-}
-
-// ─── Filter-Bottom-Sheet ──────────────────────────────────────────────────────
-class _FilterSheet extends StatefulWidget {
-  final FeedFilter current;
-  final dynamic propertyDao;
-  final ValueChanged<FeedFilter> onApply;
-  const _FilterSheet({
-    required this.current,
-    required this.propertyDao,
-    required this.onApply,
-  });
-
-  @override
-  State<_FilterSheet> createState() => _FilterSheetState();
-}
-
-class _FilterSheetState extends State<_FilterSheet> {
-  String? _entryType;
-  Map<String, String?> _propRules = {};
-  List<String> _availableKeys = [];
-  String? _selectedKey;
-  final _valueCtrl = TextEditingController();
-  final _tagCtrl = TextEditingController();
-  List<String> _tags = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _entryType = widget.current.entryType;
-    _propRules = Map.from(widget.current.propRules);
-    _tags = List.from(widget.current.tags);
-    _loadKeys();
-  }
-
-  @override
-  void dispose() {
-    _valueCtrl.dispose();
-    _tagCtrl.dispose();
-    super.dispose();
-  }
-
-  void _addTag() {
-    final t = _tagCtrl.text.trim().replaceAll(RegExp(r'^#'), '').toLowerCase();
-    if (t.isEmpty || _tags.contains(t)) return;
-    setState(() { _tags = [..._tags, t]; _tagCtrl.clear(); });
-  }
-
-  Future<void> _loadKeys() async {
-    final keys = await widget.propertyDao.getUniqueKeys();
-    if (mounted) setState(() => _availableKeys = keys);
-  }
-
-  void _addRule() {
-    final key = _selectedKey;
-    if (key == null || key.isEmpty) return;
-    setState(() {
-      _propRules[key] = _valueCtrl.text.trim().isEmpty ? null : _valueCtrl.text.trim();
-      _selectedKey = null;
-      _valueCtrl.clear();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(20, 16, 20,
-          24 + MediaQuery.of(context).viewInsets.bottom),
-      decoration: const BoxDecoration(
-        color: MFColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(child: Container(
-            width: 36, height: 4,
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(color: MFColors.border,
-                borderRadius: BorderRadius.circular(99)),
-          )),
-          const Text('FILTER', style: TextStyle(
-              fontSize: 10, fontWeight: FontWeight.bold,
-              color: MFColors.textMuted, letterSpacing: 1.2)),
-          const SizedBox(height: 14),
-
-          // Entry-Typ
-          const Text('Eintragstyp', style: TextStyle(
-              fontSize: 11, color: MFColors.textMuted)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 6,
-            children: [
-              for (final (type, label) in [
-                (null, 'Alle'), ('text', '📝 Text'),
-                ('link', '🔗 Link'), ('image', '🖼️ Bild'),
-                ('audio', '🎙️ Audio'),
-              ])
-                GestureDetector(
-                  onTap: () => setState(() => _entryType = type),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 100),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _entryType == type
-                          ? MFColors.tealBg : MFColors.bg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _entryType == type ? MFColors.teal : MFColors.border,
-                      ),
-                    ),
-                    child: Text(label, style: TextStyle(
-                        fontSize: 12,
-                        color: _entryType == type
-                            ? MFColors.teal : MFColors.textSecondary)),
-                  ),
-                ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Aktive Property-Regeln
-          if (_propRules.isNotEmpty) ...[
-            const Text('Aktive Filter', style: TextStyle(
-                fontSize: 11, color: MFColors.textMuted)),
-            const SizedBox(height: 6),
-            Wrap(spacing: 5, runSpacing: 4,
-              children: _propRules.entries.map((r) => _FilterChip(
-                label: r.value != null && r.value!.isNotEmpty
-                    ? '${r.key}: ${r.value}' : r.key,
-                onRemove: () => setState(() => _propRules.remove(r.key)),
-              )).toList(),
-            ),
-            const SizedBox(height: 14),
-          ],
-
-          // Neue Property-Regel hinzufügen
-          const Text('Property-Filter', style: TextStyle(
-              fontSize: 11, color: MFColors.textMuted)),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              flex: 2,
-              child: DropdownButtonFormField<String>(
-                value: _selectedKey,
-                isExpanded: true,
-                hint: const Text('Key', style: TextStyle(
-                    fontSize: 12, color: MFColors.textMuted)),
-                dropdownColor: MFColors.surface,
-                style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
-                decoration: const InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: MFColors.border)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: MFColors.teal)),
-                ),
-                items: _availableKeys.map((k) => DropdownMenuItem(
-                  value: k,
-                  child: Text(k,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12)),
-                )).toList(),
-                onChanged: (v) => setState(() => _selectedKey = v),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _valueCtrl,
-                style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
-                decoration: const InputDecoration(
-                  hintText: 'Wert (optional)',
-                  hintStyle: TextStyle(fontSize: 11, color: MFColors.textMuted),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: MFColors.border)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: MFColors.teal)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            IconButton(
-              onPressed: _addRule,
-              icon: const Icon(Icons.add, color: MFColors.teal, size: 20),
-              padding: EdgeInsets.zero,
-            ),
-          ]),
-
-          // ── Tags-Filter ──────────────────────────────────────────────
-          const SizedBox(height: 18),
-          const Text('TAGS', style: TextStyle(
-              fontSize: 10, fontWeight: FontWeight.bold,
-              color: MFColors.textMuted, letterSpacing: 1.2)),
-          const SizedBox(height: 8),
-          if (_tags.isNotEmpty) ...[
-            Wrap(
-              spacing: 6, runSpacing: 6,
-              children: _tags.map((t) => Container(
-                padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
-                decoration: BoxDecoration(
-                  color: MFColors.tealBg, borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: MFColors.tealDark)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('#$t', style: const TextStyle(fontSize: 11, color: MFColors.teal)),
-                  const SizedBox(width: 2),
-                  GestureDetector(
-                    onTap: () => setState(() => _tags = _tags.where((x) => x != t).toList()),
-                    child: const Icon(Icons.close, size: 12, color: MFColors.teal)),
-                ]),
-              )).toList(),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _tagCtrl,
-                style: const TextStyle(fontSize: 14, color: MFColors.textPrimary),
-                decoration: const InputDecoration(
-                  hintText: 'Tag filtern (z.B. buch)…',
-                  hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 13),
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _addTag(),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.add, color: MFColors.teal),
-              onPressed: _addTag,
-            ),
-          ]),
-
-          const SizedBox(height: 20),
-          Row(children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () {
-                  widget.onApply(const FeedFilter());
-                  Navigator.pop(context);
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: MFColors.textMuted,
-                  side: const BorderSide(color: MFColors.border),
-                ),
-                child: const Text('Zurücksetzen'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton(
-                onPressed: () {
-                  widget.onApply(FeedFilter(
-                    entryType: _entryType,
-                    propRules: _propRules,
-                    tags: _tags,
-                  ));
-                  Navigator.pop(context);
-                },
-                style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
-                child: const Text('Anwenden',
-                    style: TextStyle(color: MFColors.bg, fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ]),
-        ],
-      ),
-      ),
-    );
-  }
 }
 
 // ─── Swipe-Hintergrund ────────────────────────────────────────────────────────
@@ -866,69 +671,253 @@ PopupMenuItem<String> _menuItem(
     );
 
 // ─── Schnellfilter-Leiste ────────────────────────────────────────────────────
-class _QuickFilterBar extends StatelessWidget {
-  final int selectedIndex;
-  final ValueChanged<int> onChanged;
+class _QuickFilterBar extends ConsumerWidget {
+  final String quickKey;          // '' | inbox | pinned | done | archived | task
+  final bool quickExcept;
+  final void Function(String key) onQuick;
+  final VoidCallback onOpenBuilder;
 
   const _QuickFilterBar({
-    required this.selectedIndex,
-    required this.onChanged,
+    required this.quickKey,
+    required this.quickExcept,
+    required this.onQuick,
+    required this.onOpenBuilder,
   });
 
-  // (label | null=icon-only, icon, tooltip)
-  static const _filterDefs = [
-    (label: 'Alle',  icon: Icons.dynamic_feed_outlined, tip: 'Alle'),
-    (label: null,    icon: Icons.inbox_outlined,         tip: 'Inbox'),
-    (label: null,    icon: Icons.push_pin_outlined,      tip: 'Angeheftet'),
-    (label: null,    icon: Icons.check_circle_outline,   tip: 'Erledigt'),
-    (label: null,    icon: Icons.archive_outlined,       tip: 'Archiviert'),
+  static const _defs = [
+    (key: '',         icon: Icons.dynamic_feed_outlined, tip: 'Alle'),
+    (key: 'inbox',    icon: Icons.inbox_outlined,        tip: 'Inbox'),
+    (key: 'pinned',   icon: Icons.push_pin_outlined,     tip: 'Angeheftet'),
+    (key: 'done',     icon: Icons.check_circle_outline,  tip: 'Erledigt'),
+    (key: 'archived', icon: Icons.archive_outlined,      tip: 'Archiviert'),
+    (key: 'task',     icon: Icons.task_alt_outlined,     tip: 'Aufgaben'),
   ];
 
+  bool get _isDesktop =>
+      Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (_isDesktop) return _buildDesktop(context, ref);
+    return _buildMobile(context, ref);
+  }
+
+  // Desktop: Inline-Tri-State-Chips + Gespeichert + Filter
+  Widget _buildDesktop(BuildContext context, WidgetRef ref) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-      child: Row(
-        children: _filterDefs.asMap().entries.map((entry) {
-          final i = entry.key;
-          final def = entry.value;
-          final active = i == selectedIndex;
-          final isText = def.label != null;
+      child: Row(children: [
+        ..._defs.map((d) {
+          final active = quickKey == d.key && (d.key.isNotEmpty);
+          final except = active && quickExcept;
           return Padding(
-            padding: EdgeInsets.only(
-                right: i < _filterDefs.length - 1 ? 6 : 0),
+            padding: const EdgeInsets.only(right: 6),
             child: Tooltip(
-              message: def.tip,
+              message: except ? '${d.tip} (außer)' : d.tip,
               child: GestureDetector(
-                onTap: () => onChanged(i),
+                onTap: () => onQuick(d.key),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
-                  padding: isText
-                      ? const EdgeInsets.symmetric(horizontal: 14, vertical: 6)
-                      : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: active ? MFColors.tealBg : MFColors.surface,
+                    color: (quickKey == d.key) ? MFColors.tealBg : MFColors.surface,
                     borderRadius: BorderRadius.circular(99),
                     border: Border.all(
-                      color: active ? MFColors.tealDark : MFColors.border,
+                      color: except
+                          ? const Color(0xFFEF4444)
+                          : (quickKey == d.key ? MFColors.tealDark : MFColors.border),
                     ),
                   ),
-                  child: isText
-                      ? Text(def.label!,
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: active ? MFColors.teal : MFColors.textSecondary,
-                              fontWeight: active ? FontWeight.bold : FontWeight.w500))
-                      : Icon(def.icon, size: 17,
-                          color: active ? MFColors.teal : MFColors.textSecondary),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (except)
+                      const Icon(Icons.block, size: 13, color: Color(0xFFEF4444))
+                    else
+                      Icon(d.icon, size: 17,
+                          color: quickKey == d.key ? MFColors.teal : MFColors.textSecondary),
+                  ]),
                 ),
               ),
             ),
           );
-        }).toList(),
+        }),
+        const SizedBox(width: 4),
+        _SavedFiltersButton(),
+        const SizedBox(width: 4),
+        _miniButton(Icons.tune_rounded, 'Filter', onOpenBuilder),
+      ]),
+    );
+  }
+
+  // Mobile: zwei Dropdowns (Typ/Status, Gespeichert) + Filter-Button
+  Widget _buildMobile(BuildContext context, WidgetRef ref) {
+    final activeDef = _defs.firstWhere((d) => d.key == quickKey,
+        orElse: () => _defs.first);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Row(children: [
+        // Typ/Status-Dropdown (Tri-State via Einträge)
+        PopupMenuButton<String>(
+          onSelected: onQuick,
+          color: MFColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: MFColors.border)),
+          itemBuilder: (_) => _defs.where((d) => d.key.isNotEmpty).map((d) {
+            final sel = quickKey == d.key;
+            return PopupMenuItem<String>(
+              value: d.key,
+              child: Row(children: [
+                Icon(d.icon, size: 16,
+                    color: sel ? MFColors.teal : MFColors.textSecondary),
+                const SizedBox(width: 10),
+                Text(sel && quickExcept ? '${d.tip} (außer)' : d.tip,
+                    style: TextStyle(color: sel ? MFColors.teal : MFColors.textPrimary)),
+                if (sel) ...[
+                  const Spacer(),
+                  Icon(quickExcept ? Icons.block : Icons.check,
+                      size: 14,
+                      color: quickExcept ? const Color(0xFFEF4444) : MFColors.teal),
+                ],
+              ]),
+            );
+          }).toList(),
+          child: _dropdownChip(
+            quickKey.isEmpty ? Icons.dynamic_feed_outlined : activeDef.icon,
+            quickKey.isEmpty ? 'Typ/Status'
+                : (quickExcept ? '${activeDef.tip} (außer)' : activeDef.tip),
+            quickKey.isNotEmpty,
+          ),
+        ),
+        const SizedBox(width: 8),
+        _SavedFiltersButton(),
+        const Spacer(),
+        _miniButton(Icons.tune_rounded, 'Filter', onOpenBuilder),
+      ]),
+    );
+  }
+
+  static Widget _dropdownChip(IconData icon, String label, bool active) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: active ? MFColors.tealBg : MFColors.surface,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: active ? MFColors.tealDark : MFColors.border),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 15, color: active ? MFColors.teal : MFColors.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(fontSize: 12,
+              color: active ? MFColors.teal : MFColors.textSecondary)),
+          const Icon(Icons.expand_more, size: 16, color: MFColors.textMuted),
+        ]),
+      );
+
+  static Widget _miniButton(IconData icon, String label, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: MFColors.border)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 15, color: MFColors.textSecondary),
+            const SizedBox(width: 5),
+            Text(label, style: const TextStyle(fontSize: 12, color: MFColors.textSecondary)),
+          ]),
+        ),
+      );
+}
+
+/// Dropdown der gespeicherten Filter (+ aktuellen speichern).
+class _SavedFiltersButton extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final saved = ref.watch(savedFiltersProvider);
+    return PopupMenuButton<String>(
+      color: MFColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: MFColors.border)),
+      onSelected: (id) async {
+        if (id == '__save__') {
+          await _saveCurrent(context, ref);
+        } else {
+          final f = saved.firstWhere((s) => s.id == id,
+              orElse: () => saved.first);
+          ref.read(feedFilterProvider.notifier).state = f.filter;
+        }
+      },
+      itemBuilder: (_) => [
+        ...saved.map((s) => PopupMenuItem<String>(
+              value: s.id,
+              child: Row(children: [
+                Text(s.emoji ?? '🔖'),
+                const SizedBox(width: 8),
+                Expanded(child: Text(s.name,
+                    style: const TextStyle(color: MFColors.textPrimary))),
+                GestureDetector(
+                  onTap: () {
+                    final list = saved.where((x) => x.id != s.id).toList();
+                    ref.read(savedFiltersProvider.notifier).state = list;
+                    AppSettings.saveSavedFilters(list);
+                    Navigator.of(context).pop();
+                  },
+                  child: const Icon(Icons.delete_outline, size: 15, color: MFColors.textMuted),
+                ),
+              ]),
+            )),
+        if (saved.isNotEmpty) const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: '__save__',
+          child: Row(children: [
+            Icon(Icons.bookmark_add_outlined, size: 16, color: MFColors.teal),
+            SizedBox(width: 8),
+            Text('Aktuellen Filter speichern', style: TextStyle(color: MFColors.teal)),
+          ]),
+        ),
+      ],
+      child: _QuickFilterBar._dropdownChip(
+          Icons.bookmark_outline_rounded, 'Gespeichert', false),
+    );
+  }
+
+  Future<void> _saveCurrent(BuildContext context, WidgetRef ref) async {
+    final current = ref.read(feedFilterProvider);
+    if (!current.isActive) return;
+    final nameCtrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Filter speichern',
+            style: TextStyle(color: MFColors.textPrimary)),
+        content: TextField(
+          controller: nameCtrl, autofocus: true,
+          style: const TextStyle(color: MFColors.textPrimary),
+          decoration: const InputDecoration(hintText: 'Name des Filters'),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Abbrechen', style: TextStyle(color: MFColors.textMuted))),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(nameCtrl.text.trim()),
+              child: const Text('Speichern', style: TextStyle(color: MFColors.teal))),
+        ],
       ),
     );
+    if (name == null || name.isEmpty) return;
+    final list = [
+      ...ref.read(savedFiltersProvider),
+      SavedFilter(
+          id: 'sf-${DateTime.now().millisecondsSinceEpoch}',
+          name: name, filter: current),
+    ];
+    ref.read(savedFiltersProvider.notifier).state = list;
+    await AppSettings.saveSavedFilters(list);
   }
 }
 

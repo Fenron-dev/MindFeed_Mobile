@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../domain/prop_type.dart';
+import '../domain/feed_filter.dart';
 
 // ─── Sync-Einstellungen ───────────────────────────────────────────────────────
 
@@ -549,6 +550,22 @@ class AppSettings {
 
   static Future<void> saveSyncEnabled(bool v) async =>
       _prefs?.setBool('sync_enabled', v);
+
+  /// Gespeicherte Feed-Filter (JSON-Liste in SharedPreferences).
+  static List<SavedFilter> loadSavedFilters() {
+    final raw = _prefs?.getStringList('saved_filters');
+    if (raw == null) return [];
+    try {
+      return raw.map(SavedFilter.decode).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveSavedFilters(List<SavedFilter> filters) async {
+    await _prefs?.setStringList(
+        'saved_filters', filters.map((f) => f.encode()).toList());
+  }
 
   /// Kachelgröße der Thumbnail-Ansicht (max. Spaltenbreite in px).
   static double getGridTileSize() =>
