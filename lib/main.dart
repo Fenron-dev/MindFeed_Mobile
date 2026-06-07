@@ -80,7 +80,8 @@ class _AppRootState extends State<_AppRoot> {
   }
 
   Future<void> _boot() async {
-    await NotificationService.init();
+    // Notifications/Settings dürfen den Start nie blockieren
+    try { await NotificationService.init(); } catch (_) {}
     await AppSettings.init();
     try {
       final saved = VaultManager.getSavedVaultPath();
