@@ -246,13 +246,18 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
 
       int changes = 0;
 
-      // Ausführliche Zusammenfassung (mit Learnings) als Property speichern
+      // Strukturierte Notiz (typ-erkennend, volles Transkript) in den Body
       if (opts.enrichDetailedSummary && detailContent.trim().isNotEmpty) {
-        final detailed = await svc.summarizeDetailed(detailContent,
-            existingTitle: title);
-        if (detailed != null && detailed.trim().isNotEmpty) {
-          await ref.read(entryRepositoryProvider).setPropertyByKey(
-              entryId, 'Ausführliche Zusammenfassung', detailed, 'text');
+        final structured = await svc.generateStructuredNote(detailContent,
+            existingTitle: title,
+            sourceUrl: (await ref.read(entryRepositoryProvider).getById(entryId))
+                ?.entry.sourceUrl);
+        if (structured != null && structured.trim().isNotEmpty) {
+          final cur = (await ref.read(entryRepositoryProvider).getById(entryId))
+                  ?.entry.body ?? '';
+          await ref
+              .read(entryRepositoryProvider)
+              .updateEntry(entryId, body: _mergeAuswertung(cur, structured));
           changes++;
         }
       }
@@ -368,6 +373,23 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     }
 
     await _storeTranscript(entryId, transcript);
+  }
+
+  static const _auswStart = '<!-- mf:auswertung:start -->';
+  static const _auswEnd = '<!-- mf:auswertung:end -->';
+
+  /// Fügt die KI-Auswertung in den Body ein. Ein bereits vorhandener
+  /// Auswertungs-Block (zwischen den Sentinel-Markern) wird ersetzt, sonst
+  /// wird der Block unten angehängt. So entstehen bei Re-Runs keine Duplikate.
+  static String _mergeAuswertung(String current, String structured) {
+    final block = '$_auswStart\n$structured\n$_auswEnd';
+    final re = RegExp(
+        '${RegExp.escape(_auswStart)}[\\s\\S]*?${RegExp.escape(_auswEnd)}');
+    if (re.hasMatch(current)) {
+      return current.replaceFirst(re, block);
+    }
+    final base = current.trim();
+    return base.isEmpty ? block : '$base\n\n$block';
   }
 
   /// Speichert das Transkript als (versteckte) Property '_transcript' statt im
@@ -2752,7 +2774,7 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
           _CheckTile('Tags generieren', _tags, (v) => setState(() => _tags = v!)),
           _CheckTile('Titel verbessern', _title, (v) => setState(() => _title = v!)),
           _CheckTile('Kurz-Zusammenfassung (1-2 Sätze)', _summary, (v) => setState(() => _summary = v!)),
-          _CheckTile('Ausführliche Zusammenfassung (mit Learnings)', _detailedSummary, (v) => setState(() => _detailedSummary = v!)),
+          _CheckTile('Strukturierte Notiz erstellen (typ-erkennend, in den Text)', _detailedSummary, (v) => setState(() => _detailedSummary = v!)),
           _CheckTile('Text des Eintrags einbeziehen', _body, (v) => setState(() => _body = v!)),
         ],
       ),

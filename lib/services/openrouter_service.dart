@@ -203,38 +203,97 @@ Regeln:
     return markers.any(t.contains);
   }
 
-  /// Erstellt eine ausführliche Zusammenfassung mit den wichtigsten
-  /// Erkenntnissen/Learnings als reinen (Plain-)Text. Bewusst KEIN JSON —
-  /// das ist für lange, mehrzeilige Texte deutlich robuster. Eignet sich für
-  /// Transkripte (Video) ebenso wie für Artikel/Doku.
-  Future<String?> summarizeDetailed(String content,
-      {String? existingTitle}) async {
-    final limit = maxInputChars < 200 ? 200 : maxInputChars;
-    final body = content.trim().length > limit
-        ? content.trim().substring(0, limit)
+  /// Erstellt aus dem (vollständigen) INHALT eine strukturierte Markdown-Notiz.
+  /// Das Modell erkennt selbst den Typ (Tutorial/News/Review/Interview/
+  /// Entertainment/Rezept bzw. generisch für Artikel/Tool) und nutzt das
+  /// passende Gerüst. Bewusst KEIN JSON — robuster für lange, mehrzeilige
+  /// Markdown-Ausgaben.
+  ///
+  /// Wichtig: Hier wird NICHT auf das kleine `maxInputChars` (für Tags/Kurz-
+  /// Summary gedacht) gekürzt, sondern ein großzügiges Limit genutzt, damit
+  /// das komplette Transkript ausgewertet wird.
+  Future<String?> generateStructuredNote(String content,
+      {String? existingTitle, String? sourceUrl}) async {
+    // Großzügiges Eingabelimit: mindestens 16k, höchstens 48k Zeichen.
+    final cap = maxInputChars > 16000
+        ? (maxInputChars > 48000 ? 48000 : maxInputChars)
+        : 16000;
+    final body = content.trim().length > cap
+        ? content.trim().substring(0, cap)
         : content.trim();
     if (body.isEmpty) return null;
 
-    final titleLine =
-        existingTitle?.isNotEmpty == true ? 'Titel: $existingTitle\n\n' : '';
-    final prompt =
-        '''Du bist ein Wissensassistent. Erstelle aus dem INHALT eine ausführliche, sachliche Zusammenfassung auf Deutsch. Antworte als reiner Text (keine Code-Blöcke, keine Vorrede). Keine Emojis, keine Quellen-Hinweise wie [web:1].
+    final metaLines = [
+      if (existingTitle?.isNotEmpty == true) 'Bekannter Titel: $existingTitle',
+      if (sourceUrl?.isNotEmpty == true) 'Quelle: $sourceUrl',
+    ].join('\n');
 
-$titleLine INHALT:
+    final prompt =
+        '''Du bist ein Notiz-Assistent für ein persönliches Wissenssystem. Aus dem INHALT (z.B. einem Video-Transkript, Artikel oder Doku) erstellst du eine strukturierte, sachliche Notiz in deutschem Markdown.
+
+${metaLines.isEmpty ? '' : '$metaLines\n'}INHALT:
 $body
 
-Gib genau diese Struktur als Text zurück:
+SCHRITT 1 — TYP ERKENNEN. Bestimme genau einen Typ:
+TUTORIAL (Anleitung/How-To/Erklärung), NEWS (News/Roundup/Liste), REVIEW (Test/Vergleich), INTERVIEW (Gespräch/Podcast), ENTERTAINMENT (Let's Play/Reaction), REZEPT (Koch-/Backvideo), oder GENERISCH (Artikel/Tool/sonstiges).
 
-Worum geht es: 3-6 Sätze, die das Thema, Ziel/Ergebnis und den Nutzen konkret beschreiben.
+SCHRITT 2 — NOTIZ SCHREIBEN nach dem zum Typ passenden Gerüst (nur sinnvolle Abschnitte; leere weglassen). Allgemeine Regeln: sachlich und konkret zum INHALT, keine Emojis, keine Marketing-Sprache, keine Quellen-Hinweise wie [web:1]. Zitate nur 3-5 wirklich prägnante, als Blockquote mit Zeitstempel falls vorhanden. Verwende echte Markdown-Überschriften (##), Listen und Tabellen.
 
-Wichtigste Erkenntnisse:
-- 5-10 konkrete Learnings, Kernaussagen oder Inhalte als Stichpunkte (jeweils ein Spiegelstrich).
+Beginne IMMER mit einer 2-4-Sätze-Zusammenfassung (ohne Überschrift), dann folgt das Gerüst:
 
-Details (nur wenn sinnvoll): weitere wichtige Inhalte, Schritte, Zahlen oder Namen in 2-5 Sätzen.
+TUTORIAL:
+## Überblick
+## Voraussetzungen
+## Schritt-für-Schritt
+## Wichtige Aussagen
+## Hinweise & Risiken
+## Weiterführende Ressourcen
 
-Beziehe dich konkret auf den INHALT, keine Floskeln.''';
+NEWS:
+## Überblick
+## Themen & Neuigkeiten  (je Thema ### mit Zeitstempel + 3-6 Sätze)
+## Fazit
+## Weiterführende Ressourcen
 
-    final needed = maxTokens < 1200 ? 1200 : maxTokens;
+REVIEW:
+## Überblick
+## Getestetes / Verglichenes
+## Stärken
+## Schwächen
+## Fazit
+## Alternativen
+
+INTERVIEW:
+## Überblick
+## Personen
+## Besprochene Themen  (je Thema ### + Zusammenfassung)
+## Wichtige Aussagen
+## Kernaussagen & Erkenntnisse
+
+ENTERTAINMENT:
+## Überblick
+## Inhalt & Verlauf
+## Besondere Momente
+## Medieninfo
+
+REZEPT:
+## Überblick
+## Rahmendaten  (Markdown-Tabelle: Portionen, Zubereitungszeit, Kochzeit, Schwierigkeitsgrad, Küche)
+## Zutaten  (gruppiert, mit Mengen)
+## Zubereitung  (nummerierte Schritte, Zeitstempel falls vorhanden)
+## Tipps & Tricks
+## Wichtige Aussagen
+## Varianten & Alternativen
+
+GENERISCH:
+## Überblick
+## Wichtigste Inhalte  (Stichpunkte)
+## Details
+## Weiterführende Ressourcen
+
+Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
+
+    final needed = maxTokens < 2500 ? 2500 : maxTokens;
     final reqHeaders = {
       'Authorization': 'Bearer $apiKey',
       'Content-Type': 'application/json',
@@ -252,12 +311,12 @@ Beziehe dich konkret auf den INHALT, keine Floskeln.''';
 
     var res = await http
         .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
-        .timeout(const Duration(seconds: 45));
+        .timeout(const Duration(seconds: 90));
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
           .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
-          .timeout(const Duration(seconds: 45));
+          .timeout(const Duration(seconds: 90));
     }
     if (res.statusCode != 200) {
       throw Exception('OpenRouter ${res.statusCode}');
@@ -268,11 +327,12 @@ Beziehe dich konkret auf den INHALT, keine Floskeln.''';
     final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
     var text = (msg?['content'] as String?) ?? '';
     if (text.trim().isEmpty) text = (msg?['reasoning'] as String?) ?? '';
-    // <think>-Blöcke und Code-Fences entfernen
+    // <think>-Blöcke und umschließende Code-Fences entfernen
     text = text
         .replaceAll(
             RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'```(?:\w+)?'), '')
+        .replaceAll(RegExp(r'^\s*```(?:markdown|md)?\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s*```\s*$'), '')
         .trim();
     return text.isEmpty ? null : text;
   }
