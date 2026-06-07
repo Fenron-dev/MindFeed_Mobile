@@ -216,6 +216,15 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         if (descProp?.value?.isNotEmpty == true) descProp!.value!,
       ];
 
+      // Reichster Inhalt für die (ausführliche) Auswertung: Transkript falls
+      // vorhanden, sonst der übergebene Body.
+      final transcriptProp =
+          props.where((p) => p.key == '_transcript').firstOrNull;
+      final detailContent =
+          (transcriptProp?.value?.trim().isNotEmpty == true)
+              ? transcriptProp!.value!
+              : body;
+
       final model = await secureRead(_keyAiModel) ?? '';
       final tempStr = await secureRead('openrouter_temperature');
       final tokStr = await secureRead('openrouter_max_tokens');
@@ -230,12 +239,23 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       );
 
       final result = await svc.enrichEntry(
-        opts.enrichBody ? body : '',
+        opts.enrichBody ? detailContent : '',
         existingTitle: title,
         extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
       );
 
       int changes = 0;
+
+      // Ausführliche Zusammenfassung (mit Learnings) als Property speichern
+      if (opts.enrichDetailedSummary && detailContent.trim().isNotEmpty) {
+        final detailed = await svc.summarizeDetailed(detailContent,
+            existingTitle: title);
+        if (detailed != null && detailed.trim().isNotEmpty) {
+          await ref.read(entryRepositoryProvider).setPropertyByKey(
+              entryId, 'Ausführliche Zusammenfassung', detailed, 'text');
+          changes++;
+        }
+      }
 
       // Titel verbessern
       if (opts.enrichTitle && result.title != null) {
@@ -2689,12 +2709,14 @@ class _EnrichOptions {
   final bool enrichTitle;
   final bool enrichTags;
   final bool enrichSummary;
+  final bool enrichDetailedSummary;
   final bool enrichBody;
 
   const _EnrichOptions({
     required this.enrichTitle,
     required this.enrichTags,
     required this.enrichSummary,
+    required this.enrichDetailedSummary,
     required this.enrichBody,
   });
 }
@@ -2710,6 +2732,7 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
   bool _title = false;
   bool _tags = true;
   bool _summary = false;
+  bool _detailedSummary = true;
   bool _body = true;
 
   @override
@@ -2728,7 +2751,8 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
           const SizedBox(height: 12),
           _CheckTile('Tags generieren', _tags, (v) => setState(() => _tags = v!)),
           _CheckTile('Titel verbessern', _title, (v) => setState(() => _title = v!)),
-          _CheckTile('Zusammenfassung als Property', _summary, (v) => setState(() => _summary = v!)),
+          _CheckTile('Kurz-Zusammenfassung (1-2 Sätze)', _summary, (v) => setState(() => _summary = v!)),
+          _CheckTile('Ausführliche Zusammenfassung (mit Learnings)', _detailedSummary, (v) => setState(() => _detailedSummary = v!)),
           _CheckTile('Text des Eintrags einbeziehen', _body, (v) => setState(() => _body = v!)),
         ],
       ),
@@ -2738,13 +2762,14 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
           child: const Text('Abbrechen', style: TextStyle(color: MFColors.textMuted)),
         ),
         FilledButton(
-          onPressed: (_tags || _title || _summary)
+          onPressed: (_tags || _title || _summary || _detailedSummary)
               ? () => Navigator.pop(
                     context,
                     _EnrichOptions(
                       enrichTitle: _title,
                       enrichTags: _tags,
                       enrichSummary: _summary,
+                      enrichDetailedSummary: _detailedSummary,
                       enrichBody: _body,
                     ),
                   )

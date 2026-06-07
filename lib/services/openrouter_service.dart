@@ -203,6 +203,80 @@ Regeln:
     return markers.any(t.contains);
   }
 
+  /// Erstellt eine ausführliche Zusammenfassung mit den wichtigsten
+  /// Erkenntnissen/Learnings als reinen (Plain-)Text. Bewusst KEIN JSON —
+  /// das ist für lange, mehrzeilige Texte deutlich robuster. Eignet sich für
+  /// Transkripte (Video) ebenso wie für Artikel/Doku.
+  Future<String?> summarizeDetailed(String content,
+      {String? existingTitle}) async {
+    final limit = maxInputChars < 200 ? 200 : maxInputChars;
+    final body = content.trim().length > limit
+        ? content.trim().substring(0, limit)
+        : content.trim();
+    if (body.isEmpty) return null;
+
+    final titleLine =
+        existingTitle?.isNotEmpty == true ? 'Titel: $existingTitle\n\n' : '';
+    final prompt =
+        '''Du bist ein Wissensassistent. Erstelle aus dem INHALT eine ausführliche, sachliche Zusammenfassung auf Deutsch. Antworte als reiner Text (keine Code-Blöcke, keine Vorrede). Keine Emojis, keine Quellen-Hinweise wie [web:1].
+
+$titleLine INHALT:
+$body
+
+Gib genau diese Struktur als Text zurück:
+
+Worum geht es: 3-6 Sätze, die das Thema, Ziel/Ergebnis und den Nutzen konkret beschreiben.
+
+Wichtigste Erkenntnisse:
+- 5-10 konkrete Learnings, Kernaussagen oder Inhalte als Stichpunkte (jeweils ein Spiegelstrich).
+
+Details (nur wenn sinnvoll): weitere wichtige Inhalte, Schritte, Zahlen oder Namen in 2-5 Sätzen.
+
+Beziehe dich konkret auf den INHALT, keine Floskeln.''';
+
+    final needed = maxTokens < 1200 ? 1200 : maxTokens;
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {'role': 'user', 'content': prompt},
+      ],
+      'max_tokens': needed,
+      'temperature': temperature,
+    });
+
+    var res = await http
+        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode == 429) {
+      await Future.delayed(const Duration(seconds: 6));
+      res = await http
+          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .timeout(const Duration(seconds: 45));
+    }
+    if (res.statusCode != 200) {
+      throw Exception('OpenRouter ${res.statusCode}');
+    }
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    var text = (msg?['content'] as String?) ?? '';
+    if (text.trim().isEmpty) text = (msg?['reasoning'] as String?) ?? '';
+    // <think>-Blöcke und Code-Fences entfernen
+    text = text
+        .replaceAll(
+            RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'```(?:\w+)?'), '')
+        .trim();
+    return text.isEmpty ? null : text;
+  }
+
   /// Extrahiert ein JSON-Objekt aus der Modell-Antwort. Entfernt
   /// `<think>`-Blöcke und ```-Fences, findet das erste balancierte `{…}` und
   /// repariert ein durch max_tokens abgeschnittenes Objekt (fehlende `}`).
