@@ -351,10 +351,19 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     await ref.read(entryRepositoryProvider).updateEntry(entryId, body: newBody);
     if (_isEditing) _bodyCtrl.text = newBody;
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Transkript hinzugefügt.'),
+      final title =
+          (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.title;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Transkript hinzugefügt.'),
         behavior: SnackBarBehavior.floating,
         backgroundColor: MFColors.teal,
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: 'Mit KI auswerten',
+          textColor: Colors.white,
+          onPressed: () => _enrichWithAi(entryId, newBody, title),
+        ),
       ));
     }
   }

@@ -37,12 +37,20 @@ class YoutubeTranscriptService {
     if (vid == null) return null;
     try {
       final page = await http.get(
-        Uri.parse('https://www.youtube.com/watch?v=$vid&hl=en'),
-        headers: {'User-Agent': _ua, 'Accept-Language': 'en-US,en;q=0.9'},
+        // bpctr/has_verified umgehen die EU-Consent-Wall, die sonst eine
+        // Zwischenseite ohne captionTracks liefert.
+        Uri.parse(
+            'https://www.youtube.com/watch?v=$vid&hl=en&bpctr=9999999999&has_verified=1'),
+        headers: {
+          'User-Agent': _ua,
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cookie': 'CONSENT=YES+cb.20210328-17-p0.en+FX+000',
+        },
       );
       if (page.statusCode != 200) return null;
+      final pageBody = utf8.decode(page.bodyBytes, allowMalformed: true);
 
-      final arrJson = _extractBalanced(page.body, '"captionTracks":');
+      final arrJson = _extractBalanced(pageBody, '"captionTracks":');
       if (arrJson == null) return null;
       final tracks = (jsonDecode(arrJson) as List).cast<Map<String, dynamic>>();
       if (tracks.isEmpty) return null;
@@ -58,7 +66,8 @@ class YoutubeTranscriptService {
       final tr = await http.get(Uri.parse(baseUrl),
           headers: {'User-Agent': _ua});
       if (tr.statusCode != 200) return null;
-      final text = _parseTranscriptXml(tr.body);
+      final text = _parseTranscriptXml(
+          utf8.decode(tr.bodyBytes, allowMalformed: true));
       return text.isEmpty ? null : text;
     } catch (_) {
       return null;

@@ -99,7 +99,7 @@ class UrlMetadataService {
         return _domainFallback(uri);
       }
 
-      final doc = html_parser.parse(response.body);
+      final doc = html_parser.parse(_decodeBody(response));
 
       String? og(String prop) =>
           doc.querySelector('meta[property="og:$prop"]')?.attributes['content'] ??
@@ -182,7 +182,7 @@ class UrlMetadataService {
 
       if (res.statusCode != 200) return _domainFallback(uri);
 
-      final data = jsonDecode(res.body);
+      final data = jsonDecode(_decodeBody(res));
       final media = data['data']?['Media'];
       if (media == null) return _domainFallback(uri);
 
@@ -300,7 +300,7 @@ class UrlMetadataService {
           )
           .timeout(const Duration(seconds: 4));
       if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body);
+      final data = jsonDecode(_decodeBody(res));
       final edges =
           (data['data']?['Media']?['relations']?['edges'] as List?) ?? [];
       final nodes =
@@ -422,16 +422,17 @@ class UrlMetadataService {
 
       if (oRes.statusCode == 200) {
         // oEmbed ist sauberes JSON → korrekt dekodieren (Umlaute/Sonderzeichen)
+        final oBody = _decodeBody(oRes);
         try {
-          final o = jsonDecode(oRes.body) as Map<String, dynamic>;
+          final o = jsonDecode(oBody) as Map<String, dynamic>;
           title = (o['title'] as String?)?.trim().isNotEmpty == true
               ? (o['title'] as String).trim() : title;
           author = (o['author_name'] as String?) ?? author;
           thumb = (o['thumbnail_url'] as String?) ?? thumb;
         } catch (_) {
-          title = _jsonStr(oRes.body, 'title') ?? title;
-          author = _jsonStr(oRes.body, 'author_name') ?? author;
-          thumb = _jsonStr(oRes.body, 'thumbnail_url') ?? thumb;
+          title = _jsonStr(oBody, 'title') ?? title;
+          author = _jsonStr(oBody, 'author_name') ?? author;
+          thumb = _jsonStr(oBody, 'thumbnail_url') ?? thumb;
         }
       }
 
@@ -440,7 +441,7 @@ class UrlMetadataService {
       final extra = <String, String>{'youtube_channel': author};
 
       if (dRes.statusCode == 200) {
-        final body = dRes.body;
+        final body = _decodeBody(dRes);
 
         // Beschreibung
         final descMatch = RegExp(
@@ -537,7 +538,7 @@ class UrlMetadataService {
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return _domainFallback(fallbackUri);
 
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = jsonDecode(_decodeBody(res)) as Map<String, dynamic>;
       final fullName = data['full_name'] as String? ?? '$owner/$repo';
       final desc = data['description'] as String? ?? '';
       final stars = data['stargazers_count'] as int? ?? 0;
@@ -594,7 +595,7 @@ class UrlMetadataService {
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return _domainFallback(fallbackUri);
 
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = jsonDecode(_decodeBody(res)) as Map<String, dynamic>;
       final title = data['title'] as String? ?? 'Issue #$number';
       final state = data['state'] as String? ?? '';
       final body = (data['body'] as String? ?? '').trim();
@@ -634,7 +635,7 @@ class UrlMetadataService {
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return _domainFallback(fallbackUri);
 
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = jsonDecode(_decodeBody(res)) as Map<String, dynamic>;
       final title = data['title'] as String? ?? 'PR #$number';
       final state = data['state'] as String? ?? '';
       final merged = data['merged'] as bool? ?? false;
@@ -685,6 +686,29 @@ class UrlMetadataService {
       }
     }
     return host;
+  }
+
+  /// Dekodiert den HTTP-Body mit dem korrekten Zeichensatz. Das `http`-Paket
+  /// nimmt ohne charset-Header standardmäßig latin1 an — dadurch werden
+  /// UTF-8-Mehrbyte-Zeichen (é, à, ü …) verstümmelt ("Déjà" → "DÃ©jÃ ").
+  /// Wir bevorzugen daher UTF-8 (auch laut <meta charset>), außer der Server
+  /// deklariert explizit latin1/iso-8859-1.
+  static String _decodeBody(http.Response res) {
+    final ct = (res.headers['content-type'] ?? '').toLowerCase();
+    if (ct.contains('charset=iso-8859-1') || ct.contains('charset=latin1') ||
+        ct.contains('charset=windows-1252')) {
+      return latin1.decode(res.bodyBytes, allowInvalid: true);
+    }
+    // Schneller Blick auf eine ggf. deklarierte Nicht-UTF-8-HTML-Kodierung
+    try {
+      final head = latin1.decode(
+          res.bodyBytes.take(2048).toList(), allowInvalid: true).toLowerCase();
+      if (head.contains('charset=iso-8859-1') ||
+          head.contains('charset=windows-1252')) {
+        return latin1.decode(res.bodyBytes, allowInvalid: true);
+      }
+    } catch (_) {}
+    return utf8.decode(res.bodyBytes, allowMalformed: true);
   }
 
   /// Extrahiert einen JSON-String-Wert per Regex UND dekodiert Escapes
