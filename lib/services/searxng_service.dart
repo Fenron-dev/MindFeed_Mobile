@@ -25,7 +25,7 @@ class SearxResult {
 /// Treffer-Snippets werden als Kontext ins LLM gegeben, damit es nicht
 /// halluziniert.
 class SearxngService {
-  /// Basis-URL der Instanz, z.B. `http://192.168.178.99:8063`.
+  /// Basis-URL der Instanz, z.B. `http://<host>:8080`.
   final String baseUrl;
   const SearxngService({required this.baseUrl});
 
