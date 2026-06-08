@@ -1,0 +1,156 @@
+name: Public Release
+
+# Baut signierte Release-Builds (Android/macOS/Windows) und veröffentlicht sie
+# als GitHub-Release. Wird durch einen Versions-Tag (v*) oder manuell ausgelöst.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+          cache: true
+      - name: Dependencies installieren
+        run: flutter pub get
+      - name: Code-Generator ausführen (Drift)
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Release-Keystore + key.properties aus Secrets erzeugen
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/mindfeed-release.p12
+          cat > android/key.properties <<EOF
+          storeFile=mindfeed-release.p12
+          storeType=PKCS12
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          EOF
+      - name: Release-APK bauen (signiert, universal)
+        run: flutter build apk --release
+      - name: Aufräumen (Keystore/Secrets nicht behalten)
+        if: always()
+        run: rm -f android/app/mindfeed-release.p12 android/key.properties
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+  macos:
+    name: macOS Release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+          cache: true
+      - name: Dependencies installieren
+        run: flutter pub get
+      - name: Code-Generator ausführen (Drift + Riverpod)
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Flutter Workspace vorbereiten (pod install + Flutter-Artefakte)
+        run: flutter build macos --release --config-only
+      - name: macOS App bauen via xcodebuild (Release)
+        run: |
+          cd macos
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            SYMROOT="$PWD/../build/macos/Build/Products" \
+            OBJROOT="$PWD/../build/macos/Build/Intermediates"
+      - name: Ad-hoc Signierung (verhindert "beschädigt"-Fehler auf macOS)
+        run: |
+          codesign --force --deep --sign - \
+            build/macos/Build/Products/Release/mindfeed_mobile.app
+      - name: App zippen + Quarantine-Flag entfernen
+        run: |
+          APP="build/macos/Build/Products/Release/mindfeed_mobile.app"
+          xattr -cr "$APP"
+          cd build/macos/Build/Products/Release
+          zip -r --symlinks MindFeed-macOS.zip mindfeed_mobile.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: build/macos/Build/Products/Release/MindFeed-macOS.zip
+          retention-days: 7
+
+  windows:
+    name: Windows Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+          cache: true
+      - name: Dependencies installieren
+        run: flutter pub get
+      - name: Code-Generator ausführen (Drift + Riverpod)
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Windows App bauen (Release)
+        run: flutter build windows --release
+      - name: App zippen
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem -Path build/windows -Recurse -Directory `
+                 | Where-Object { $_.FullName -match 'runner[\\/]+Release$' } `
+                 | Select-Object -First 1
+          if (-not $dir) { throw "Release-Ausgabeordner nicht gefunden" }
+          Write-Host "Packe $($dir.FullName)"
+          Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath MindFeed-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: MindFeed-Windows.zip
+          retention-days: 7
+
+  release:
+    name: GitHub-Release veröffentlichen
+    needs: [android, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Artifacts umbenennen (Tag im Dateinamen)
+        run: |
+          mkdir -p out
+          TAG="${GITHUB_REF_NAME}"
+          cp artifacts/android/app-release.apk "out/MindFeed-Android-${TAG}.apk"
+          cp artifacts/macos/MindFeed-macOS.zip "out/MindFeed-macOS-${TAG}.zip"
+          cp artifacts/windows/MindFeed-Windows.zip "out/MindFeed-Windows-${TAG}.zip"
+          ls -lh out
+      - name: Release erstellen/aktualisieren
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
