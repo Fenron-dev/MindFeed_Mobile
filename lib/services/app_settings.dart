@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../domain/prop_type.dart';
 import '../domain/feed_filter.dart';
+import 'enrichment/api_field_prefs.dart';
 
 // ─── Sync-Einstellungen ───────────────────────────────────────────────────────
 
@@ -455,6 +456,32 @@ class AppSettings {
     await _prefs?.setString('api_field_settings', jsonEncode(s.toJson()));
   }
 
+  // ── API-Feld-Präferenzen (katalog-getrieben) ────────────────────────────────
+
+  /// Lädt die katalog-getriebenen Feld-Präferenzen. Reihenfolge der Quellen:
+  /// 1) neues `api_field_prefs`-JSON, 2) Migration aus dem alten
+  /// `api_field_settings` (Bool-Modell), 3) Katalog-Defaults.
+  static ApiFieldPrefs loadApiFieldPrefs() {
+    final raw = _prefs?.getString('api_field_prefs');
+    if (raw != null) {
+      try {
+        return ApiFieldPrefs.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      } catch (_) {/* fällt unten auf Migration/Defaults zurück */}
+    }
+    final legacy = _prefs?.getString('api_field_settings');
+    if (legacy != null) {
+      try {
+        return ApiFieldPrefs.fromLegacy(
+            jsonDecode(legacy) as Map<String, dynamic>);
+      } catch (_) {/* Defaults */}
+    }
+    return ApiFieldPrefs.defaults();
+  }
+
+  static Future<void> saveApiFieldPrefs(ApiFieldPrefs prefs) async {
+    await _prefs?.setString('api_field_prefs', jsonEncode(prefs.toJson()));
+  }
+
   // ── Templates ─────────────────────────────────────────────────────────────
 
   static List<PropTemplate> loadTemplates() {
@@ -484,7 +511,7 @@ class AppSettings {
     final result = <String, dynamic>{};
     for (final key in [
       'tag_bg', 'tag_text', 'tag_border',
-      'api_field_settings',
+      'api_field_settings', 'api_field_prefs',
     ]) {
       final v = p.get(key);
       if (v != null) result[key] = v;
