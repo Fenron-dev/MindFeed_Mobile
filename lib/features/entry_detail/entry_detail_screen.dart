@@ -20,7 +20,8 @@ import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
-import '../../features/tasks/task_provider.dart' show tasksBySourceNoteProvider;
+import '../../features/tasks/task_provider.dart'
+    show tasksBySourceNoteProvider, subtasksByParentProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
 import '../../widgets/linked_entries_section.dart';
@@ -1915,6 +1916,67 @@ class _CheckTile extends StatelessWidget {
 
 // ─── Verlinkte Aufgaben zu einer Notiz ───────────────────────────────────────
 
+/// Eine Task-Zeile in der Notiz-Aufgaben-Sektion samt eingerückten Subtasks,
+/// damit Unteraufgaben direkt aus der Notiz erreichbar sind.
+class _NoteTaskTile extends ConsumerWidget {
+  final EntryWithDetails task;
+  const _NoteTaskTile({required this.task});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subtasks = ref.watch(subtasksByParentProvider(task.entry.id)).maybeWhen(
+          data: (list) =>
+              list.where((e) => e.entry.type == 'task').toList(),
+          orElse: () => const <EntryWithDetails>[],
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _taskRow(context, ref, task, indent: 0),
+        ...subtasks.map((s) => _taskRow(context, ref, s, indent: 28)),
+      ],
+    );
+  }
+
+  Widget _taskRow(BuildContext context, WidgetRef ref, EntryWithDetails t,
+      {required double indent}) {
+    final isDone = t.entry.status == 'done';
+    final isSub = indent > 0;
+    return Padding(
+      padding: EdgeInsets.only(left: indent, bottom: 6),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () =>
+              ref.read(entryRepositoryProvider).toggleTaskStatus(t.entry.id),
+          child: Icon(
+              isDone
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: isSub ? 16 : 18,
+              color: isDone ? MFColors.teal : MFColors.textMuted),
+        ),
+        SizedBox(width: isSub ? 8 : 10),
+        Expanded(
+          child: GestureDetector(
+            onTap: () => navigateToTask(context, ref, t.entry.id),
+            child: Text(
+              t.entry.title ?? t.entry.body,
+              style: TextStyle(
+                fontSize: isSub ? 13 : 14,
+                color: isDone ? MFColors.textMuted : MFColors.textPrimary,
+                decoration: isDone ? TextDecoration.lineThrough : null,
+                decorationColor: MFColors.textMuted,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 class _NoteTasksSection extends ConsumerStatefulWidget {
   final String noteId;
   const _NoteTasksSection({required this.noteId});
@@ -1976,38 +2038,7 @@ class _NoteTasksSectionState extends ConsumerState<_NoteTasksSection> {
               ],
             ]),
             const SizedBox(height: 8),
-            ...tasks.map((t) {
-              final isDone = t.entry.status == 'done';
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(children: [
-                  GestureDetector(
-                    onTap: () => ref.read(entryRepositoryProvider)
-                        .toggleTaskStatus(t.entry.id),
-                    child: Icon(
-                      isDone ? Icons.check_circle_rounded
-                             : Icons.radio_button_unchecked_rounded,
-                      size: 18, color: isDone ? MFColors.teal : MFColors.textMuted),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => navigateToTask(context, ref, t.entry.id),
-                      child: Text(
-                        t.entry.title ?? t.entry.body,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: isDone ? MFColors.textMuted : MFColors.textPrimary,
-                          decoration: isDone ? TextDecoration.lineThrough : null,
-                          decorationColor: MFColors.textMuted,
-                        ),
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ]),
-              );
-            }),
+            ...tasks.map((t) => _NoteTaskTile(task: t)),
             // Quick-Add
             Row(children: [
               const Icon(Icons.radio_button_unchecked_rounded,
