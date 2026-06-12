@@ -634,6 +634,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       final record = MetadataRecord.fromUrlMetadata(_urlPreview!,
           url: detectedUrl ?? '');
       if (record.describedFields().isNotEmpty) {
+        if (!mounted) return;
         final picked = await FieldImportSheet.show(
           context,
           record: record,
@@ -729,18 +730,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               maxInputChars: int.tryParse(charStr ?? '') ??
                   OpenRouterService.defaultMaxInputChars,
             );
-            // Zusätzlichen Kontext aus URL-Metadaten aufbauen
-            final extraParts = <String>[];
-            if (_urlPreview?.description?.isNotEmpty == true) {
-              extraParts.add(_urlPreview!.description!);
-            }
-            if ((_urlPreview?.genres ?? []).isNotEmpty) {
-              extraParts.add('Genres: ${_urlPreview!.genres!.join(', ')}');
-            }
+            // Der KI den VOLLEN abgerufenen Feld-Satz als Kontext geben —
+            // auch Felder, die der Nutzer nicht importiert hat, damit sie in
+            // generierte Texte einfließen können.
+            final aiCtx = _urlPreview != null
+                ? MetadataRecord.fromUrlMetadata(_urlPreview!,
+                        url: detectedUrl ?? '')
+                    .aiContext()
+                : '';
             final result = await svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
-              extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+              extraContext: aiCtx.isNotEmpty ? aiCtx : null,
             );
             if (result.tags.isNotEmpty || result.title != null) {
               // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)

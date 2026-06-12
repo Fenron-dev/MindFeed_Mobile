@@ -37,6 +37,21 @@ class MetadataRecord {
     return out;
   }
 
+  /// Formatiert den **vollen** Feld-Satz als Kontextblock für die KI —
+  /// unabhängig davon, welche Felder der Nutzer importiert. So kann die KI auch
+  /// nicht-importierte Felder in generierte Texte einweben.
+  String aiContext() {
+    final lines = <String>[];
+    for (final e in describedFields()) {
+      final def = ApiFieldCatalog.findField(source, e.key);
+      final label = def?.label ?? e.key;
+      final v = e.value is List ? (e.value as List).join(', ') : '${e.value}';
+      lines.add('$label: $v');
+    }
+    if (lines.isEmpty) return '';
+    return 'Verfügbare Quelldaten (${source.label}):\n${lines.join('\n')}';
+  }
+
   /// Brücke aus dem bestehenden [UrlMetadata]. Die Quelle wird per Domain
   /// bestimmt; die typisierten UrlMetadata-Felder werden auf die Katalog-Keys
   /// der erkannten Quelle abgebildet. So liefern die heutigen Extraktoren ohne
