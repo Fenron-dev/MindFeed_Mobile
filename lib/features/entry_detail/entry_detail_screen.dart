@@ -19,6 +19,10 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/openrouter_service.dart';
+import '../../services/app_settings.dart';
+import '../../services/url_metadata_service.dart';
+import '../../services/enrichment/metadata_record.dart';
+import '../capture/field_import_sheet.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../features/tasks/task_provider.dart' show tasksBySourceNoteProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
@@ -49,6 +53,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _showPreview = false;
   bool _enriching = false;
   bool _researching = false;
+  bool _refetching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
   // ScrollController bleibt über Stream-Re-Emits hinweg erhalten → Position springt nicht
@@ -178,6 +183,76 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xFFF59E0B),
       ));
+    }
+  }
+
+  /// Holt die Metadaten der Quell-URL erneut ab und zeigt dasselbe Review-Sheet
+  /// wie beim Erfassen. Bestätigte Felder werden als Properties gemergt
+  /// (bestehende Keys werden überschrieben).
+  Future<void> _refetchMetadata(String entryId, String? sourceUrl) async {
+    if (sourceUrl == null || sourceUrl.isEmpty || _refetching) return;
+    setState(() => _refetching = true);
+    try {
+      final meta = await UrlMetadataService.fetch(sourceUrl);
+      if (!mounted) return;
+      if (meta == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Keine Metadaten gefunden.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+        return;
+      }
+      final record = MetadataRecord.fromUrlMetadata(meta, url: sourceUrl);
+      final picked = await FieldImportSheet.show(
+        context,
+        record: record,
+        prefs: AppSettings.loadApiFieldPrefs(),
+      );
+      if (picked == null || !mounted) return;
+
+      final dao = ref.read(propertyDaoProvider);
+      final existing = await dao.watchByEntry(entryId).first;
+      final pickedKeys = picked.map((f) => f.storageKey).toSet();
+      // Bestehende Properties behalten, außer sie werden neu gesetzt.
+      final merged = <EntryPropertiesCompanion>[
+        for (final p in existing)
+          if (!pickedKeys.contains(p.key))
+            EntryPropertiesCompanion(
+              id: drift.Value(p.id),
+              entryId: drift.Value(p.entryId),
+              key: drift.Value(p.key),
+              value: drift.Value(p.value),
+              type: drift.Value(p.type),
+            ),
+      ];
+      var i = 0;
+      for (final f in picked) {
+        merged.add(EntryPropertiesCompanion(
+          id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
+          entryId: drift.Value(entryId),
+          key: drift.Value(f.storageKey),
+          value: drift.Value(f.value),
+          type: drift.Value(f.propType),
+        ));
+      }
+      await dao.setProperties(entryId, merged);
+      // Eintrag touchen, damit Streams/Feed neu emittieren.
+      await ref.read(entryRepositoryProvider).updateEntry(entryId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Metadaten aktualisiert.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Abruf fehlgeschlagen: $e'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _refetching = false);
     }
   }
 
@@ -844,6 +919,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   if (v == 'transcript') {
                     await _fetchTranscript(entry.id, entry.sourceUrl, entry.body);
                   }
+                  if (v == 'refetch') {
+                    await _refetchMetadata(entry.id, entry.sourceUrl);
+                  }
                   if (v == 'done' || v == 'inbox' || v == 'archive') {
                     await ref.read(entryRepositoryProvider).updateEntry(
                         entry.id, status: v == 'archive' ? 'archived' : v);
@@ -863,6 +941,11 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                     _popItem('transcript', Icons.subtitles_outlined,
                       'Transkript einfügen',
                       color: const Color(0xFFEF4444)),
+                  if (entry.sourceUrl != null && entry.sourceUrl!.isNotEmpty)
+                    _popItem('refetch',
+                      _refetching ? Icons.hourglass_top_rounded : Icons.download_outlined,
+                      _refetching ? 'Wird abgerufen…' : 'Metadaten neu abholen',
+                      color: const Color(0xFF38BDF8)),
                   const PopupMenuDivider(),
                   if (entry.status != 'done')
                     _popItem('done', Icons.check_circle_outline, 'Erledigt'),

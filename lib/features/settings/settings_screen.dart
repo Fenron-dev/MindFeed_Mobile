@@ -14,6 +14,9 @@ import '../../core/vault_manager.dart';
 import '../../domain/prop_type.dart';
 import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
+import '../../services/enrichment/api_field_catalog.dart';
+import '../../services/enrichment/api_field_prefs.dart';
+import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/searxng_service.dart';
@@ -58,8 +61,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _freeOnly = true;
   String _modelSearch = '';
 
-  // API-Feld-Einstellungen
-  ApiFieldSettings _apiFields = const ApiFieldSettings();
+  // API-Feld-Präferenzen (katalog-getrieben)
+  ApiFieldPrefs _apiPrefs = const ApiFieldPrefs({});
 
   // Verbindungstest
   String _testState = 'idle'; // idle | loading | ok | error
@@ -76,7 +79,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadBackups();
     _loadAiSettings();
     _activeVaultPath = VaultManager.getSavedVaultPath();
-    _apiFields = AppSettings.loadApiFieldSettings();
+    _apiPrefs = AppSettings.loadApiFieldPrefs();
   }
 
   @override
@@ -1362,10 +1365,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionHeader('INFO-APIS'),
           const SizedBox(height: 8),
           _ApiFieldSection(
-            settings: _apiFields,
-            onChanged: (s) async {
-              setState(() => _apiFields = s);
-              await AppSettings.saveApiFieldSettings(s);
+            prefs: _apiPrefs,
+            onChanged: (p) async {
+              setState(() => _apiPrefs = p);
+              await AppSettings.saveApiFieldPrefs(p);
             },
           ),
 
@@ -2263,126 +2266,48 @@ class _FieldDialogState extends State<_FieldDialog> {
 // ─── API-Feld-Einstellungen Widget ────────────────────────────────────────────
 
 class _ApiFieldSection extends StatelessWidget {
-  final ApiFieldSettings settings;
-  final ValueChanged<ApiFieldSettings> onChanged;
+  final ApiFieldPrefs prefs;
+  final ValueChanged<ApiFieldPrefs> onChanged;
 
-  const _ApiFieldSection(
-      {required this.settings, required this.onChanged});
+  const _ApiFieldSection({required this.prefs, required this.onChanged});
+
+  // Anzeige-Metadaten pro Quelle (Titel/Icon/Farbe). Die Felder selbst kommen
+  // aus dem ApiFieldCatalog — neue Quellen erscheinen automatisch, sobald sie
+  // hier eine Darstellung erhalten.
+  static const _display = <ApiSource, (String, IconData, Color)>{
+    ApiSource.anilist: ('AniList (Anime & Manga)', Icons.animation_outlined, Color(0xFF02A9FF)),
+    ApiSource.bgg: ('BoardGameGeek (Brettspiele)', Icons.casino_outlined, Color(0xFFFF5100)),
+    ApiSource.vgg: ('VideoGameGeek (Videospiele)', Icons.videogame_asset_outlined, Color(0xFF7C3AED)),
+    ApiSource.rpgg: ('RPGGeek (Rollenspiele)', Icons.auto_fix_high_outlined, Color(0xFF059669)),
+    ApiSource.github: ('GitHub (Repositories)', Icons.code_outlined, Color(0xFF6366F1)),
+    ApiSource.youtube: ('YouTube (Videos)', Icons.smart_display_outlined, Color(0xFFFF0000)),
+    ApiSource.genericWeb: ('Web (allgemeine Links)', Icons.public_outlined, Color(0xFF38BDF8)),
+  };
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      // ── AniList ──────────────────────────────────────────────────────────
-      _ApiGroup(
-        title: 'AniList (Anime & Manga)',
-        icon: Icons.animation_outlined,
-        color: const Color(0xFF02A9FF),
+    final groups = <Widget>[];
+    for (final entry in _display.entries) {
+      final source = entry.key;
+      final fields = ApiFieldCatalog.fieldsFor(source);
+      if (fields.isEmpty) continue;
+      final (title, icon, color) = entry.value;
+      if (groups.isNotEmpty) groups.add(const SizedBox(height: 10));
+      groups.add(_ApiGroup(
+        title: title,
+        icon: icon,
+        color: color,
         children: [
-          _ApiToggle('Beschreibung', settings.aniDescription,
-              (v) => onChanged(settings.copyWith(aniDescription: v))),
-          _ApiToggle('Cover-Bild', settings.aniImage,
-              (v) => onChanged(settings.copyWith(aniImage: v))),
-          _ApiToggle('Genres', settings.aniGenres,
-              (v) => onChanged(settings.copyWith(aniGenres: v))),
-          _ApiToggle('Bewertung (Score)', settings.aniScore,
-              (v) => onChanged(settings.copyWith(aniScore: v))),
-          _ApiToggle('Format (TV/Movie/OVA…)', settings.aniFormat,
-              (v) => onChanged(settings.copyWith(aniFormat: v))),
-          _ApiToggle('Status (Fertig/Laufend…)', settings.aniStatus,
-              (v) => onChanged(settings.copyWith(aniStatus: v))),
-          _ApiToggle('Episoden / Kapitel', settings.aniEpisodes,
-              (v) => onChanged(settings.copyWith(aniEpisodes: v))),
-          _ApiToggle('Studio', settings.aniStudio,
-              (v) => onChanged(settings.copyWith(aniStudio: v))),
-          _ApiToggle('Erscheinungsjahr', settings.aniYear,
-              (v) => onChanged(settings.copyWith(aniYear: v))),
+          for (final def in fields)
+            _ApiToggle(
+              def.label,
+              prefs.isEnabled(source, def.key),
+              (v) => onChanged(prefs.withField(source, def.key, v)),
+            ),
         ],
-      ),
-      const SizedBox(height: 10),
-      // ── BoardGameGeek ────────────────────────────────────────────────────
-      _ApiGroup(
-        title: 'BoardGameGeek (Brettspiele)',
-        icon: Icons.casino_outlined,
-        color: const Color(0xFFFF5100),
-        children: [
-          _ApiToggle('Beschreibung', settings.bggDescription,
-              (v) => onChanged(settings.copyWith(bggDescription: v))),
-          _ApiToggle('Cover-Bild', settings.bggImage,
-              (v) => onChanged(settings.copyWith(bggImage: v))),
-          _ApiToggle('Kategorien', settings.bggCategories,
-              (v) => onChanged(settings.copyWith(bggCategories: v))),
-          _ApiToggle('Bewertung', settings.bggScore,
-              (v) => onChanged(settings.copyWith(bggScore: v))),
-          _ApiToggle('Spieleranzahl', settings.bggPlayers,
-              (v) => onChanged(settings.copyWith(bggPlayers: v))),
-          _ApiToggle('Spielzeit', settings.bggPlayTime,
-              (v) => onChanged(settings.copyWith(bggPlayTime: v))),
-          _ApiToggle('Erscheinungsjahr', settings.bggYear,
-              (v) => onChanged(settings.copyWith(bggYear: v))),
-          _ApiToggle('Designer', settings.bggDesigners,
-              (v) => onChanged(settings.copyWith(bggDesigners: v))),
-          _ApiToggle('Verleger', settings.bggPublishers,
-              (v) => onChanged(settings.copyWith(bggPublishers: v))),
-          _ApiToggle('Mechaniken', settings.bggMechanics,
-              (v) => onChanged(settings.copyWith(bggMechanics: v))),
-        ],
-      ),
-      const SizedBox(height: 10),
-      // ── VideoGameGeek ────────────────────────────────────────────────────
-      _ApiGroup(
-        title: 'VideoGameGeek (Videospiele)',
-        icon: Icons.videogame_asset_outlined,
-        color: const Color(0xFF7C3AED),
-        children: [
-          _ApiToggle('Beschreibung', settings.vggDescription,
-              (v) => onChanged(settings.copyWith(vggDescription: v))),
-          _ApiToggle('Cover-Bild', settings.vggImage,
-              (v) => onChanged(settings.copyWith(vggImage: v))),
-          _ApiToggle('Genres', settings.vggCategories,
-              (v) => onChanged(settings.copyWith(vggCategories: v))),
-          _ApiToggle('Plattformen', settings.vggPlatforms,
-              (v) => onChanged(settings.copyWith(vggPlatforms: v))),
-        ],
-      ),
-      const SizedBox(height: 10),
-      // ── RPGGeek ──────────────────────────────────────────────────────────
-      _ApiGroup(
-        title: 'RPGGeek (Rollenspiele)',
-        icon: Icons.auto_fix_high_outlined,
-        color: const Color(0xFF059669),
-        children: [
-          _ApiToggle('Beschreibung', settings.rpggDescription,
-              (v) => onChanged(settings.copyWith(rpggDescription: v))),
-          _ApiToggle('Cover-Bild', settings.rpggImage,
-              (v) => onChanged(settings.copyWith(rpggImage: v))),
-          _ApiToggle('Kategorien & Genres', settings.rpggCategories,
-              (v) => onChanged(settings.copyWith(rpggCategories: v))),
-          _ApiToggle('Mechaniken', settings.rpggMechanics,
-              (v) => onChanged(settings.copyWith(rpggMechanics: v))),
-        ],
-      ),
-      const SizedBox(height: 10),
-      // ── GitHub ───────────────────────────────────────────────────────────
-      _ApiGroup(
-        title: 'GitHub (Repositories)',
-        icon: Icons.code_outlined,
-        color: const Color(0xFF6366F1),
-        children: [
-          _ApiToggle('Beschreibung', settings.ghDescription,
-              (v) => onChanged(settings.copyWith(ghDescription: v))),
-          _ApiToggle('Vorschau-Bild', settings.ghImage,
-              (v) => onChanged(settings.copyWith(ghImage: v))),
-          _ApiToggle('Topics (Genres)', settings.ghTopics,
-              (v) => onChanged(settings.copyWith(ghTopics: v))),
-          _ApiToggle('Stars & Forks', settings.ghStars,
-              (v) => onChanged(settings.copyWith(ghStars: v))),
-          _ApiToggle('Lizenz', settings.ghLicense,
-              (v) => onChanged(settings.copyWith(ghLicense: v))),
-          _ApiToggle('Website-Link', settings.ghWebsite,
-              (v) => onChanged(settings.copyWith(ghWebsite: v))),
-        ],
-      ),
-    ]);
+      ));
+    }
+    return Column(children: groups);
   }
 }
 
