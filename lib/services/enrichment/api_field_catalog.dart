@@ -64,6 +64,10 @@ class ApiFieldCatalog {
       ApiFieldDef(key: 'image', label: 'Thumbnail', type: PropType.url, propKey: 'og_image'),
       ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),
     ],
+    ApiSource.genericWeb: [
+      ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),
+      ApiFieldDef(key: 'image', label: 'Vorschaubild', type: PropType.url, propKey: 'og_image'),
+    ],
   };
 
   /// Felder einer Quelle (leere Liste, wenn noch nicht im Katalog beschrieben).

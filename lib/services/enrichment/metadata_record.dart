@@ -42,7 +42,13 @@ class MetadataRecord {
   /// der erkannten Quelle abgebildet. So liefern die heutigen Extraktoren ohne
   /// Umbau bereits einen Record.
   factory MetadataRecord.fromUrlMetadata(UrlMetadata m, {String? url}) {
-    final source = ApiSource.fromDomain(m.domain);
+    var source = ApiSource.fromDomain(m.domain);
+    // Quellen ohne (bisher) beschriebene Felder (z.B. TMDB/OMDb/Amazon vor
+    // ihrer Phase) als generischen Web-Treffer behandeln, damit Beschreibung/
+    // Bild trotzdem reviewbar bleiben.
+    if (ApiFieldCatalog.fieldsFor(source).isEmpty) {
+      source = ApiSource.genericWeb;
+    }
     final f = <String, dynamic>{};
 
     void put(String key, dynamic value) {
