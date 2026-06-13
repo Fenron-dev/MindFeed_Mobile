@@ -1,0 +1,52 @@
+name: Linux App Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Linux-Build-Abhängigkeiten installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - name: Flutter setup
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+          cache: true
+
+      - name: Dependencies installieren
+        run: flutter pub get
+
+      - name: Code-Generator ausführen (Drift + Riverpod)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Linux App bauen (Debug)
+        run: flutter build linux --debug
+
+      - name: App packen (tar.gz)
+        run: |
+          # Build-Ausgabeordner robust ermitteln (x64/arm64 je nach Runner).
+          BUNDLE=$(find build/linux -type d -path '*debug/bundle' | head -n1)
+          if [ -z "$BUNDLE" ]; then echo "Bundle-Ordner nicht gefunden"; exit 1; fi
+          echo "Packe $BUNDLE"
+          tar -czf MindFeed-Linux.tar.gz -C "$BUNDLE" .
+
+      - name: Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: MindFeed-Linux-debug
+          path: MindFeed-Linux.tar.gz
+          retention-days: 14
