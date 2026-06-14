@@ -16,8 +16,10 @@ import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
+import '../../services/enrichment/metadata_record.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
+import 'field_import_sheet.dart';
 import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/wikilink_text_field.dart';
@@ -552,6 +554,40 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     });
   }
 
+  /// Schreibt die im Review-Sheet bestätigten Felder als Entry-Properties.
+  /// Mergt mit bereits gesetzten Properties (z.B. og_title/domain aus
+  /// createEntry) und überspringt bereits vorhandene Keys, um Dubletten zu
+  /// vermeiden.
+  Future<void> _writeResolvedFields(
+      String entryId, List<ResolvedField> fields) async {
+    if (fields.isEmpty) return;
+    final dao = ref.read(propertyDaoProvider);
+    final existing = await dao.watchByEntry(entryId).first;
+    final existingKeys = existing.map((p) => p.key).toSet();
+    final merged = <EntryPropertiesCompanion>[
+      ...existing.map((p) => EntryPropertiesCompanion(
+            id: drift.Value(p.id),
+            entryId: drift.Value(p.entryId),
+            key: drift.Value(p.key),
+            value: drift.Value(p.value),
+            type: drift.Value(p.type),
+          )),
+    ];
+    var i = 0;
+    for (final f in fields) {
+      if (existingKeys.contains(f.storageKey)) continue;
+      merged.add(EntryPropertiesCompanion(
+        id: drift.Value(
+            'prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
+        entryId: drift.Value(entryId),
+        key: drift.Value(f.storageKey),
+        value: drift.Value(f.value),
+        type: drift.Value(f.propType),
+      ));
+    }
+    await dao.setProperties(entryId, merged);
+  }
+
   Future<void> _save() async {
     final rawBody = _bodyCtrl.text.trim();
     if (rawBody.isEmpty && _pendingImages.isEmpty && _recordedAudioPath == null) return;
@@ -591,10 +627,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           'Bild – ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}';
     }
 
-    // API-Feld-Einstellungen laden und anwenden
-    final apiFields = AppSettings.loadApiFieldSettings();
-    final isAniList = _urlPreview?.domain == 'anilist.co';
-    final isBgg = _urlPreview?.domain == 'boardgamegeek.com';
+    // Abgerufene Metadaten vor dem finalen Speichern bestätigen lassen:
+    // an-/abwählen, überschreiben, eigene Felder ergänzen.
+    List<ResolvedField> resolvedFields = const [];
+    if (_urlPreview != null) {
+      final record = MetadataRecord.fromUrlMetadata(_urlPreview!,
+          url: detectedUrl ?? '');
+      if (record.describedFields().isNotEmpty) {
+        if (!mounted) return;
+        final picked = await FieldImportSheet.show(
+          context,
+          record: record,
+          prefs: AppSettings.loadApiFieldPrefs(),
+        );
+        if (!mounted) return;
+        if (picked == null) {
+          // Abgebrochen → Speichern abbrechen, zurück zum Bearbeiten.
+          setState(() => _isSaving = false);
+          return;
+        }
+        resolvedFields = picked;
+      }
+    }
 
     try {
       final createdEntry = await ref.read(entryRepositoryProvider).createEntry(
@@ -606,55 +660,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 : [],
             sourceUrl: detectedUrl,
             urlTitle: _urlPreview?.title,
-            // Beschreibung je nach API-Settings
-            urlDescription: (isAniList && !apiFields.aniDescription) ||
-                    (isBgg && !apiFields.bggDescription)
-                ? null
-                : _urlPreview?.description,
-            urlImage: (isAniList && !apiFields.aniImage) ||
-                    (isBgg && !apiFields.bggImage)
-                ? null
-                : _urlPreview?.image,
             urlDomain: _urlPreview?.domain,
-            urlGenres: (isAniList && !apiFields.aniGenres) ||
-                    (isBgg && !apiFields.bggCategories)
-                ? []
-                : _urlPreview?.genres ?? [],
-            urlScore: (isAniList && !apiFields.aniScore) ||
-                    (isBgg && !apiFields.bggScore)
-                ? null
-                : _urlPreview?.score,
             urlMediaType: _urlPreview?.mediaType,
-            anilistFormat: (isAniList && apiFields.aniFormat)
-                ? _urlPreview?.anilistFormat
-                : null,
-            anilistEpisodes: (isAniList && apiFields.aniEpisodes)
-                ? _urlPreview?.anilistEpisodes
-                : null,
-            anilistChapters: (isAniList && apiFields.aniEpisodes)
-                ? _urlPreview?.anilistChapters
-                : null,
-            anilistStudio: (isAniList && apiFields.aniStudio)
-                ? _urlPreview?.anilistStudio
-                : null,
-            anilistYear: (isAniList && apiFields.aniYear)
-                ? _urlPreview?.anilistYear
-                : null,
-            anilistStatus: (isAniList && apiFields.aniStatus)
-                ? _urlPreview?.anilistStatus
-                : null,
-            anilistSeason: isAniList ? _urlPreview?.anilistSeason : null,
-            anilistTotalSeasons:
-                isAniList ? _urlPreview?.anilistTotalSeasons : null,
-            urlAuthor: _urlPreview?.authorName,
-            githubStars: _urlPreview?.githubStars,
-            githubForks: _urlPreview?.githubForks,
-            githubLicense: _urlPreview?.githubLicense,
-            githubWebsite: _urlPreview?.githubWebsite,
-            githubLanguage: _urlPreview?.githubLanguage,
-            githubDefaultBranch: _urlPreview?.githubDefaultBranch,
-            extraProps: _urlPreview?.extraProps ?? {},
+            // Saison-Kette ist nicht nutzer-wählbar (interne Verkettung).
+            anilistSeason: _urlPreview?.anilistSeason,
+            anilistTotalSeasons: _urlPreview?.anilistTotalSeasons,
           );
+      // Vom Nutzer bestätigte Felder generisch als Properties schreiben.
+      await _writeResolvedFields(createdEntry.entry.id, resolvedFields);
       // Parent-Entry-Verknüpfung als Property speichern
       if (widget.parentEntryId != null) {
         final dao = ref.read(propertyDaoProvider);
@@ -717,18 +730,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               maxInputChars: int.tryParse(charStr ?? '') ??
                   OpenRouterService.defaultMaxInputChars,
             );
-            // Zusätzlichen Kontext aus URL-Metadaten aufbauen
-            final extraParts = <String>[];
-            if (_urlPreview?.description?.isNotEmpty == true) {
-              extraParts.add(_urlPreview!.description!);
-            }
-            if ((_urlPreview?.genres ?? []).isNotEmpty) {
-              extraParts.add('Genres: ${_urlPreview!.genres!.join(', ')}');
-            }
+            // Der KI den VOLLEN abgerufenen Feld-Satz als Kontext geben —
+            // auch Felder, die der Nutzer nicht importiert hat, damit sie in
+            // generierte Texte einfließen können.
+            final aiCtx = _urlPreview != null
+                ? MetadataRecord.fromUrlMetadata(_urlPreview!,
+                        url: detectedUrl ?? '')
+                    .aiContext()
+                : '';
             final result = await svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
-              extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+              extraContext: aiCtx.isNotEmpty ? aiCtx : null,
             );
             if (result.tags.isNotEmpty || result.title != null) {
               // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)
