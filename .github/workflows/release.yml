@@ -112,6 +112,11 @@ jobs:
       - name: Code-Generator ausführen (Drift + Riverpod)
         run: dart run build_runner build --delete-conflicting-outputs
       - name: Windows App bauen (Release)
+        # MSVC 14.51 (VS18) macht <experimental/coroutine> zum harten Fehler
+        # (STL1011); mehrere Flutter-Plugins inkludieren den Header noch. Das
+        # Makro (per CL-Env auf alle cl.exe-Aufrufe) unterdrückt den Abbruch.
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: flutter build windows --release
       - name: App zippen
         shell: pwsh
