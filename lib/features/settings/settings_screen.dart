@@ -16,6 +16,7 @@ import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
 import '../../services/enrichment/api_field_catalog.dart';
 import '../../services/enrichment/api_field_prefs.dart';
+import '../../services/enrichment/api_keys.dart';
 import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
 import '../../services/openrouter_service.dart';
@@ -64,6 +65,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // API-Feld-Präferenzen (katalog-getrieben)
   ApiFieldPrefs _apiPrefs = const ApiFieldPrefs({});
 
+  // Quellen-API-Keys (YouTube Data API v3)
+  final _youtubeKeyCtrl = TextEditingController();
+
   // Verbindungstest
   String _testState = 'idle'; // idle | loading | ok | error
   String _testError = '';
@@ -86,6 +90,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     _apiKeyCtrl.dispose();
     _searxngUrlCtrl.dispose();
+    _youtubeKeyCtrl.dispose();
     super.dispose();
   }
 
@@ -96,6 +101,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final tokStr = await secureRead(_keyMaxTokens);
     final charStr = await secureRead(_keyMaxInputChars);
     final searx = await secureRead(_keySearxngUrl) ?? '';
+    final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
     if (mounted) {
       setState(() {
         _apiKeyCtrl.text = key;
@@ -105,8 +111,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
         _maxInputChars = int.tryParse(charStr ?? '') ?? 1500;
         _searxngUrlCtrl.text = searx;
+        _youtubeKeyCtrl.text = youtubeKey;
       });
     }
+  }
+
+  Future<void> _saveYoutubeKey() async {
+    await secureWrite(ApiKeyStore.youtube, _youtubeKeyCtrl.text.trim());
+    if (mounted) _showSnack('YouTube-API-Key gespeichert', success: true);
   }
 
   Future<void> _saveAiSettings() async {
@@ -1364,6 +1376,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 28),
           _SectionHeader('INFO-APIS'),
           const SizedBox(height: 8),
+          // YouTube Data API-Key (optional). Ohne Key nutzt MindFeed den
+          // oEmbed-Pfad; mit Key kommen Aufrufe, Likes, Tags etc. dazu.
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: const [
+                  Icon(Icons.smart_display_outlined,
+                      size: 16, color: Color(0xFFFF0000)),
+                  SizedBox(width: 8),
+                  Text('YouTube Data API',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600,
+                          color: MFColors.textPrimary)),
+                ]),
+                const SizedBox(height: 4),
+                const Text(
+                  'Optionaler Key (Google Cloud → YouTube Data API v3). '
+                  'Ohne Key: oEmbed-Fallback.',
+                  style: TextStyle(fontSize: 11, color: MFColors.textMuted),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _youtubeKeyCtrl,
+                  obscureText: true,
+                  style: const TextStyle(
+                      fontSize: 13, color: MFColors.textPrimary),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'API-Key einfügen…',
+                    hintStyle: const TextStyle(
+                        fontSize: 13, color: MFColors.textMuted),
+                    filled: true,
+                    fillColor: MFColors.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.save_outlined,
+                          size: 18, color: MFColors.teal),
+                      tooltip: 'Speichern',
+                      onPressed: _saveYoutubeKey,
+                    ),
+                  ),
+                  onSubmitted: (_) => _saveYoutubeKey(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
           _ApiFieldSection(
             prefs: _apiPrefs,
             onChanged: (p) async {

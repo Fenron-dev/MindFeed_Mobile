@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -vE \"origin/main$|HEAD\")",
+      "Bash(git remote *)",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/release.yml'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/release.yml'\\); puts 'YAML OK'\")",
+      "Bash(ruby -ryaml -e \"puts YAML.load_file\\('.github/workflows/release.yml'\\)['jobs'].keys.join\\(', '\\)\")",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/release.yml'\\); YAML.load_file\\('.github/workflows/windows_build.yml'\\); puts 'YAML OK'\")",
+      "Bash(echo \"WATCH_DONE exit=$?\")",
+      "Bash(flutter create *)",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/release.yml'\\); YAML.load_file\\('.github/workflows/linux_build.yml'\\); puts 'YAML OK'\")",
+      "Bash(sed -n '1,40p' lib/core/secure_storage.dart)",
+      "Bash(sed -n '389,500p' lib/services/url_metadata_service.dart)",
+      "Bash(echo \"errors: $\\(flutter analyze lib 2>&1)"
+    ]
+  }
+}
