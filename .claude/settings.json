@@ -12,7 +12,11 @@
       "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/release.yml'\\); YAML.load_file\\('.github/workflows/linux_build.yml'\\); puts 'YAML OK'\")",
       "Bash(sed -n '1,40p' lib/core/secure_storage.dart)",
       "Bash(sed -n '389,500p' lib/services/url_metadata_service.dart)",
-      "Bash(echo \"errors: $\\(flutter analyze lib 2>&1)"
+      "Bash(echo \"errors: $\\(flutter analyze lib 2>&1)",
+      "Bash(echo \"macOS: $\\(gh run view 27976609830 --json conclusion -q '.conclusion'\\)\")",
+      "Bash(python3 -c \"import os;print\\('macos 1024:', os.path.getsize\\('macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png'\\) if os.path.exists\\('macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png'\\) else 'fehlt'\\)\")",
+      "Bash(git pull *)",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('pubspec.yaml'\\); puts 'pubspec YAML OK'\")"
     ]
   }
 }
