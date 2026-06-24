@@ -28,6 +28,7 @@ import '../../features/tasks/task_provider.dart'
     show tasksBySourceNoteProvider, subtasksByParentProvider;
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
+import '../../widgets/format_toolbar.dart';
 import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
@@ -318,6 +319,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         opts.enrichBody ? detailContent : '',
         existingTitle: title,
         extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+        existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
       );
 
       int changes = 0;
@@ -1094,6 +1096,16 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.zero,
                                   filled: false),
+                            ),
+                          if (!_showPreview)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: FormatToolbar(
+                                controller: _bodyCtrl,
+                                // Tag-Chips leiten sich aus dem Body ab → nach
+                                // Formatierung/QR-Einfügen neu rendern.
+                                onChanged: () => setState(() {}),
+                              ),
                             ),
                         ],
                       )

@@ -46,7 +46,9 @@ class OpenRouterService {
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
   /// [extraContext] kann zusätzliche Metadaten enthalten (z.B. URL-Beschreibung, Genres).
   Future<AiEnrichment> enrichEntry(String body,
-      {String? existingTitle, String? extraContext}) async {
+      {String? existingTitle,
+      String? extraContext,
+      List<String> existingTags = const []}) async {
     // Gesamtinhalt aus allen verfügbaren Quellen zusammensetzen
     final bodyLimit = maxInputChars < 200 ? 200 : maxInputChars;
     final ctxLimit = (bodyLimit ~/ 3).clamp(200, 4000);
@@ -64,6 +66,17 @@ class OpenRouterService {
 
     final content = parts.join('\n\n');
 
+    // Vorhandene Tags (gekappt) der KI mitgeben, damit sie passende
+    // wiederverwendet statt Quasi-Duplikate zu erzeugen. Tag-Namen sind kurz →
+    // moderater Token-Aufschlag.
+    final tagPool =
+        existingTags.where((t) => t.trim().isNotEmpty).take(200).toList();
+    final tagHint = tagPool.isEmpty
+        ? ''
+        : '\n\nVORHANDENE TAGS — bevorzuge inhaltlich passende daraus (exakte '
+            'Schreibweise übernehmen) und erstelle nur dann einen neuen Tag, '
+            'wenn wirklich keiner passt:\n${tagPool.join(', ')}';
+
     final prompt = '''Du bist ein präziser Wissensassistent. Analysiere den INHALT unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück (kein Markdown, kein Code-Block, kein Text davor/danach).
 
 INHALT:
@@ -74,7 +87,7 @@ Erzeuge ein JSON-Objekt mit GENAU diesen Schlüsseln. Befülle jeden Wert mit de
 - "title": Verbesserter, konkreter Titel des Themas/Tools/Projekts (max 70 Zeichen). null, wenn der vorhandene Titel bereits gut ist.
 - "summary": 2-4 vollständige, eigene Sätze, die konkret beschreiben, worum es geht, was es kann/macht und für wen es nützlich ist. Bezieh dich auf konkrete Inhalte, keine Floskeln.
 - "tags": 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen). Kleingeschrieben, nur Buchstaben/Zahlen/Bindestriche.
-- "lang": ISO-639-1-Sprachcode des Hauptinhalts (z.B. "de", "en").
+- "lang": ISO-639-1-Sprachcode des Hauptinhalts (z.B. "de", "en").$tagHint
 
 Beispiel für das FORMAT (Inhalt ignorieren, nur Struktur):
 {"title": null, "summary": "…", "tags": ["…","…"], "lang": "de"}
