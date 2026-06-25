@@ -669,6 +669,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           );
       // Vom Nutzer bestätigte Felder generisch als Properties schreiben.
       await _writeResolvedFields(createdEntry.entry.id, resolvedFields);
+      // Seiten-Haupttext versteckt ablegen → spätere KI-Anreicherung nutzt ihn
+      // als Treibstoff (#27).
+      final pageText = _urlPreview?.pageText ?? '';
+      if (pageText.isNotEmpty) {
+        await _writeResolvedFields(createdEntry.entry.id,
+            [ResolvedField('_pagetext', pageText, 'string')]);
+      }
       // Parent-Entry-Verknüpfung als Property speichern
       if (widget.parentEntryId != null) {
         final dao = ref.read(propertyDaoProvider);
@@ -734,11 +741,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             // Der KI den VOLLEN abgerufenen Feld-Satz als Kontext geben —
             // auch Felder, die der Nutzer nicht importiert hat, damit sie in
             // generierte Texte einfließen können.
-            final aiCtx = _urlPreview != null
-                ? MetadataRecord.fromUrlMetadata(_urlPreview!,
-                        url: detectedUrl ?? '')
-                    .aiContext()
-                : '';
+            final ctxParts = <String>[];
+            if (_urlPreview != null) {
+              final fields = MetadataRecord.fromUrlMetadata(_urlPreview!,
+                      url: detectedUrl ?? '')
+                  .aiContext();
+              if (fields.isNotEmpty) ctxParts.add(fields);
+            }
+            // Haupttext der Seite als KI-Treibstoff (#27) — Variable stammt aus
+            // dem äußeren Scope (oben bei der Eintragserstellung gesetzt).
+            if (pageText.isNotEmpty) ctxParts.add('SEITENINHALT:\n$pageText');
+            final aiCtx = ctxParts.join('\n\n');
             final result = await svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
