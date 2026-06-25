@@ -63,6 +63,11 @@ class ApiFieldCatalog {
       ApiFieldDef(key: 'channel', label: 'Kanal', propKey: 'youtube_channel'),
       ApiFieldDef(key: 'image', label: 'Thumbnail', type: PropType.url, propKey: 'og_image'),
       ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),
+      ApiFieldDef(key: 'duration', label: 'Laufzeit', propKey: 'youtube_laufzeit'),
+      ApiFieldDef(key: 'published', label: 'Hochgeladen', propKey: 'youtube_hochgeladen'),
+      ApiFieldDef(key: 'views', label: 'Aufrufe', type: PropType.number, propKey: 'youtube_views'),
+      ApiFieldDef(key: 'likes', label: 'Likes', type: PropType.number, propKey: 'youtube_likes', defaultEnabled: false),
+      ApiFieldDef(key: 'tags', label: 'Tags', type: PropType.tags, propKey: 'youtube_tags', defaultEnabled: false),
     ],
     ApiSource.genericWeb: [
       ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),

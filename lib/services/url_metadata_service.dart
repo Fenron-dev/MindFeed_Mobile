@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
+import '../core/secure_storage.dart';
 import 'bgg_service.dart';
+import 'enrichment/api_keys.dart';
+import 'enrichment/sources/youtube_api_source.dart';
 
 class UrlMetadata {
   final String title;
@@ -394,6 +397,14 @@ class UrlMetadataService {
       }
       if (vid == null) return null;
       if (vid.contains('?')) vid = vid.split('?').first;
+
+      // Bevorzugt offizielle YouTube Data API v3 (mehr Felder, robuster).
+      // Ohne hinterlegten Key oder bei Fehler: Fallback auf oEmbed + Scraping.
+      final apiKey = await secureRead(ApiKeyStore.youtube) ?? '';
+      if (apiKey.isNotEmpty) {
+        final viaApi = await YoutubeApiSource.fetch(vid, apiKey);
+        if (viaApi != null) return viaApi;
+      }
 
       // oEmbed für Titel, Kanal und Thumbnail
       final oEmbedFuture = http
