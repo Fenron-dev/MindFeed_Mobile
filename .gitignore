@@ -50,3 +50,6 @@ secrets.json
 
 # Generated Dart files (behalten in Repo für CI)
 # lib/**/*.g.dart  ← absichtlich NICHT ignoriert
+
+# Claude Code lokale Einstellungen
+.claude/
