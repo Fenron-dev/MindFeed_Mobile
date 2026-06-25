@@ -218,11 +218,14 @@ class BulkActionBar extends ConsumerWidget {
         ),
       ),
     );
+    // Einmal vorab laden (nicht pro Eintrag) → der KI als bevorzugte Tags geben.
+    final allTagNames = await tagDao.getAllTagNames();
     for (final id in ids) {
       try {
         final e = await repo.getById(id);
         if (e != null) {
-          final r = await svc.enrichEntry(e.entry.body, existingTitle: e.entry.title);
+          final r = await svc.enrichEntry(e.entry.body,
+              existingTitle: e.entry.title, existingTags: allTagNames);
           if (r.title != null && (e.entry.title == null || e.entry.title!.isEmpty)) {
             await repo.updateEntry(id, title: r.title);
           }

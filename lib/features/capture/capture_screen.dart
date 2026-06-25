@@ -22,6 +22,7 @@ import '../../services/url_metadata_service.dart';
 import 'field_import_sheet.dart';
 import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry;
+import '../../widgets/format_toolbar.dart';
 import '../../widgets/wikilink_text_field.dart';
 
 const _storage = FlutterSecureStorage();
@@ -742,6 +743,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
               extraContext: aiCtx.isNotEmpty ? aiCtx : null,
+              existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
             );
             if (result.tags.isNotEmpty || result.title != null) {
               // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)
@@ -1118,6 +1120,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ]),
             ),
 
+          // Formatierungs-Leiste (Fett/Kursiv/Strike/Liste/Link + QR-Scan).
+          // Der _bodyCtrl-Listener (_onBodyChanged) stößt URL-Vorschau und
+          // Tag-Parsing nach jeder Änderung selbst an.
+          FormatToolbar(controller: _bodyCtrl, focusNode: _bodyFocus),
           _CaptureToolbar(
             onTitleToggle: () =>
                 setState(() => _showTitle = !_showTitle),
