@@ -69,6 +69,11 @@ class ApiFieldCatalog {
       ApiFieldDef(key: 'likes', label: 'Likes', type: PropType.number, propKey: 'youtube_likes', defaultEnabled: false),
       ApiFieldDef(key: 'tags', label: 'Tags', type: PropType.tags, propKey: 'youtube_tags', defaultEnabled: false),
     ],
+    ApiSource.amazon: [
+      ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),
+      ApiFieldDef(key: 'image', label: 'Bild', type: PropType.url, propKey: 'og_image'),
+      ApiFieldDef(key: 'price', label: 'Preis', propKey: 'Preis'),
+    ],
     ApiSource.genericWeb: [
       ApiFieldDef(key: 'description', label: 'Beschreibung', propKey: 'og_description'),
       ApiFieldDef(key: 'image', label: 'Vorschaubild', type: PropType.url, propKey: 'og_image'),

@@ -293,14 +293,14 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         if (descProp?.value?.isNotEmpty == true) descProp!.value!,
       ];
 
-      // Reichster Inhalt für die (ausführliche) Auswertung: Transkript falls
-      // vorhanden, sonst der übergebene Body.
-      final transcriptProp =
-          props.where((p) => p.key == '_transcript').firstOrNull;
+      // Reichster Inhalt für die (ausführliche) Auswertung: Transkript, sonst
+      // der extrahierte Seiten-Haupttext (#27), sonst der übergebene Body.
+      String? hiddenText(String key) => props
+          .where((p) => p.key == key && (p.value?.trim().isNotEmpty == true))
+          .firstOrNull
+          ?.value;
       final detailContent =
-          (transcriptProp?.value?.trim().isNotEmpty == true)
-              ? transcriptProp!.value!
-              : body;
+          hiddenText('_transcript') ?? hiddenText('_pagetext') ?? body;
 
       final model = await secureRead(_keyAiModel) ?? '';
       final tempStr = await secureRead('openrouter_temperature');

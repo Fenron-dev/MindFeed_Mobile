@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 import '../core/secure_storage.dart';
@@ -34,6 +35,10 @@ class UrlMetadata {
   final String? githubDefaultBranch;
   // Generische Zusatz-Properties (BGG/VGG/RPGG-spezifisch)
   final Map<String, String> extraProps;
+  // Aus der HTML-Seite extrahierter Haupttext (readability-artig) — dient als
+  // "Treibstoff" für die KI-Anreicherung generischer Links (#27). Transport-
+  // only, kein Katalogfeld.
+  final String? pageText;
 
   const UrlMetadata({
     required this.title,
@@ -59,6 +64,7 @@ class UrlMetadata {
     this.githubLanguage,
     this.githubDefaultBranch,
     this.extraProps = const {},
+    this.pageText,
   });
 }
 
@@ -67,6 +73,49 @@ class UrlMetadataService {
 
   static String? extractUrl(String text) =>
       _urlPattern.firstMatch(text)?.group(0);
+
+  /// Maximale Länge des extrahierten Seitentexts (Token-Schranke für die KI).
+  static const _pageTextCap = 6000;
+
+  /// Extrahiert den Haupttext einer HTML-Seite (readability-artig): entfernt
+  /// Navigations-/Skript-Elemente, bevorzugt `<article>`/`<main>` und sammelt
+  /// die Absätze/Überschriften/Listenpunkte. Mutiert das übergebene Dokument.
+  static String mainTextFromDocument(dom.Document doc) {
+    try {
+      // Störendes entfernen.
+      const noise = [
+        'script', 'style', 'noscript', 'nav', 'header', 'footer',
+        'aside', 'form', 'svg', 'template', 'iframe',
+      ];
+      for (final sel in noise) {
+        for (final e in doc.querySelectorAll(sel)) {
+          e.remove();
+        }
+      }
+      final root =
+          doc.querySelector('article') ?? doc.querySelector('main') ?? doc.body;
+      if (root == null) return '';
+
+      final buf = StringBuffer();
+      for (final el in root.querySelectorAll('h1, h2, h3, p, li')) {
+        final t = el.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+        if (t.isEmpty) continue;
+        final isHeading = const {'h1', 'h2', 'h3'}.contains(el.localName);
+        // Kurze Nicht-Überschriften (Menüpunkte, Buttons) überspringen.
+        if (isHeading || t.length >= 30) buf.writeln(t);
+      }
+      var text = buf.toString().trim();
+      if (text.isEmpty) {
+        text = (root.text).replaceAll(RegExp(r'\s+'), ' ').trim();
+      }
+      if (text.length > _pageTextCap) {
+        text = '${text.substring(0, _pageTextCap)}…';
+      }
+      return text;
+    } catch (_) {
+      return '';
+    }
+  }
 
   static Future<UrlMetadata?> fetch(String url) async {
     try {
@@ -86,6 +135,9 @@ class UrlMetadataService {
       }
       if (host.contains('github.com')) {
         return _fetchGitHub(uri);
+      }
+      if (host.contains('amazon.')) {
+        return _fetchAmazon(uri);
       }
 
       final response = await http
@@ -117,11 +169,16 @@ class UrlMetadataService {
 
       final image = og('image');
 
+      // Haupttext der Seite extrahieren (nach dem OG-Lesen, da die Extraktion
+      // den DOM mutiert). Dient als KI-Treibstoff (#27).
+      final pageText = mainTextFromDocument(doc);
+
       return UrlMetadata(
         title: (title?.isNotEmpty == true) ? title!.trim() : _hostLabel(uri),
         description: desc?.trim() ?? '',
         image: image,
         domain: host.replaceFirst('www.', ''),
+        pageText: pageText.isNotEmpty ? pageText : null,
       );
     } catch (_) {
       try {
@@ -570,6 +627,9 @@ class UrlMetadataService {
         if (licenseKey != null && licenseKey != 'NOASSERTION') licenseKey,
       ].join(' · ');
 
+      // README als KI-Treibstoff (#27).
+      final readme = await _fetchGitHubReadme(owner, repo);
+
       return UrlMetadata(
         title: fullName,
         description: [details, if (desc.isNotEmpty) desc].join('\n'),
@@ -586,9 +646,34 @@ class UrlMetadataService {
             (website != null && website.isNotEmpty) ? website : null,
         githubLanguage: lang,
         githubDefaultBranch: defaultBranch,
+        pageText: readme.isNotEmpty ? readme : null,
       );
     } catch (_) {
       return _domainFallback(fallbackUri);
+    }
+  }
+
+  /// Lädt das README eines Repos als Roh-Text (für die KI-Anreicherung).
+  /// Leerer String bei Fehler/fehlendem README.
+  static Future<String> _fetchGitHubReadme(String owner, String repo) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('https://api.github.com/repos/$owner/$repo/readme'),
+            headers: {
+              'Accept': 'application/vnd.github.raw+json',
+              'User-Agent': 'MindFeed-Mobile',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return '';
+      var text = _decodeBody(res).replaceAll(RegExp(r'\s+\n'), '\n').trim();
+      if (text.length > _pageTextCap) {
+        text = '${text.substring(0, _pageTextCap)}…';
+      }
+      return text;
+    } catch (_) {
+      return '';
     }
   }
 
@@ -672,6 +757,65 @@ class UrlMetadataService {
       );
     } catch (_) {
       return _domainFallback(fallbackUri);
+    }
+  }
+
+  // ─── Amazon (best-effort) ────────────────────────────────────────────────────
+  // Keine offizielle freie Produkt-API → HTML-Extraktion. Amazon blockt Bots
+  // teils (Robot-Check); dann greift der Domain-Fallback.
+
+  static Future<UrlMetadata?> _fetchAmazon(Uri uri) async {
+    try {
+      final res = await http
+          .get(uri, headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+          })
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode < 200 || res.statusCode >= 400) {
+        return _domainFallback(uri);
+      }
+      final doc = html_parser.parse(_decodeBody(res));
+
+      String? sel(String s) => doc.querySelector(s)?.text.trim();
+      String? og(String p) =>
+          doc.querySelector('meta[property="og:$p"]')?.attributes['content'];
+
+      final title = (sel('#productTitle') ??
+              og('title') ??
+              doc.querySelector('title')?.text.trim())
+          ?.replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      // Robot-Check / kein Produkttitel → Fallback.
+      if (title == null || title.isEmpty) return _domainFallback(uri);
+
+      final image = og('image') ??
+          doc.querySelector('#landingImage')?.attributes['src'] ??
+          doc.querySelector('#imgBlkFront')?.attributes['src'];
+
+      final price = sel('.a-price .a-offscreen') ??
+          sel('#corePrice_feature_div .a-offscreen') ??
+          sel('#priceblock_ourprice') ??
+          sel('#priceblock_dealprice');
+
+      final bullets = sel('#feature-bullets');
+      final desc = og('description') ?? bullets ?? '';
+      final pageText = UrlMetadataService.mainTextFromDocument(doc);
+
+      return UrlMetadata(
+        title: title,
+        description: desc.replaceAll(RegExp(r'\s+'), ' ').trim(),
+        image: image,
+        domain: uri.host.replaceFirst('www.', ''),
+        mediaType: 'AMAZON',
+        extraProps: {if (price != null && price.isNotEmpty) 'Preis': price},
+        pageText: pageText.isNotEmpty ? pageText : null,
+      );
+    } catch (_) {
+      return _domainFallback(uri);
     }
   }
 
