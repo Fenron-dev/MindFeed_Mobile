@@ -19,7 +19,6 @@ import '../../services/enrichment/api_field_prefs.dart';
 import '../../services/enrichment/api_keys.dart';
 import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
-import '../../services/openrouter_service.dart';
 import '../../services/searxng_service.dart';
 import '../settings/sync_settings_screen.dart';
 import 'ai_profiles_screen.dart';
@@ -28,11 +27,6 @@ import '../../core/constants.dart';
 import '../../sync/sync_provider.dart';
 import 'package:go_router/go_router.dart';
 
-const _keyApiKey = 'openrouter_api_key';
-const _keyAiModel = 'openrouter_model';
-const _keyTemperature = 'openrouter_temperature';
-const _keyMaxTokens = 'openrouter_max_tokens';
-const _keyMaxInputChars = 'openrouter_max_input_chars';
 const _keySearxngUrl = 'searxng_base_url';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -49,30 +43,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _backupsLoaded = false;
   String? _activeVaultPath; // null = Default-Vault
 
-  // AI Settings
-  final _apiKeyCtrl = TextEditingController();
-  bool _apiKeySaved = false;
-  bool _apiKeyVisible = false;
-  String _selectedModel = '';
-  double _temperature = 0.3;
-  int _maxTokens = 400;
-  int _maxInputChars = 1500;
-
-  // Modell-Picker
-  List<Map<String, dynamic>> _models = [];
-  bool _loadingModels = false;
-  bool _freeOnly = true;
-  String _modelSearch = '';
-
   // API-Feld-Präferenzen (katalog-getrieben)
   ApiFieldPrefs _apiPrefs = const ApiFieldPrefs({});
 
   // Quellen-API-Keys (YouTube Data API v3)
   final _youtubeKeyCtrl = TextEditingController();
-
-  // Verbindungstest
-  String _testState = 'idle'; // idle | loading | ok | error
-  String _testError = '';
 
   // SearXNG (eigene Recherche-Schicht)
   final _searxngUrlCtrl = TextEditingController();
@@ -90,28 +65,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
-    _apiKeyCtrl.dispose();
     _searxngUrlCtrl.dispose();
     _youtubeKeyCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadAiSettings() async {
-    final key = await secureRead(_keyApiKey) ?? '';
-    final model = await secureRead(_keyAiModel) ?? '';
-    final tempStr = await secureRead(_keyTemperature);
-    final tokStr = await secureRead(_keyMaxTokens);
-    final charStr = await secureRead(_keyMaxInputChars);
     final searx = await secureRead(_keySearxngUrl) ?? '';
     final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
     if (mounted) {
       setState(() {
-        _apiKeyCtrl.text = key;
-        _apiKeySaved = key.isNotEmpty;
-        _selectedModel = model;
-        _temperature = double.tryParse(tempStr ?? '') ?? 0.3;
-        _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
-        _maxInputChars = int.tryParse(charStr ?? '') ?? 1500;
         _searxngUrlCtrl.text = searx;
         _youtubeKeyCtrl.text = youtubeKey;
       });
@@ -124,61 +87,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _saveAiSettings() async {
-    await secureWrite(_keyApiKey, _apiKeyCtrl.text.trim());
-    await secureWrite(_keyAiModel, _selectedModel);
-    await secureWrite(_keyTemperature, _temperature.toString());
-    await secureWrite(_keyMaxTokens, _maxTokens.toString());
-    await secureWrite(_keyMaxInputChars, _maxInputChars.toString());
     await secureWrite(_keySearxngUrl, _searxngUrlCtrl.text.trim());
     if (mounted) {
-      setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('AI-Einstellungen gespeichert.'),
+        content: Text('Gespeichert.'),
         behavior: SnackBarBehavior.floating,
       ));
-    }
-  }
-
-  Future<void> _loadModels() async {
-    final key = _apiKeyCtrl.text.trim();
-    if (key.isEmpty) {
-      _showSnack('Bitte zuerst API-Key eingeben.', success: false);
-      return;
-    }
-    setState(() => _loadingModels = true);
-    try {
-      final models = await OpenRouterService.getModels(key);
-      if (mounted) setState(() { _models = models; _loadingModels = false; });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loadingModels = false);
-        _showSnack('Modelle konnten nicht geladen werden: $e', success: false);
-      }
-    }
-  }
-
-  Future<void> _testConnection() async {
-    final key = _apiKeyCtrl.text.trim();
-    if (key.isEmpty) {
-      setState(() { _testState = 'error'; _testError = 'Kein API-Key eingegeben'; });
-      return;
-    }
-    setState(() { _testState = 'loading'; _testError = ''; });
-    try {
-      final svc = OpenRouterService(
-        apiKey: key,
-        model: _selectedModel.isNotEmpty ? _selectedModel : OpenRouterService.defaultModel,
-      );
-      await svc.testConnection();
-      if (mounted) setState(() => _testState = 'ok');
-    } catch (e) {
-      if (mounted) {
-        final msg = e.toString().replaceFirst('Exception: ', '');
-        setState(() {
-          _testState = 'error';
-          _testError = msg.length > 150 ? '${msg.substring(0, 150)}…' : msg;
-        });
-      }
     }
   }
 
@@ -197,35 +111,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ? ''
           : (err.length > 150 ? '${err.substring(0, 150)}…' : err);
     });
-  }
-
-  List<Map<String, dynamic>> get _filteredModels {
-    return _models.where((m) {
-      final id = (m['id'] as String? ?? '').toLowerCase();
-      final name = (m['name'] as String? ?? '').toLowerCase();
-      final isFree = id.endsWith(':free') ||
-          ((m['pricing'] as Map?)?.entries.every(
-                (e) => e.value == '0' || e.value == null,
-              ) ??
-              false);
-      if (_freeOnly && !isFree) return false;
-      if (_modelSearch.isNotEmpty) {
-        final q = _modelSearch.toLowerCase();
-        if (!id.contains(q) && !name.contains(q)) return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  String _priceLabel(Map<String, dynamic> m) {
-    final id = (m['id'] as String? ?? '');
-    final pricing = m['pricing'] as Map?;
-    final isFree = id.endsWith(':free') ||
-        (pricing?.entries.every((e) => e.value == '0' || e.value == null) ?? false);
-    if (isFree) return 'Free';
-    final p = double.tryParse(pricing?['prompt']?.toString() ?? '') ?? 0;
-    if (p > 0) return '\$${(p * 1000000).toStringAsFixed(2)}/M';
-    return '—';
   }
 
   Future<void> _loadBackups() async {
@@ -2076,32 +1961,6 @@ class _ApiToggle extends StatelessWidget {
               activeColor: MFColors.teal,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-          ]),
-        ),
-      );
-}
-
-class _SmallBtn extends StatelessWidget {
-  final String label;
-  final VoidCallback? onTap;
-  final Widget? icon;
-  const _SmallBtn({required this.label, this.onTap, this.icon});
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            border: Border.all(color: MFColors.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (icon != null) ...[icon!, const SizedBox(width: 4)],
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: MFColors.textSecondary)),
           ]),
         ),
       );
