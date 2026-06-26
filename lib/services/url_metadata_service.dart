@@ -334,6 +334,72 @@ class UrlMetadataService {
     }
   }
 
+  /// Sucht ein Werk per **Titel** auf AniList (für die Bild-/Vision-Erkennung).
+  /// [kind] = 'anime' | 'manga'. Liefert echte Metadaten + Cover oder null.
+  static Future<UrlMetadata?> searchAniList(String query,
+      {String kind = 'anime'}) async {
+    if (query.trim().isEmpty) return null;
+    final type = kind.toLowerCase() == 'manga' ? 'MANGA' : 'ANIME';
+    const gql = r'''
+      query ($q: String, $type: MediaType) {
+        Media(search: $q, type: $type, sort: SEARCH_MATCH) {
+          title { romaji english }
+          description(asHtml: false)
+          coverImage { extraLarge large }
+          genres averageScore type format episodes chapters
+          startDate { year }
+          studios(isMain: true) { nodes { name } }
+        }
+      }''';
+    try {
+      final res = await http
+          .post(Uri.parse('https://graphql.anilist.co'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              },
+              body: jsonEncode({
+                'query': gql,
+                'variables': {'q': query.trim(), 'type': type},
+              }))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final media = jsonDecode(_decodeBody(res))['data']?['Media'];
+      if (media == null) return null;
+
+      final t = media['title'] as Map<String, dynamic>?;
+      final title = (t?['english'] as String?)?.isNotEmpty == true
+          ? t!['english'] as String
+          : (t?['romaji'] as String?) ?? query.trim();
+      final desc = ((media['description'] as String?) ?? '')
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#039;', "'")
+          .trim();
+      final cover = media['coverImage'] as Map<String, dynamic>?;
+      final studioNodes = media['studios']?['nodes'] as List?;
+      return UrlMetadata(
+        title: title,
+        description: desc,
+        image: (cover?['extraLarge'] as String?) ?? (cover?['large'] as String?),
+        domain: 'anilist.co',
+        genres: (media['genres'] as List?)?.map((g) => '$g').toList() ?? [],
+        score: media['averageScore'] as int?,
+        mediaType: media['type'] as String?,
+        anilistFormat: media['format'] as String?,
+        anilistEpisodes: media['episodes'] as int?,
+        anilistChapters: media['chapters'] as int?,
+        anilistYear: (media['startDate'] as Map?)?['year'] as int?,
+        anilistStudio: studioNodes?.isNotEmpty == true
+            ? (studioNodes!.first as Map)['name'] as String?
+            : null,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── Staffel-Kette traversieren ────────────────────────────────────────────
 
   static Future<int?> _fetchDirectRelationId(

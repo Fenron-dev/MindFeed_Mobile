@@ -26,6 +26,7 @@ import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/format_toolbar.dart';
 import '../../widgets/wikilink_text_field.dart';
+import 'vision_flow.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
@@ -237,6 +238,35 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _pendingImages.addAll(images.map((f) => XFile(f.path!)));
       });
     }
+  }
+
+  /// Analysiert das erste angehängte Bild per Vision-Profil und füllt
+  /// Titel/Body/Tags der Notiz (#34).
+  Future<void> _analyzeImage() async {
+    if (_pendingImages.isEmpty) return;
+    final bytes = await _pendingImages.first.readAsBytes();
+    if (!mounted) return;
+    final existing = await ref.read(tagDaoProvider).getAllTagNames();
+    if (!mounted) return;
+    final outcome =
+        await runVisionFlow(context, ref, bytes, existingTags: existing);
+    if (outcome == null || !mounted) return;
+    setState(() {
+      if ((outcome.title ?? '').isNotEmpty) {
+        _titleCtrl.text = outcome.title!;
+        _showTitle = true;
+      }
+      final parts = <String>[];
+      if ((outcome.summary ?? '').isNotEmpty) parts.add(outcome.summary!);
+      if (outcome.tags.isNotEmpty) {
+        parts.add(outcome.tags.map((t) => '#$t').join(' '));
+      }
+      if (parts.isNotEmpty) {
+        final cur = _bodyCtrl.text.trim();
+        _bodyCtrl.text =
+            cur.isEmpty ? parts.join('\n\n') : '$cur\n\n${parts.join('\n\n')}';
+      }
+    });
   }
 
   Future<void> _pickImage() async {
@@ -996,6 +1026,31 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             ),
 
           // Bild-Thumbnails
+          if (_pendingImages.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: InkWell(
+                  onTap: _analyzeImage,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF8B5CF6)),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.auto_awesome, size: 14, color: Color(0xFF8B5CF6)),
+                      SizedBox(width: 6),
+                      Text('KI aus Bild',
+                          style: TextStyle(color: Color(0xFF8B5CF6), fontSize: 12)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
           if (_pendingImages.isNotEmpty)
             Container(
               height: 72,

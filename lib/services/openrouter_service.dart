@@ -15,6 +15,25 @@ class AiEnrichment {
   });
 }
 
+/// Ergebnis der Bild-Analyse (#34).
+class VisionResult {
+  final String? title;
+  final String? summary;
+  final List<String> tags;
+  final String? lang;
+  final String? mediaType; // z.B. 'anime', 'movie', 'series', 'youtube', 'shop'
+  final String? recognizedTitle; // erkannter Werk-/Seitentitel für die Suche
+
+  const VisionResult({
+    this.title,
+    this.summary,
+    this.tags = const [],
+    this.lang,
+    this.mediaType,
+    this.recognizedTitle,
+  });
+}
+
 /// Signalisiert, dass das aktuelle Profil/Modell nicht verfügbar ist
 /// (Rate-Limit/Guthaben/Modell weg/Server/Netz) → `AiService` wechselt auf das
 /// nächste Kettenglied und legt das Profil ggf. in Cooldown.
@@ -116,6 +135,85 @@ class OpenRouterService {
           retryAfter: AiUnavailableException.retryAfterFrom(res.headers));
     }
     throw Exception('AI ${res.statusCode}: $errMsg');
+  }
+
+  /// Analysiert ein Bild (multimodal) und erzeugt daraus eine Notiz-Vorlage:
+  /// erkennt Quelle/Medium + Titel + Inhalt. [imageDataUrl] ist eine
+  /// `data:image/...;base64,…`-URL (via ImageVision.toDataUrl). Braucht ein
+  /// vision-fähiges Modell.
+  Future<VisionResult> analyzeImage(String imageDataUrl,
+      {String? userHint, List<String> existingTags = const []}) async {
+    final tagPool =
+        existingTags.where((t) => t.trim().isNotEmpty).take(200).toList();
+    final tagHint = tagPool.isEmpty
+        ? ''
+        : '\nBevorzuge passende Tags aus: ${tagPool.join(', ')}';
+    final prompt =
+        '''Analysiere das Bild (oft ein Screenshot). Erkenne, um welche Quelle/Plattform und welches Werk es geht (z.B. YouTube-Video, Crunchyroll/Anime, Film, Serie, Buch, Shop-Produkt) und worum es inhaltlich geht.${userHint != null && userHint.isNotEmpty ? '\nHinweis des Nutzers: $userHint' : ''}
+
+Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
+- "title": prägnanter Titel für die Notiz (max 70 Zeichen)
+- "summary": 2-3 Sätze, worum es geht
+- "tags": 3-6 kleingeschriebene Schlagwörter
+- "lang": ISO-639-1 Sprachcode
+- "media_type": eines von "anime","manga","movie","series","youtube","book","game","shop","web","other"
+- "recognized_title": der konkrete Werk-/Seitentitel zur Nachschlage-Suche (oder null)$tagHint''';
+
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': prompt},
+            {
+              'type': 'image_url',
+              'image_url': {'url': imageDataUrl},
+            },
+          ],
+        },
+      ],
+      'max_tokens': maxTokens < 800 ? 800 : maxTokens,
+      'temperature': temperature,
+    });
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+
+    final res = await http
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
+        .timeout(const Duration(seconds: 45));
+    _checkStatus(res);
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    final responseText = (msg?['content'] as String?) ?? '';
+    final jsonStr = _extractJson(responseText);
+    if (jsonStr == null) {
+      throw Exception('Bild-Analyse: keine verwertbare Antwort.');
+    }
+    final p = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final tags = (p['tags'] as List?)
+            ?.map((t) => '$t'
+                .toLowerCase()
+                .replaceAll(RegExp(r'[^a-z0-9\-äöüß]'), ''))
+            .where((t) => t.length > 1)
+            .toList() ??
+        [];
+    String? str(dynamic v) =>
+        (v is String && v.trim().isNotEmpty && v != 'null') ? v.trim() : null;
+    return VisionResult(
+      title: str(p['title']),
+      summary: str(p['summary']),
+      tags: tags,
+      lang: str(p['lang']),
+      mediaType: str(p['media_type'])?.toLowerCase(),
+      recognizedTitle: str(p['recognized_title']),
+    );
   }
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.

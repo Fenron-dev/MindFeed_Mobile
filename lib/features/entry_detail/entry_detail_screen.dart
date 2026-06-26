@@ -25,6 +25,7 @@ import '../../services/app_settings.dart';
 import '../../services/url_metadata_service.dart';
 import '../../services/enrichment/metadata_record.dart';
 import '../capture/field_import_sheet.dart';
+import '../capture/vision_flow.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../features/tasks/task_provider.dart'
     show tasksBySourceNoteProvider, subtasksByParentProvider;
@@ -258,6 +259,46 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     } finally {
       if (mounted) setState(() => _refetching = false);
     }
+  }
+
+  /// Analysiert den ersten Bild-Anhang per Vision-Profil und ergänzt die Notiz
+  /// (Titel/Body/Tags) (#34).
+  Future<void> _analyzeImageNote(
+      String entryId, List<Attachment> attachments) async {
+    final att = attachments.where((a) => a.type == 'image').firstOrNull;
+    if (att == null || (att.localPath ?? '').isEmpty) {
+      _snack('Kein Bild-Anhang gefunden.');
+      return;
+    }
+    Uint8List bytes;
+    try {
+      bytes = await File(att.localPath!).readAsBytes();
+    } catch (e) {
+      _snack('Bild nicht lesbar: $e');
+      return;
+    }
+    if (!mounted) return;
+    final existing = await ref.read(tagDaoProvider).getAllTagNames();
+    if (!mounted) return;
+    final outcome =
+        await runVisionFlow(context, ref, bytes, existingTags: existing);
+    if (outcome == null) return;
+    final repo = ref.read(entryRepositoryProvider);
+    final cur = (await repo.getById(entryId))?.entry;
+    if ((outcome.title ?? '').isNotEmpty &&
+        (cur?.title == null || cur!.title!.isEmpty)) {
+      await repo.updateEntry(entryId, title: outcome.title);
+    }
+    final add = <String>[];
+    if ((outcome.summary ?? '').isNotEmpty) add.add(outcome.summary!);
+    if (outcome.tags.isNotEmpty) {
+      add.add(outcome.tags.map((t) => '#$t').join(' '));
+    }
+    if (add.isNotEmpty) {
+      final b = (await repo.getById(entryId))?.entry.body ?? '';
+      await repo.updateEntry(entryId, body: '$b\n\n${add.join('\n\n')}'.trim());
+    }
+    if (mounted) _snack('Aus Bild ergänzt.', error: false);
   }
 
   Future<void> _enrichWithAi(String entryId, String body, String? title) async {
@@ -912,6 +953,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   if (v == 'refetch') {
                     await _refetchMetadata(entry.id, entry.sourceUrl);
                   }
+                  if (v == 'vision') {
+                    await _analyzeImageNote(entry.id, item.attachments);
+                  }
                   if (v == 'done' || v == 'inbox' || v == 'archive') {
                     await ref.read(entryRepositoryProvider).updateEntry(
                         entry.id, status: v == 'archive' ? 'archived' : v);
@@ -936,6 +980,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                       _refetching ? Icons.hourglass_top_rounded : Icons.download_outlined,
                       _refetching ? 'Wird abgerufen…' : 'Metadaten neu abholen',
                       color: const Color(0xFF38BDF8)),
+                  if (item.attachments.any((a) => a.type == 'image'))
+                    _popItem('vision', Icons.image_search_outlined,
+                        'KI aus Bild',
+                        color: const Color(0xFF8B5CF6)),
                   const PopupMenuDivider(),
                   if (entry.status != 'done')
                     _popItem('done', Icons.check_circle_outline, 'Erledigt'),
