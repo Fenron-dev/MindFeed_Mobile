@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../domain/prop_type.dart';
-import '../../services/openrouter_service.dart';
+import '../../services/ai/ai_service.dart';
+import '../../services/ai/llm_profile.dart';
 import 'selection_provider.dart';
-
-const _storage = FlutterSecureStorage();
 
 /// Untere Sammel-Toolbar — sichtbar im Auswahlmodus (Feed + Aufgaben).
 class BulkActionBar extends ConsumerWidget {
@@ -185,18 +183,6 @@ class BulkActionBar extends ConsumerWidget {
 
   // ── KI-Anreicherung ──────────────────────────────────────────────────────────
   Future<void> _bulkEnrich(BuildContext context, WidgetRef ref, List<String> ids) async {
-    final apiKey = await _storage.read(key: 'openrouter_api_key') ?? '';
-    if (apiKey.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Kein OpenRouter-API-Key in den Einstellungen hinterlegt.')));
-      }
-      return;
-    }
-    final model = await _storage.read(key: 'openrouter_model') ?? '';
-    final svc = OpenRouterService(
-        apiKey: apiKey,
-        model: model.isNotEmpty ? model : OpenRouterService.defaultModel);
     final repo = ref.read(entryRepositoryProvider);
     final tagDao = ref.read(tagDaoProvider);
 
@@ -224,8 +210,9 @@ class BulkActionBar extends ConsumerWidget {
       try {
         final e = await repo.getById(id);
         if (e != null) {
-          final r = await svc.enrichEntry(e.entry.body,
-              existingTitle: e.entry.title, existingTags: allTagNames);
+          final r = await AiService.runForTask(ref, LlmTask.enrichment,
+              (svc) => svc.enrichEntry(e.entry.body,
+                  existingTitle: e.entry.title, existingTags: allTagNames));
           if (r.title != null && (e.entry.title == null || e.entry.title!.isEmpty)) {
             await repo.updateEntry(id, title: r.title);
           }

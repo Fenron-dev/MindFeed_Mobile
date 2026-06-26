@@ -18,7 +18,9 @@ import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
-import '../../services/openrouter_service.dart';
+import '../../services/ai/ai_service.dart';
+import '../../services/ai/llm_profile.dart';
+import '../../services/ai/llm_profiles_store.dart';
 import '../../services/app_settings.dart';
 import '../../services/url_metadata_service.dart';
 import '../../services/enrichment/metadata_record.dart';
@@ -259,11 +261,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   }
 
   Future<void> _enrichWithAi(String entryId, String body, String? title) async {
-    final apiKey = await secureRead(_keyApiKey) ?? '';
-    if (apiKey.isEmpty) {
+    if (ref.read(llmProfilesProvider).chainFor(LlmTask.enrichment).isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Kein OpenRouter API-Key in Einstellungen gesetzt.'),
+          content: Text('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.'),
           behavior: SnackBarBehavior.floating,
         ));
       }
@@ -302,34 +303,30 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       final detailContent =
           hiddenText('_transcript') ?? hiddenText('_pagetext') ?? body;
 
-      final model = await secureRead(_keyAiModel) ?? '';
-      final tempStr = await secureRead('openrouter_temperature');
-      final tokStr = await secureRead('openrouter_max_tokens');
-      final charStr = await secureRead('openrouter_max_input_chars');
-      final svc = OpenRouterService(
-        apiKey: apiKey,
-        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-        temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-        maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-        maxInputChars: int.tryParse(charStr ?? '') ??
-            OpenRouterService.defaultMaxInputChars,
-      );
-
-      final result = await svc.enrichEntry(
-        opts.enrichBody ? detailContent : '',
-        existingTitle: title,
-        extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
-        existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
+      final existingTagNames = await ref.read(tagDaoProvider).getAllTagNames();
+      final result = await AiService.runForTask(
+        ref,
+        LlmTask.enrichment,
+        (svc) => svc.enrichEntry(
+          opts.enrichBody ? detailContent : '',
+          existingTitle: title,
+          extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+          existingTags: existingTagNames,
+        ),
       );
 
       int changes = 0;
 
       // Strukturierte Notiz (typ-erkennend, volles Transkript) in den Body
       if (opts.enrichDetailedSummary && detailContent.trim().isNotEmpty) {
-        final structured = await svc.generateStructuredNote(detailContent,
-            existingTitle: title,
-            sourceUrl: (await ref.read(entryRepositoryProvider).getById(entryId))
-                ?.entry.sourceUrl);
+        final srcUrl =
+            (await ref.read(entryRepositoryProvider).getById(entryId))
+                ?.entry.sourceUrl;
+        final structured = await AiService.runForTask(
+            ref,
+            LlmTask.structuredNote,
+            (svc) => svc.generateStructuredNote(detailContent,
+                existingTitle: title, sourceUrl: srcUrl));
         if (structured != null && structured.trim().isNotEmpty) {
           final cur = (await ref.read(entryRepositoryProvider).getById(entryId))
                   ?.entry.body ?? '';
@@ -435,11 +432,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   /// Recherchiert einen Link über SearXNG und erzeugt daraus per LLM eine
   /// strukturierte Notiz, die als eigener Block in den Body eingefügt wird.
   Future<void> _researchLink(String entryId, String? url, String? title) async {
-    final apiKey = await secureRead(_keyApiKey) ?? '';
     final searxUrl = (await secureRead(_keySearxngUrl) ?? '').trim();
     if (!mounted) return;
-    if (apiKey.isEmpty) {
-      _snack('Kein OpenRouter API-Key in Einstellungen gesetzt.');
+    if (ref.read(llmProfilesProvider).chainFor(LlmTask.researchedNote).isEmpty) {
+      _snack('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.');
       return;
     }
     if (searxUrl.isEmpty) {
@@ -468,24 +464,15 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
               p.key.toLowerCase() == 'description')
           .firstOrNull;
 
-      final model = await secureRead(_keyAiModel) ?? '';
-      final tempStr = await secureRead('openrouter_temperature');
-      final tokStr = await secureRead('openrouter_max_tokens');
-      final charStr = await secureRead('openrouter_max_input_chars');
-      final svc = OpenRouterService(
-        apiKey: apiKey,
-        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-        temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-        maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-        maxInputChars: int.tryParse(charStr ?? '') ??
-            OpenRouterService.defaultMaxInputChars,
-      );
-
-      final note = await svc.generateResearchedNote(
-        title: query,
-        sourceUrl: url,
-        knownDescription: descProp?.value,
-        searchContext: context,
+      final note = await AiService.runForTask(
+        ref,
+        LlmTask.researchedNote,
+        (svc) => svc.generateResearchedNote(
+          title: query,
+          sourceUrl: url,
+          knownDescription: descProp?.value,
+          searchContext: context,
+        ),
       );
       if (note == null || note.trim().isEmpty) {
         throw Exception('Modell lieferte keine Notiz');

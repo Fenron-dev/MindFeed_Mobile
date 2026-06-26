@@ -16,6 +16,8 @@ import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
+import '../../services/ai/ai_service.dart';
+import '../../services/ai/llm_profile.dart';
 import '../../services/enrichment/metadata_record.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
@@ -721,63 +723,48 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         await _autoApplyTemplate(createdEntry.entry.id, mediaType);
       }
 
-      // Auto-KI Anreicherung wenn Toggle aktiv
+      // Auto-KI Anreicherung wenn Toggle aktiv (über die Profil-Kette).
       if (_autoAi) {
-        final apiKey = await _storage.read(key: _keyApiKey) ?? '';
-        if (apiKey.isNotEmpty) {
-          try {
-            final model = await _storage.read(key: _keyAiModel) ?? '';
-            final tempStr = await _storage.read(key: 'openrouter_temperature');
-            final tokStr = await _storage.read(key: 'openrouter_max_tokens');
-            final charStr = await _storage.read(key: 'openrouter_max_input_chars');
-            final svc = OpenRouterService(
-              apiKey: apiKey,
-              model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-              temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-              maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-              maxInputChars: int.tryParse(charStr ?? '') ??
-                  OpenRouterService.defaultMaxInputChars,
-            );
-            // Der KI den VOLLEN abgerufenen Feld-Satz als Kontext geben —
-            // auch Felder, die der Nutzer nicht importiert hat, damit sie in
-            // generierte Texte einfließen können.
-            final ctxParts = <String>[];
-            if (_urlPreview != null) {
-              final fields = MetadataRecord.fromUrlMetadata(_urlPreview!,
-                      url: detectedUrl ?? '')
-                  .aiContext();
-              if (fields.isNotEmpty) ctxParts.add(fields);
-            }
-            // Haupttext der Seite als KI-Treibstoff (#27) — Variable stammt aus
-            // dem äußeren Scope (oben bei der Eintragserstellung gesetzt).
-            if (pageText.isNotEmpty) ctxParts.add('SEITENINHALT:\n$pageText');
-            final aiCtx = ctxParts.join('\n\n');
-            final result = await svc.enrichEntry(
+        try {
+          // Der KI den vollen Feld-Satz + Seiten-Haupttext als Kontext geben.
+          final ctxParts = <String>[];
+          if (_urlPreview != null) {
+            final fields = MetadataRecord.fromUrlMetadata(_urlPreview!,
+                    url: detectedUrl ?? '')
+                .aiContext();
+            if (fields.isNotEmpty) ctxParts.add(fields);
+          }
+          if (pageText.isNotEmpty) ctxParts.add('SEITENINHALT:\n$pageText');
+          final aiCtx = ctxParts.join('\n\n');
+          final existingTagNames =
+              await ref.read(tagDaoProvider).getAllTagNames();
+          final result = await AiService.runForTask(
+            ref,
+            LlmTask.enrichment,
+            (svc) => svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
               extraContext: aiCtx.isNotEmpty ? aiCtx : null,
-              existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
-            );
-            if (result.tags.isNotEmpty || result.title != null) {
-              // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)
-              await ref.read(entryRepositoryProvider).updateEntry(
-                    createdEntry.entry.id,
-                    title: result.title ?? createdEntry.entry.title,
-                  );
-              // KI-Tags direkt in die Tag-Relation schreiben (nicht in den Body)
-              if (result.tags.isNotEmpty) {
-                final existingTags = await ref
-                    .read(tagDaoProvider)
-                    .getTagNamesForEntry(createdEntry.entry.id);
-                final merged = {...existingTags, ...result.tags}.toList();
-                await ref
-                    .read(tagDaoProvider)
-                    .setEntryTags(createdEntry.entry.id, merged);
-              }
+              existingTags: existingTagNames,
+            ),
+          );
+          if (result.tags.isNotEmpty || result.title != null) {
+            await ref.read(entryRepositoryProvider).updateEntry(
+                  createdEntry.entry.id,
+                  title: result.title ?? createdEntry.entry.title,
+                );
+            if (result.tags.isNotEmpty) {
+              final existingTags = await ref
+                  .read(tagDaoProvider)
+                  .getTagNamesForEntry(createdEntry.entry.id);
+              final merged = {...existingTags, ...result.tags}.toList();
+              await ref
+                  .read(tagDaoProvider)
+                  .setEntryTags(createdEntry.entry.id, merged);
             }
-          } catch (_) {
-            // KI-Fehler still ignorieren — Eintrag ist gespeichert
           }
+        } catch (_) {
+          // KI-Fehler still ignorieren — Eintrag ist gespeichert
         }
       }
 
