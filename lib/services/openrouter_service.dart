@@ -23,6 +23,7 @@ class VisionResult {
   final String? lang;
   final String? mediaType; // z.B. 'anime', 'movie', 'series', 'youtube', 'shop'
   final String? recognizedTitle; // erkannter Werk-/Seitentitel für die Suche
+  final String? url; // im Bild sichtbare URL (z.B. Adressleiste), falls erkannt
 
   const VisionResult({
     this.title,
@@ -31,6 +32,7 @@ class VisionResult {
     this.lang,
     this.mediaType,
     this.recognizedTitle,
+    this.url,
   });
 }
 
@@ -157,7 +159,9 @@ Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
 - "tags": 3-6 kleingeschriebene Schlagwörter
 - "lang": ISO-639-1 Sprachcode
 - "media_type": eines von "anime","manga","movie","series","youtube","book","game","shop","web","other"
-- "recognized_title": der konkrete Werk-/Seitentitel zur Nachschlage-Suche (oder null)$tagHint''';
+- "recognized_title": der konkrete Werk-/Seitentitel zur Nachschlage-Suche (oder null)
+- "url": die im Bild sichtbare URL (z.B. Browser-Adressleiste, YouTube-Link) exakt abgetippt, sonst null
+- Tags klein, einzelne Wörter mit Bindestrich verbinden (z.B. "slice-of-life")$tagHint''';
 
     final reqBody = jsonEncode({
       'model': model,
@@ -199,8 +203,12 @@ Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
     final p = jsonDecode(jsonStr) as Map<String, dynamic>;
     final tags = (p['tags'] as List?)
             ?.map((t) => '$t'
+                .trim()
                 .toLowerCase()
-                .replaceAll(RegExp(r'[^a-z0-9\-äöüß]'), ''))
+                .replaceAll(RegExp(r'\s+'), '-')
+                .replaceAll(RegExp(r'[^a-z0-9\-äöüß]'), '')
+                .replaceAll(RegExp(r'-+'), '-')
+                .replaceAll(RegExp(r'^-|-$'), ''))
             .where((t) => t.length > 1)
             .toList() ??
         [];
@@ -213,6 +221,7 @@ Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
       lang: str(p['lang']),
       mediaType: str(p['media_type'])?.toLowerCase(),
       recognizedTitle: str(p['recognized_title']),
+      url: str(p['url']),
     );
   }
 

@@ -16,9 +16,14 @@ class VisionOutcome {
   final String? title;
   final String? summary;
   final List<String> tags;
-  final String? imageUrl; // Cover aus AniList o.ä., falls gefunden
 
-  const VisionOutcome({this.title, this.summary, this.tags = const [], this.imageUrl});
+  /// Echte Quell-Metadaten (per Link-Fetch oder AniList-Titelsuche). Ist dies
+  /// gesetzt, wird die Notiz **wie ein eingegebener Link** aufgebaut
+  /// (Cover/Properties); das aufgenommene Foto bleibt nur Anhang.
+  final UrlMetadata? metadata;
+
+  const VisionOutcome(
+      {this.title, this.summary, this.tags = const [], this.metadata});
 }
 
 /// Führt die komplette Bild→Notiz-Analyse aus: Vision-Modell (Profil-Kette) →
@@ -72,29 +77,31 @@ Future<VisionOutcome?> runVisionFlow(
   final confirmed = await _confirmDialog(context, result);
   if (confirmed == null) return null;
 
-  var outcome = VisionOutcome(
-    title: confirmed.title,
-    summary: result.summary,
-    tags: result.tags,
-  );
-
-  // Optional: echte Metadaten per Titel (aktuell AniList für Anime/Manga).
+  // Echte Quell-Metadaten beschaffen, damit die Notiz wie ein Link-Eintrag
+  // aussieht (Cover + Properties), statt das Foto als Hauptbild zu nutzen.
+  UrlMetadata? meta;
+  // 1) Im Bild sichtbare URL → exakt wie ein eingegebener Link behandeln
+  //    (YouTube-Thumbnail/Metadaten, AniList, GitHub, …).
+  final url = result.url;
+  if (url != null && url.startsWith('http')) {
+    meta = await UrlMetadataService.fetch(url);
+  }
+  // 2) Sonst: Anime/Manga per erkanntem Titel auf AniList nachschlagen.
   final mt = result.mediaType;
   final recog = confirmed.title;
-  if (recog != null &&
+  if (meta == null &&
+      recog != null &&
       recog.isNotEmpty &&
       (mt == 'anime' || mt == 'manga')) {
-    final meta = await UrlMetadataService.searchAniList(recog, kind: mt!);
-    if (meta != null) {
-      outcome = VisionOutcome(
-        title: meta.title.isNotEmpty ? meta.title : outcome.title,
-        summary: meta.description.isNotEmpty ? meta.description : outcome.summary,
-        tags: {...outcome.tags, ...meta.genres.map((g) => g.toLowerCase())}.toList(),
-        imageUrl: meta.image,
-      );
-    }
+    meta = await UrlMetadataService.searchAniList(recog, kind: mt!);
   }
-  return outcome;
+
+  return VisionOutcome(
+    title: (confirmed.title?.isNotEmpty == true) ? confirmed.title : result.title,
+    summary: result.summary,
+    tags: result.tags,
+    metadata: meta,
+  );
 }
 
 class _Confirmed {

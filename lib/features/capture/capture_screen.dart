@@ -252,6 +252,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         await runVisionFlow(context, ref, bytes, existingTags: existing);
     if (outcome == null || !mounted) return;
     setState(() {
+      if (outcome.metadata != null) {
+        // Echte Quelle erkannt → wie ein eingegebener Link aufbauen: Cover +
+        // Auto-Template + Eigenschaften beim Speichern. Das Foto bleibt Anhang.
+        _urlPreview = outcome.metadata;
+        if (outcome.metadata!.title.isNotEmpty) {
+          _titleCtrl.text = outcome.metadata!.title;
+          _showTitle = true;
+        }
+        return;
+      }
+      // Kein Quell-Treffer → KI-Titel/Zusammenfassung/Tags in die Notiz.
       if ((outcome.title ?? '').isNotEmpty) {
         _titleCtrl.text = outcome.title!;
         _showTitle = true;

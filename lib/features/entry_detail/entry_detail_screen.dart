@@ -207,48 +207,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         ));
         return;
       }
-      final record = MetadataRecord.fromUrlMetadata(meta, url: sourceUrl);
-      final picked = await FieldImportSheet.show(
-        context,
-        record: record,
-        prefs: AppSettings.loadApiFieldPrefs(),
-      );
-      if (picked == null || !mounted) return;
-
-      final dao = ref.read(propertyDaoProvider);
-      final existing = await dao.watchByEntry(entryId).first;
-      final pickedKeys = picked.map((f) => f.storageKey).toSet();
-      // Bestehende Properties behalten, außer sie werden neu gesetzt.
-      final merged = <EntryPropertiesCompanion>[
-        for (final p in existing)
-          if (!pickedKeys.contains(p.key))
-            EntryPropertiesCompanion(
-              id: drift.Value(p.id),
-              entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key),
-              value: drift.Value(p.value),
-              type: drift.Value(p.type),
-            ),
-      ];
-      var i = 0;
-      for (final f in picked) {
-        merged.add(EntryPropertiesCompanion(
-          id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
-          entryId: drift.Value(entryId),
-          key: drift.Value(f.storageKey),
-          value: drift.Value(f.value),
-          type: drift.Value(f.propType),
-        ));
-      }
-      await dao.setProperties(entryId, merged);
-      // Eintrag touchen, damit Streams/Feed neu emittieren.
-      await ref.read(entryRepositoryProvider).updateEntry(entryId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Metadaten aktualisiert.'),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      await _importMetadataToEntry(entryId, meta, sourceUrl: sourceUrl);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -258,6 +217,54 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
     } finally {
       if (mounted) setState(() => _refetching = false);
+    }
+  }
+
+  /// Zeigt das Review-Sheet für [meta] und merged die bestätigten Felder als
+  /// Properties (bestehende Keys werden überschrieben). Geteilt von „Metadaten
+  /// neu abholen" und „KI aus Bild".
+  Future<void> _importMetadataToEntry(String entryId, UrlMetadata meta,
+      {String? sourceUrl}) async {
+    final record = MetadataRecord.fromUrlMetadata(meta, url: sourceUrl ?? '');
+    if (!mounted) return;
+    final picked = await FieldImportSheet.show(
+      context,
+      record: record,
+      prefs: AppSettings.loadApiFieldPrefs(),
+    );
+    if (picked == null || !mounted) return;
+
+    final dao = ref.read(propertyDaoProvider);
+    final existing = await dao.watchByEntry(entryId).first;
+    final pickedKeys = picked.map((f) => f.storageKey).toSet();
+    final merged = <EntryPropertiesCompanion>[
+      for (final p in existing)
+        if (!pickedKeys.contains(p.key))
+          EntryPropertiesCompanion(
+            id: drift.Value(p.id),
+            entryId: drift.Value(p.entryId),
+            key: drift.Value(p.key),
+            value: drift.Value(p.value),
+            type: drift.Value(p.type),
+          ),
+    ];
+    var i = 0;
+    for (final f in picked) {
+      merged.add(EntryPropertiesCompanion(
+        id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
+        entryId: drift.Value(entryId),
+        key: drift.Value(f.storageKey),
+        value: drift.Value(f.value),
+        type: drift.Value(f.propType),
+      ));
+    }
+    await dao.setProperties(entryId, merged);
+    await ref.read(entryRepositoryProvider).updateEntry(entryId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Metadaten aktualisiert.'),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
@@ -289,6 +296,12 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         (cur?.title == null || cur!.title!.isEmpty)) {
       await repo.updateEntry(entryId, title: outcome.title);
     }
+    // Echte Quelle erkannt → Cover + Eigenschaften wie beim Link-Eintrag.
+    if (outcome.metadata != null) {
+      await _importMetadataToEntry(entryId, outcome.metadata!);
+      return;
+    }
+    // Sonst KI-Zusammenfassung/Tags an den Body anhängen.
     final add = <String>[];
     if ((outcome.summary ?? '').isNotEmpty) add.add(outcome.summary!);
     if (outcome.tags.isNotEmpty) {
