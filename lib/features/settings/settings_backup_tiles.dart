@@ -139,8 +139,8 @@ class SettingsBackupTiles extends StatelessWidget {
   }
 
   Future<void> _import(BuildContext context) async {
-    final res = await FilePicker.platform
-        .pickFiles(type: FileType.any, withData: true);
+    final res =
+        await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
     if (res == null || res.files.isEmpty || !context.mounted) return;
     final f = res.files.single;
     String content;

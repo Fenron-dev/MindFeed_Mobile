@@ -85,9 +85,20 @@ class SettingsBackup {
 
   /// Wirft bei falschem Passwort/kaputter Datei eine Exception.
   static Future<void> importEncrypted(String data, String password) async {
-    final bytes = base64Decode(data.trim());
+    final trimmed = data.trim();
+    // ZIP-Inhalts-Backup („PK"-Signatur) ist KEINE Einstellungssicherung.
+    if (trimmed.startsWith('PK')) {
+      throw Exception(
+          'Das ist ein ZIP-Inhalts-Backup, keine Einstellungssicherung. Bitte die .mfbak-Datei wählen.');
+    }
+    final Uint8List bytes;
+    try {
+      bytes = base64Decode(trimmed);
+    } catch (_) {
+      throw Exception('Keine gültige Einstellungssicherung (.mfbak).');
+    }
     if (bytes.length < 4 + 1 + 16 + 12 + 16) {
-      throw const FormatException('Datei zu kurz/ungültig.');
+      throw Exception('Datei zu kurz/ungültig.');
     }
     for (var i = 0; i < 4; i++) {
       if (bytes[i] != _magic[i]) {
