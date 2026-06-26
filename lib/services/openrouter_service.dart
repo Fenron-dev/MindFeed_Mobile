@@ -15,8 +15,51 @@ class AiEnrichment {
   });
 }
 
+/// Signalisiert, dass das aktuelle Profil/Modell nicht verfügbar ist
+/// (Rate-Limit/Guthaben/Modell weg/Server/Netz) → `AiService` wechselt auf das
+/// nächste Kettenglied und legt das Profil ggf. in Cooldown.
+class AiUnavailableException implements Exception {
+  final int status; // HTTP-Status (0 = Netz/Timeout)
+  final String message;
+  final Duration? retryAfter; // aus Retry-After/Reset-Header, falls vorhanden
+  const AiUnavailableException(this.status, this.message, {this.retryAfter});
+
+  /// Quota-/Limit-Fehler, die einen Cooldown auslösen.
+  bool get isLimit => status == 429 || status == 402;
+
+  @override
+  String toString() => 'AiUnavailable($status): $message';
+
+  static bool isRetryableStatus(int s) =>
+      s == 429 || s == 402 || s == 404 || s >= 500;
+
+  /// Liest `Retry-After` (Sekunden) bzw. `x-ratelimit-reset` (Sekunden/Epoch-ms).
+  static Duration? retryAfterFrom(Map<String, String> headers) {
+    final ra = headers['retry-after'];
+    if (ra != null) {
+      final secs = int.tryParse(ra.trim());
+      if (secs != null && secs > 0) return Duration(seconds: secs);
+    }
+    final reset = headers['x-ratelimit-reset'];
+    if (reset != null) {
+      final n = int.tryParse(reset.trim());
+      if (n != null) {
+        // > 10^12 ⇒ Epoch-Millis, sonst Sekunden bis Reset.
+        if (n > 1000000000000) {
+          final d = DateTime.fromMillisecondsSinceEpoch(n)
+              .difference(DateTime.now());
+          if (d > Duration.zero) return d;
+        } else if (n > 0 && n < 86400) {
+          return Duration(seconds: n);
+        }
+      }
+    }
+    return null;
+  }
+}
+
 class OpenRouterService {
-  static const _endpoint =
+  static const _defaultEndpoint =
       'https://openrouter.ai/api/v1/chat/completions';
 
   // Standard Free-Tier Modell
@@ -31,6 +74,10 @@ class OpenRouterService {
   final double temperature;
   final int maxTokens;
 
+  /// OpenAI-kompatibler `/chat/completions`-Endpoint. Default = OpenRouter;
+  /// für andere Profile (Groq, lokal …) wird die Profil-`chatUrl` übergeben.
+  final String chatUrl;
+
   /// Max. Zeichen des übertragenen Inhalts (Body). Bei größeren Modellen höher
   /// setzen für besseren Kontext. Der Zusatzkontext bekommt anteilig ein Drittel.
   final int maxInputChars;
@@ -41,7 +88,35 @@ class OpenRouterService {
     this.temperature = 0.3,
     this.maxTokens = 400,
     this.maxInputChars = defaultMaxInputChars,
+    this.chatUrl = _defaultEndpoint,
   });
+
+  /// Wirft bei verfügbarkeitsbedingten HTTP-Fehlern eine [AiUnavailableException]
+  /// (für den Fallback), sonst eine normale Exception.
+  static void _checkStatus(http.Response res) {
+    if (res.statusCode == 200) return;
+    String errMsg;
+    if (res.statusCode == 429) {
+      errMsg = 'Rate-Limit erreicht.';
+    } else if (res.statusCode == 402) {
+      errMsg = 'Kein Guthaben / Limit erreicht.';
+    } else if (res.statusCode == 404) {
+      errMsg = 'Modell nicht gefunden.';
+    } else {
+      try {
+        final j = jsonDecode(res.body) as Map<String, dynamic>;
+        errMsg = (j['error']?['message'] as String?) ??
+            res.body.substring(0, res.body.length.clamp(0, 200));
+      } catch (_) {
+        errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+      }
+    }
+    if (AiUnavailableException.isRetryableStatus(res.statusCode)) {
+      throw AiUnavailableException(res.statusCode, errMsg,
+          retryAfter: AiUnavailableException.retryAfterFrom(res.headers));
+    }
+    throw Exception('AI ${res.statusCode}: $errMsg');
+  }
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
   /// [extraContext] kann zusätzliche Metadaten enthalten (z.B. URL-Beschreibung, Genres).
@@ -117,35 +192,18 @@ Regeln:
     };
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 30));
 
     // Bei Rate-Limit (429) einmal nach kurzer Pause wiederholen
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 30));
     }
 
-    if (res.statusCode != 200) {
-      String errMsg;
-      if (res.statusCode == 429) {
-        errMsg = 'Rate-Limit des Free-Modells erreicht. Warte kurz oder wähle ein anderes Modell in den Einstellungen.';
-      } else if (res.statusCode == 404) {
-        errMsg = 'Modell "$model" nicht gefunden. Bitte in den Einstellungen ein verfügbares Modell auswählen.';
-      } else {
-        try {
-          final errJson = jsonDecode(res.body) as Map<String, dynamic>;
-          errMsg = (errJson['error']?['message'] as String?) ??
-              errJson['error']?.toString() ??
-              res.body.substring(0, res.body.length.clamp(0, 200));
-        } catch (_) {
-          errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
-        }
-      }
-      throw Exception('OpenRouter ${res.statusCode}: $errMsg');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -323,17 +381,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     });
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 90));
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 90));
     }
-    if (res.statusCode != 200) {
-      throw Exception('OpenRouter ${res.statusCode}');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -423,17 +479,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     });
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 90));
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 90));
     }
-    if (res.statusCode != 200) {
-      throw Exception('OpenRouter ${res.statusCode}');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -499,7 +553,7 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
   Future<void> testConnection() async {
     final res = await http
         .post(
-          Uri.parse(_endpoint),
+          Uri.parse(chatUrl),
           headers: {
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json',
@@ -535,12 +589,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     }
   }
 
-  /// Holt verfügbare Modelle von OpenRouter
-  static Future<List<Map<String, dynamic>>> getModels(String apiKey) async {
+  /// Holt verfügbare Modelle vom (OpenAI-kompatiblen) Endpoint.
+  static Future<List<Map<String, dynamic>>> getModels(String apiKey,
+      {String modelsUrl = 'https://openrouter.ai/api/v1/models'}) async {
     final res = await http
         .get(
-          Uri.parse('https://openrouter.ai/api/v1/models'),
-          headers: {'Authorization': 'Bearer $apiKey'},
+          Uri.parse(modelsUrl),
+          headers: {
+            if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+          },
         )
         .timeout(const Duration(seconds: 10));
 
