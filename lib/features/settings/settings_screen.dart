@@ -23,6 +23,7 @@ import '../../services/openrouter_service.dart';
 import '../../services/searxng_service.dart';
 import '../settings/sync_settings_screen.dart';
 import 'ai_profiles_screen.dart';
+import 'settings_backup_tiles.dart';
 import '../../core/constants.dart';
 import '../../sync/sync_provider.dart';
 import 'package:go_router/go_router.dart';
@@ -696,6 +697,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionHeader('DATENSICHERUNG'),
           const SizedBox(height: 8),
 
+          const SettingsBackupTiles(),
+          const SizedBox(height: 10),
           _SettingsTile(
             icon: Icons.cloud_upload_outlined,
             iconColor: MFColors.teal,
