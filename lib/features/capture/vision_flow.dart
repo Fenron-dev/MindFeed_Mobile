@@ -116,7 +116,7 @@ Future<VisionOutcome?> runVisionFlow(
     final ytKey = await secureRead(ApiKeyStore.youtube) ?? '';
     trace.add('YouTube-Suche: API-Key ${ytKey.isEmpty ? 'FEHLT' : 'vorhanden'}');
     if (ytKey.isNotEmpty) {
-      meta = await UrlMetadataService.searchYoutube(recog, ytKey);
+      meta = await UrlMetadataService.searchYoutube(recog, ytKey, trace: trace);
       trace.add(meta != null ? '  → Video: ${meta.title}' : '  → kein Treffer');
     }
   }
