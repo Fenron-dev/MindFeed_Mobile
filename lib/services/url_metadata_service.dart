@@ -443,6 +443,31 @@ class UrlMetadataService {
     }
   }
 
+  /// Testet einen YouTube-Data-API-Key mit einem günstigen Aufruf (videos.list,
+  /// 1 Quota-Einheit). Liefert `null` bei Erfolg, sonst den Fehlergrund
+  /// (z.B. "API_KEY_INVALID", "accessNotConfigured", "ipRefererBlocked").
+  static Future<String?> testYoutubeKey(String key) async {
+    if (key.trim().isEmpty) return 'Kein Key eingegeben.';
+    try {
+      final uri = Uri.parse(
+          'https://www.googleapis.com/youtube/v3/videos'
+          '?part=id&id=dQw4w9WgXcQ&key=${key.trim()}');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return null;
+      String reason = 'HTTP ${res.statusCode}';
+      try {
+        final err = jsonDecode(res.body)['error'] as Map?;
+        final r = (err?['errors'] as List?)?.isNotEmpty == true
+            ? (err!['errors'] as List).first['reason']
+            : null;
+        reason = '${r ?? err?['message'] ?? reason}';
+      } catch (_) {}
+      return reason;
+    } catch (e) {
+      return '$e';
+    }
+  }
+
   // ─── Staffel-Kette traversieren ────────────────────────────────────────────
 
   static Future<int?> _fetchDirectRelationId(

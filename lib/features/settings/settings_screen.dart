@@ -20,6 +20,7 @@ import '../../services/enrichment/api_keys.dart';
 import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
 import '../../services/searxng_service.dart';
+import '../../services/url_metadata_service.dart';
 import '../settings/sync_settings_screen.dart';
 import 'ai_profiles_screen.dart';
 import 'settings_backup_tiles.dart';
@@ -48,6 +49,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // Quellen-API-Keys (YouTube Data API v3)
   final _youtubeKeyCtrl = TextEditingController();
+  String _ytTestState = 'idle'; // idle | loading | ok | error
+  String _ytTestMsg = '';
 
   // SearXNG (eigene Recherche-Schicht)
   final _searxngUrlCtrl = TextEditingController();
@@ -84,6 +87,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _saveYoutubeKey() async {
     await secureWrite(ApiKeyStore.youtube, _youtubeKeyCtrl.text.trim());
     if (mounted) _showSnack('YouTube-API-Key gespeichert', success: true);
+  }
+
+  Future<void> _testYoutubeKey() async {
+    await secureWrite(ApiKeyStore.youtube, _youtubeKeyCtrl.text.trim());
+    setState(() {
+      _ytTestState = 'loading';
+      _ytTestMsg = '';
+    });
+    final err =
+        await UrlMetadataService.testYoutubeKey(_youtubeKeyCtrl.text.trim());
+    if (!mounted) return;
+    setState(() {
+      _ytTestState = err == null ? 'ok' : 'error';
+      _ytTestMsg = err ?? '';
+    });
   }
 
   Future<void> _saveAiSettings() async {
@@ -926,6 +944,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   onSubmitted: (_) => _saveYoutubeKey(),
                 ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  TextButton.icon(
+                    onPressed:
+                        _ytTestState == 'loading' ? null : _testYoutubeKey,
+                    icon: Icon(
+                      switch (_ytTestState) {
+                        'ok' => Icons.check_circle_outline,
+                        'error' => Icons.error_outline,
+                        _ => Icons.wifi_tethering,
+                      },
+                      size: 16,
+                      color: _ytTestState == 'ok'
+                          ? const Color(0xFF22C55E)
+                          : _ytTestState == 'error'
+                              ? Colors.redAccent
+                              : MFColors.teal,
+                    ),
+                    label: Text(
+                      switch (_ytTestState) {
+                        'loading' => 'Teste…',
+                        'ok' => 'Key gültig',
+                        'error' => 'Fehler',
+                        _ => 'Speichern & testen',
+                      },
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: _ytTestState == 'error'
+                              ? Colors.redAccent
+                              : MFColors.teal),
+                    ),
+                  ),
+                  if (_ytTestState == 'error' && _ytTestMsg.isNotEmpty)
+                    Expanded(
+                      child: Text(_ytTestMsg,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.redAccent)),
+                    ),
+                ]),
               ],
             ),
           ),
