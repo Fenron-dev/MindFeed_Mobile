@@ -206,6 +206,7 @@ class _TagsRow extends ConsumerWidget {
               children: [
                 ...tags.map((t) => _TagChip(
                       tag: t,
+                      onLongPress: () => _showRenameTag(context, ref, t),
                       onRemove: editable
                           ? () => onRemoveTag != null
                               ? onRemoveTag!(t)
@@ -228,10 +229,18 @@ class _TagsRow extends ConsumerWidget {
 class _TagChip extends StatelessWidget {
   final String tag;
   final VoidCallback? onRemove;
-  const _TagChip({required this.tag, this.onRemove});
+  final VoidCallback? onLongPress;
+  const _TagChip({required this.tag, this.onRemove, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: _chip(),
+    );
+  }
+
+  Widget _chip() {
     return Container(
       padding: EdgeInsets.fromLTRB(8, 3, onRemove != null ? 4 : 8, 3),
       decoration: BoxDecoration(
@@ -253,6 +262,54 @@ class _TagChip extends StatelessWidget {
         ],
       ]),
     );
+  }
+}
+
+/// Tag in allen Einträgen umbenennen (z.B. `ai_x` → `ai/x` für Hierarchie).
+Future<void> _showRenameTag(
+    BuildContext context, WidgetRef ref, String oldTag) async {
+  final ctrl = TextEditingController(text: oldTag);
+  final newName = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: MFColors.surface,
+      title: const Text('Tag umbenennen',
+          style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: MFColors.textPrimary),
+          decoration: const InputDecoration(
+            prefixText: '#',
+            labelText: 'Neuer Name',
+            helperText: '„/" erzeugt Unter-Tags, z.B. ai/bildgeneration',
+            helperStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text('Gilt für alle Einträge mit diesem Tag.',
+            style: TextStyle(color: MFColors.textMuted, fontSize: 11)),
+      ]),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Abbrechen')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+          onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+          child: const Text('Umbenennen'),
+        ),
+      ],
+    ),
+  );
+  if (newName == null || newName.isEmpty || newName == oldTag) return;
+  final n = await ref.read(entryRepositoryProvider).renameTag(oldTag, newName);
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Tag in $n Eintrag/Einträgen umbenannt.'),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 }
 
