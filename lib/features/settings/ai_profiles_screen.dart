@@ -93,6 +93,10 @@ class AiProfilesScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           _header('FALLBACK'),
           _CooldownSetting(),
+
+          const SizedBox(height: 16),
+          _header('DIAGNOSE'),
+          _DebugToggle(),
         ],
       ),
     );
@@ -380,6 +384,41 @@ class _TaskChainRow extends ConsumerWidget {
           ]),
         );
       }),
+    );
+  }
+}
+
+class _DebugToggle extends StatefulWidget {
+  @override
+  State<_DebugToggle> createState() => _DebugToggleState();
+}
+
+class _DebugToggleState extends State<_DebugToggle> {
+  bool _on = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AiService.isDebug().then((v) {
+      if (mounted) setState(() => _on = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      value: _on,
+      activeColor: MFColors.teal,
+      contentPadding: EdgeInsets.zero,
+      title: const Text('Diagnose-Popup',
+          style: TextStyle(color: MFColors.textPrimary, fontSize: 13)),
+      subtitle: const Text(
+          'Zeigt nach „KI aus Bild": erkannter Typ/Titel/URL, welche Suche/API lief, welches Modell genutzt wurde',
+          style: TextStyle(color: MFColors.textMuted, fontSize: 11)),
+      onChanged: (v) async {
+        setState(() => _on = v);
+        await AiService.setDebug(v);
+      },
     );
   }
 }

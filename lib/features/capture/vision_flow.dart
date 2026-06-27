@@ -52,7 +52,11 @@ Future<VisionOutcome?> runVisionFlow(
     if (ok != true) return null;
   }
 
+  final trace = <String>[];
+  final debug = await AiService.isDebug();
+
   // Analyse mit Ladeanzeige.
+  if (!context.mounted) return null;
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -66,14 +70,19 @@ Future<VisionOutcome?> runVisionFlow(
       ref,
       LlmTask.vision,
       (svc) => svc.analyzeImage(dataUrl, existingTags: existingTags),
+      trace: trace,
     );
   } catch (e) {
     if (context.mounted) Navigator.pop(context); // Ladeanzeige
+    trace.add('Analyse fehlgeschlagen: $e');
+    if (debug && context.mounted) await _showDebug(context, trace);
     if (context.mounted) _snack(context, 'Bild-Analyse fehlgeschlagen: $e');
     return null;
   }
   if (context.mounted) Navigator.pop(context); // Ladeanzeige
   if (!context.mounted) return null;
+  trace.add(
+      'Erkannt: typ=${result.mediaType ?? '—'} · titel="${result.recognizedTitle ?? result.title ?? '—'}" · url=${result.url ?? '—'}');
 
   // Bestätigungs-/Korrektur-Dialog.
   final confirmed = await _confirmDialog(context, result);
@@ -82,37 +91,69 @@ Future<VisionOutcome?> runVisionFlow(
   // Echte Quell-Metadaten beschaffen, damit die Notiz wie ein Link-Eintrag
   // aussieht (Cover + Properties), statt das Foto als Hauptbild zu nutzen.
   UrlMetadata? meta;
-  // 1) Im Bild sichtbare URL → exakt wie ein eingegebener Link behandeln
-  //    (YouTube-Thumbnail/Metadaten, AniList, GitHub, …).
   final url = result.url;
   if (url != null && url.startsWith('http')) {
+    trace.add('URL im Bild → abrufen: $url');
     meta = await UrlMetadataService.fetch(url);
+    trace.add(meta != null
+        ? '  → Metadaten von ${meta.domain}'
+        : '  → kein Ergebnis');
   }
-  // 2) Sonst: Anime/Manga per erkanntem Titel auf AniList nachschlagen.
   final mt = result.mediaType;
   final recog = confirmed.title;
   if (meta == null &&
       recog != null &&
       recog.isNotEmpty &&
       (mt == 'anime' || mt == 'manga')) {
+    trace.add('AniList-Suche: "$recog"');
     meta = await UrlMetadataService.searchAniList(recog, kind: mt!);
+    trace.add(meta != null ? '  → gefunden: ${meta.title}' : '  → kein Treffer');
   }
-  // 3) YouTube per Titel suchen (mit Data-API-Key) → echtes Video statt Raten.
   if (meta == null &&
       recog != null &&
       recog.isNotEmpty &&
       (mt == 'youtube' || (result.url ?? '').toLowerCase().contains('youtu'))) {
     final ytKey = await secureRead(ApiKeyStore.youtube) ?? '';
+    trace.add('YouTube-Suche: API-Key ${ytKey.isEmpty ? 'FEHLT' : 'vorhanden'}');
     if (ytKey.isNotEmpty) {
       meta = await UrlMetadataService.searchYoutube(recog, ytKey);
+      trace.add(meta != null ? '  → Video: ${meta.title}' : '  → kein Treffer');
     }
   }
+  trace.add(meta != null
+      ? 'Quelle übernommen: ${meta.domain} → Cover + Eigenschaften'
+      : 'Keine Quelle → dein Foto + KI-Text');
+
+  if (debug && context.mounted) await _showDebug(context, trace);
 
   return VisionOutcome(
     title: (confirmed.title?.isNotEmpty == true) ? confirmed.title : result.title,
     summary: result.summary,
     tags: result.tags,
     metadata: meta,
+  );
+}
+
+/// Zeigt die gesammelten Diagnose-Zeilen (Debug-Modus).
+Future<void> _showDebug(BuildContext context, List<String> trace) {
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: MFColors.surface,
+      title: const Text('KI-Diagnose',
+          style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+      content: SingleChildScrollView(
+        child: SelectableText(
+          trace.join('\n'),
+          style: const TextStyle(
+              color: MFColors.textSecondary, fontSize: 12, height: 1.5),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx), child: const Text('Schließen')),
+      ],
+    ),
   );
 }
 

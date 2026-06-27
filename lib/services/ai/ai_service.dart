@@ -27,6 +27,15 @@ class AiService {
     await prefs.setInt(_kCooldownMin, m);
   }
 
+  static const _kDebug = 'ai_debug_mode';
+
+  /// Diagnose-Popup aktiviert? (zeigt nach KI-/Bild-Aktionen, was passiert ist).
+  static Future<bool> isDebug() async =>
+      (await SharedPreferences.getInstance()).getBool(_kDebug) ?? false;
+
+  static Future<void> setDebug(bool v) async =>
+      (await SharedPreferences.getInstance()).setBool(_kDebug, v);
+
   static bool _inCooldown(String id) {
     final until = _cooldownUntil[id];
     if (until == null) return false;
@@ -42,6 +51,7 @@ class AiService {
     LlmTask task,
     Future<T> Function(OpenRouterService client) op, {
     void Function(String notice)? onNotice,
+    List<String>? trace,
   }) async {
     final state = ref.read(llmProfilesProvider);
     if (!state.aiEnabled) {
@@ -61,11 +71,13 @@ class AiService {
       // Freie Profile im Cooldown überspringen; bezahlte bleiben verfügbar.
       if (p.tier == LlmTier.free && _inCooldown(p.id)) {
         errors.add('${p.name}: im Cooldown');
+        trace?.add('⏭︎ ${p.name}: im Cooldown — übersprungen');
         continue;
       }
       final key = await notifier.loadApiKey(p.id) ?? '';
       if (p.needsApiKey && key.isEmpty) {
         errors.add('${p.name}: kein API-Key hinterlegt');
+        trace?.add('⏭︎ ${p.name}: kein API-Key');
         continue;
       }
       final client = OpenRouterService(
@@ -75,14 +87,17 @@ class AiService {
         maxTokens: p.maxTokens,
         chatUrl: p.chatUrl,
       );
+      trace?.add('▶︎ ${p.name} · ${p.model}');
       try {
         final result = await op(client);
+        trace?.add('✓ genutzt: ${p.name} · ${p.model}');
         if (i > 0) {
           onNotice?.call('„${chain[i - 1].name}" nicht verfügbar → „${p.name}" genutzt.');
         }
         return result;
       } on AiUnavailableException catch (e) {
         errors.add('${p.name}: ${e.message}');
+        trace?.add('✗ ${p.name}: nicht verfügbar (${e.status}) ${e.message}');
         if (e.isLimit) {
           _cooldownUntil[p.id] =
               DateTime.now().add(e.retryAfter ?? defaultCooldown);
@@ -91,6 +106,7 @@ class AiService {
       } catch (e) {
         // z.B. ungültige Antwort (kein JSON), Netzfehler → nächstes Profil.
         errors.add('${p.name}: $e');
+        trace?.add('✗ ${p.name}: $e');
       }
     }
     throw Exception('Alle KI-Profile fehlgeschlagen:\n${errors.join('\n')}');
