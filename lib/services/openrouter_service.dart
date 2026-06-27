@@ -155,7 +155,7 @@ class OpenRouterService {
 
 Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
 - "title": prägnanter Titel für die Notiz (max 70 Zeichen)
-- "summary": 2-3 Sätze, worum es geht
+- "summary": 2-3 Sätze NUR auf Basis dessen, was im Bild sichtbar ist (Titel, Beschreibung, Thumbnail). Erfinde KEINEN Inhalt, den du nicht siehst
 - "tags": 3-6 kleingeschriebene Schlagwörter
 - "lang": ISO-639-1 Sprachcode
 - "media_type": eines von "anime","manga","movie","series","youtube","book","game","shop","web","other"

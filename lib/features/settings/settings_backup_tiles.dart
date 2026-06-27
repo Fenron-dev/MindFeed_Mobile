@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/theme.dart';
+import '../../main.dart' show onRestartApp;
 import '../../services/settings_backup.dart';
 
 /// Zwei Tiles: Einstellungen (inkl. Keys) passwortgeschützt exportieren /
@@ -157,10 +158,31 @@ class SettingsBackupTiles extends StatelessWidget {
     if (pw == null || !context.mounted) return;
     try {
       await SettingsBackup.importEncrypted(content, pw);
-      if (context.mounted) {
-        _snack(context,
-            'Einstellungen wiederhergestellt. App neu starten, damit alles greift.');
-      }
+      if (!context.mounted) return;
+      // Neustart nötig, damit Profile/Keys/SearXNG-URL frisch geladen werden
+      // (UI-Felder werden sonst erst beim nächsten App-Start aktualisiert).
+      final restart = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Wiederhergestellt',
+              style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+          content: const Text(
+              'Einstellungen importiert. Zum Übernehmen die App neu starten.',
+              style: TextStyle(color: MFColors.textSecondary)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Später')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Jetzt neu starten'),
+            ),
+          ],
+        ),
+      );
+      if (restart == true) await onRestartApp?.call();
     } catch (e) {
       if (context.mounted) _snack(context, '$e');
     }

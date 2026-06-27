@@ -3,8 +3,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/secure_storage.dart';
 import '../../core/theme.dart';
 import '../../services/ai/ai_service.dart';
+import '../../services/enrichment/api_keys.dart';
 import '../../services/ai/image_vision.dart';
 import '../../services/ai/llm_profile.dart';
 import '../../services/ai/llm_profiles_store.dart';
@@ -94,6 +96,16 @@ Future<VisionOutcome?> runVisionFlow(
       recog.isNotEmpty &&
       (mt == 'anime' || mt == 'manga')) {
     meta = await UrlMetadataService.searchAniList(recog, kind: mt!);
+  }
+  // 3) YouTube per Titel suchen (mit Data-API-Key) → echtes Video statt Raten.
+  if (meta == null &&
+      recog != null &&
+      recog.isNotEmpty &&
+      (mt == 'youtube' || (result.url ?? '').toLowerCase().contains('youtu'))) {
+    final ytKey = await secureRead(ApiKeyStore.youtube) ?? '';
+    if (ytKey.isNotEmpty) {
+      meta = await UrlMetadataService.searchYoutube(recog, ytKey);
+    }
   }
 
   return VisionOutcome(

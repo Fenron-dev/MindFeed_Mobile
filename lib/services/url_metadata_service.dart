@@ -400,6 +400,31 @@ class UrlMetadataService {
     }
   }
 
+  /// Sucht per **Titel** das passende YouTube-Video (Data API) und liefert
+  /// dessen echte Metadaten (Thumbnail, Kanal, Beschreibung …). Braucht einen
+  /// YouTube-Data-API-Key. So wird die Bild-Erkennung auf das reale Video
+  /// geerdet statt zu halluzinieren.
+  static Future<UrlMetadata?> searchYoutube(String query, String apiKey) async {
+    if (apiKey.isEmpty || query.trim().isEmpty) return null;
+    try {
+      final uri = Uri.parse(
+          'https://www.googleapis.com/youtube/v3/search'
+          '?part=snippet&type=video&maxResults=1'
+          '&q=${Uri.encodeQueryComponent(query.trim())}&key=$apiKey');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final items = jsonDecode(res.body)['items'] as List?;
+      if (items == null || items.isEmpty) return null;
+      final idObj = (items.first as Map)['id'];
+      final id = idObj is Map ? idObj['videoId'] as String? : null;
+      if (id == null) return null;
+      // Volle Metadaten über den bestehenden Data-API-Pfad.
+      return YoutubeApiSource.fetch(id, apiKey);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── Staffel-Kette traversieren ────────────────────────────────────────────
 
   static Future<int?> _fetchDirectRelationId(
