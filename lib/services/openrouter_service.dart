@@ -268,7 +268,7 @@ Erzeuge ein JSON-Objekt mit GENAU diesen Schlüsseln. Befülle jeden Wert mit de
 
 - "title": Verbesserter, konkreter Titel des Themas/Tools/Projekts (max 70 Zeichen). null, wenn der vorhandene Titel bereits gut ist.
 - "summary": 2-4 vollständige, eigene Sätze, die konkret beschreiben, worum es geht, was es kann/macht und für wen es nützlich ist. Bezieh dich auf konkrete Inhalte, keine Floskeln.
-- "tags": 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen). Kleingeschrieben, nur Buchstaben/Zahlen/Bindestriche.
+- "tags": IMMER 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen), niemals leer — notfalls aus Titel/Kontext ableiten. Kleingeschrieben, Wörter mit Bindestrich verbinden (z.B. "open-source"), nur Buchstaben/Zahlen/Bindestriche.
 - "lang": ISO-639-1-Sprachcode des Hauptinhalts (z.B. "de", "en").$tagHint
 
 Beispiel für das FORMAT (Inhalt ignorieren, nur Struktur):

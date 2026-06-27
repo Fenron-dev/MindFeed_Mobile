@@ -429,17 +429,25 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
 
       // Tags hinzufügen
-      if (opts.enrichTags && result.tags.isNotEmpty) {
-        // Wenn Genres vorhanden: Genres als Tags verwenden statt KI-Tags
-        final tagsToAdd = (genresText?.isNotEmpty == true && body.trim().isEmpty)
-            ? genresText!.split(',').map((g) => g.trim().toLowerCase().replaceAll(' ', '-')).where((g) => g.isNotEmpty).toList()
-            : result.tags;
-        if (tagsToAdd.isNotEmpty) {
-          final current = (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? body;
-          final tagLine = tagsToAdd.map((t) => '#$t').join(' ');
-          // Bestehende Tag-Zeile nicht doppeln
-          if (!current.contains(tagLine)) {
-            await ref.read(entryRepositoryProvider).updateEntry(entryId, body: '$current\n$tagLine');
+      if (opts.enrichTags) {
+        // Genres (falls vorhanden) zusätzlich zu den KI-Tags übernehmen.
+        final genreTags = (genresText?.isNotEmpty == true)
+            ? genresText!
+                .split(',')
+                .map((g) => g.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '-'))
+                .where((g) => g.isNotEmpty)
+            : const <String>[];
+        final addTags = {...result.tags, ...genreTags}.toList();
+        if (addTags.isNotEmpty) {
+          // In die Tag-Relation MERGEN (Bestand bleibt erhalten) — nicht den
+          // Body ersetzen, sonst würden vorhandene Relations-Tags verloren gehen.
+          final existing =
+              await ref.read(tagDaoProvider).getTagNamesForEntry(entryId);
+          final merged = {...existing, ...addTags}.toList();
+          if (merged.length != existing.length) {
+            await ref.read(tagDaoProvider).setEntryTags(entryId, merged);
+            // Eintrag touchen → Streams neu emittieren.
+            await ref.read(entryRepositoryProvider).updateEntry(entryId);
             changes++;
           }
         }
