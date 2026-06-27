@@ -1020,7 +1020,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.info_outline_rounded,
             iconColor: MFColors.textMuted,
             title: 'MindFeed Mobile',
-            subtitle: 'Version 1.3.0 · Offline-First PKM',
+            subtitle: 'Version 1.5.0 · Offline-First PKM',
             onTap: null,
           ),
         ],
