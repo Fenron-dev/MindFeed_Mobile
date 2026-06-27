@@ -456,16 +456,89 @@ class _PropValueState extends ConsumerState<_PropValue> {
         );
       default:
         // text / number / select / tags-string
+        // Lange Werte gekürzt anzeigen (max. 5 Zeilen) → Antippen öffnet die
+        // Vollansicht. Gespeichert wird immer der volle Text.
+        final isLong = val.length > 140 || '\n'.allMatches(val).length >= 4;
         return Row(children: [
           Expanded(
-            child: Text(val.isEmpty ? '—' : val,
-                style: TextStyle(
-                    fontSize: 13,
-                    color: val.isEmpty ? MFColors.textMuted : MFColors.textPrimary)),
+            child: GestureDetector(
+              onTap: isLong
+                  ? () => _showFullValue(context, widget.prop.key, val)
+                  : null,
+              child: Text(val.isEmpty ? '—' : val,
+                  maxLines: 5,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: val.isEmpty
+                          ? MFColors.textMuted
+                          : MFColors.textPrimary)),
+            ),
           ),
+          if (isLong)
+            IconButton(
+              icon: const Icon(Icons.open_in_full_rounded,
+                  size: 15, color: MFColors.textMuted),
+              tooltip: 'Voll anzeigen',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _showFullValue(context, widget.prop.key, val),
+            ),
           if (widget.editable) _EditIcon(onTap: () => _openEditor(type)),
         ]);
     }
+  }
+
+  /// Zeigt einen langen Property-Wert formatiert in voller Länge.
+  void _showFullValue(BuildContext context, String title, String value) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: MFColors.surface,
+        insetPadding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.82,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(title,
+                        style: const TextStyle(
+                            color: MFColors.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: MFColors.textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ]),
+              ),
+              const Divider(height: 1, color: MFColors.border),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    value,
+                    style: const TextStyle(
+                        color: MFColors.textSecondary,
+                        fontSize: 14,
+                        height: 1.6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openEditor(PropType type) async {

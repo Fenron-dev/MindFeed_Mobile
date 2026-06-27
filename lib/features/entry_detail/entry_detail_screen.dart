@@ -220,6 +220,37 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     }
   }
 
+  /// Löscht einen Anhang (per Long-Press) nach Rückfrage.
+  Future<void> _deleteAttachment(Attachment a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Anhang löschen?',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+        content: Text(a.fileName ?? 'Diese Datei',
+            style: const TextStyle(color: MFColors.textSecondary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Löschen',
+                  style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(attachmentDaoProvider).deleteById(a.id);
+    try {
+      if ((a.localPath).isNotEmpty) await File(a.localPath).delete();
+    } catch (_) {}
+    // Eintrag touchen → Detail/Feed-Stream neu emittieren.
+    await ref.read(entryRepositoryProvider).updateEntry(a.entryId);
+    if (mounted) _snack('Anhang gelöscht.', error: false);
+  }
+
   /// Zeigt das Review-Sheet für [meta] und merged die bestätigten Felder als
   /// Properties (bestehende Keys werden überschrieben). Geteilt von „Metadaten
   /// neu abholen" und „KI aus Bild".
@@ -1272,12 +1303,18 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                               runSpacing: 8,
                               children: imageAttachments.map((a) {
                                 final gi = imageAtts.indexWhere((x) => x.id == a.id);
-                                return _AttachmentTile(a,
-                                    gallery: gallery,
-                                    galleryIndex: gi < 0 ? 0 : gi);
+                                return GestureDetector(
+                                  onLongPress: () => _deleteAttachment(a),
+                                  child: _AttachmentTile(a,
+                                      gallery: gallery,
+                                      galleryIndex: gi < 0 ? 0 : gi),
+                                );
                               }).toList(),
                             ),
-                          ...otherAttachments.map((a) => _AttachmentTile(a)),
+                          ...otherAttachments.map((a) => GestureDetector(
+                                onLongPress: () => _deleteAttachment(a),
+                                child: _AttachmentTile(a),
+                              )),
                         ],
                       );
                     }),
