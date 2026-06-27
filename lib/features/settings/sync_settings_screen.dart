@@ -8,7 +8,10 @@ import '../../sync/sync_provider.dart';
 import '../../sync/server/sync_server.dart';
 import '../../sync/ui/pairing_flow_screen.dart';
 import '../../sync/ui/conflict_resolution_screen.dart';
+import '../../sync/client/sync_api_client.dart';
 import '../../services/app_settings.dart';
+import '../../services/settings_backup.dart';
+import '../../main.dart' show onRestartApp;
 
 class SyncSettingsScreen extends ConsumerStatefulWidget {
   const SyncSettingsScreen({super.key});
@@ -75,6 +78,82 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
     } else {
       await server.stop();
       await ref.read(mdnsServiceProvider).stopAdvertising();
+    }
+  }
+
+  void _snack(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg), behavior: SnackBarBehavior.floating));
+    }
+  }
+
+  /// Lädt die lokalen Einstellungen (ohne Keys) auf den Server bzw. setzt sie
+  /// als Server-Bundle (#39).
+  Future<void> _shareSettings() async {
+    try {
+      final bundle = await SettingsBackup.exportSyncBundle();
+      if (_role == SyncRole.server) {
+        await ref.read(syncServerProvider).setSettingsBundle(bundle);
+      } else {
+        final url = AppSettings.getSyncServerUrl();
+        if (url == null) {
+          _snack('Nicht mit einem Server verbunden.');
+          return;
+        }
+        await SyncApiClient(url).uploadSettings(bundle);
+      }
+      _snack('Einstellungen geteilt (ohne Keys).');
+    } catch (e) {
+      _snack('Teilen fehlgeschlagen: $e');
+    }
+  }
+
+  /// Holt das Server-Bundle und wendet es lokal an (ohne Keys).
+  Future<void> _loadSettings() async {
+    try {
+      String? bundle;
+      if (_role == SyncRole.server) {
+        bundle = ref.read(syncServerProvider).settingsBundle;
+      } else {
+        final url = AppSettings.getSyncServerUrl();
+        if (url == null) {
+          _snack('Nicht mit einem Server verbunden.');
+          return;
+        }
+        bundle = await SyncApiClient(url).downloadSettings();
+      }
+      if (bundle == null || bundle.isEmpty) {
+        _snack('Keine Einstellungen auf dem Server hinterlegt.');
+        return;
+      }
+      await SettingsBackup.importSyncBundle(bundle);
+      if (!mounted) return;
+      final restart = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('Übernommen',
+              style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+          content: const Text(
+              'Einstellungen geladen (API-Keys musst du je Gerät selbst eintragen). '
+              'Zum Übernehmen die App neu starten.',
+              style: TextStyle(color: MFColors.textSecondary)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Später')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Jetzt neu starten'),
+            ),
+          ],
+        ),
+      );
+      if (restart == true) await onRestartApp?.call();
+    } catch (e) {
+      _snack('Laden fehlgeschlagen: $e');
     }
   }
 
@@ -220,6 +299,32 @@ class _SyncSettingsScreenState extends ConsumerState<SyncSettingsScreen> {
               ),
             ],
           ],
+
+          const SizedBox(height: 24),
+
+          // ── Einstellungen synchronisieren (ohne Keys) ────────────────────────
+          _SectionHeader('Einstellungen synchronisieren'),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text(
+              'Profile (ohne API-Keys), Fallback-Ketten und SearXNG-URL über den '
+              'Server an andere Geräte übertragen. API-Keys bleiben lokal.',
+              style: TextStyle(fontSize: 12, color: MFColors.textMuted),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_upload_outlined, color: MFColors.teal),
+            title: const Text('Diese Einstellungen teilen'),
+            subtitle: const Text('Profile/SearXNG (ohne Keys) zum Server'),
+            onTap: _shareSettings,
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.cloud_download_outlined, color: Color(0xFF38BDF8)),
+            title: const Text('Einstellungen vom Server laden'),
+            subtitle: const Text('Profile/SearXNG übernehmen (ohne Keys)'),
+            onTap: _loadSettings,
+          ),
 
           const SizedBox(height: 24),
 

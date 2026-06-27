@@ -85,6 +85,15 @@ class SyncServer {
   // Zeitstempel wenn Server-seitiger Sync-Ping ausgelöst wurde
   DateTime? syncNotifyRequestedAt;
 
+  // Geräte-Einstellungs-Bundle (Profile ohne Keys, SearXNG …), das der Server
+  // für andere Clients vorhält (#39). Enthält keine API-Keys.
+  String? settingsBundle;
+
+  Future<void> setSettingsBundle(String bundle) async {
+    settingsBundle = bundle;
+    await secureWrite('sync_settings_bundle_v1', bundle);
+  }
+
   /// Anzahl Clients die in den letzten 5 Minuten aktiv waren.
   int get onlineClientCount {
     final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
@@ -122,6 +131,9 @@ class SyncServer {
         refreshTokens.addAll(map.cast<String, String>());
       } catch (_) {}
     }
+
+    // Vorgehaltenes Einstellungs-Bundle wiederherstellen.
+    settingsBundle = await secureRead('sync_settings_bundle_v1');
 
     // Bekannte Clients wiederherstellen (IPs ändern sich, werden als 'gespeichert' markiert)
     final clientsJson = await secureRead(_kServerClients);

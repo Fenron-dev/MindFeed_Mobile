@@ -131,6 +131,56 @@ class SettingsBackup {
     }
   }
 
+  // ── Sync-Bundle (ohne API-Keys, unverschlüsselt) ────────────────────────────
+
+  /// Baut ein Einstellungs-Bundle für die Geräte-Synchronisation: LLM-Profile
+  /// (ohne Keys), Ketten, SearXNG-URL und sonstige Nicht-Geheim-Einstellungen.
+  /// **Enthält keine API-Keys** und keine geräte-/sync-spezifischen Werte.
+  static Future<String> exportSyncBundle() async {
+    final prefs = await SharedPreferences.getInstance();
+    final prefsMap = <String, dynamic>{};
+    for (final k in prefs.getKeys()) {
+      if (k.startsWith('_sec_')) continue;
+      if (k.startsWith('sync_')) continue; // geräte-spezifische Sync-Config
+      if (_prefsExclude.contains(k)) continue;
+      if (k == 'llm_migrated_from_openrouter') continue;
+      var v = prefs.get(k);
+      // Profile mit übertragen, aber has_api_key=false (Keys bleiben lokal).
+      if (k == 'llm_profiles' && v is List) {
+        v = v.map((s) {
+          try {
+            final m = jsonDecode('$s') as Map<String, dynamic>;
+            m['has_api_key'] = false;
+            return jsonEncode(m);
+          } catch (_) {
+            return s;
+          }
+        }).toList();
+      }
+      prefsMap[k] = _encodePref(v);
+    }
+    String? searx;
+    try {
+      searx = await secureRead('searxng_base_url');
+    } catch (_) {}
+    return jsonEncode({'prefs': prefsMap, if (searx != null) 'searxng': searx});
+  }
+
+  /// Wendet ein Sync-Bundle an (keine Keys). SearXNG-URL wird übernommen.
+  static Future<void> importSyncBundle(String json) async {
+    final map = jsonDecode(json) as Map<String, dynamic>;
+    final prefs = await SharedPreferences.getInstance();
+    for (final e in (map['prefs'] as Map<String, dynamic>? ?? {}).entries) {
+      await _writePref(prefs, e.key, e.value);
+    }
+    final searx = map['searxng'];
+    if (searx is String && searx.isNotEmpty) {
+      try {
+        await secureWrite('searxng_base_url', searx);
+      } catch (_) {}
+    }
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   static List<String> _profileKeyRefs(SharedPreferences prefs) {

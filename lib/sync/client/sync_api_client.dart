@@ -114,6 +114,23 @@ class SyncApiClient {
         jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
+  // ── Einstellungs-Bundle (#39) ────────────────────────────────────────────────
+
+  /// Lädt das Einstellungs-Bundle (ohne Keys) auf den Server.
+  Future<void> uploadSettings(String bundleJson) async {
+    final resp = await _post(
+        '/sync/settings', jsonDecode(bundleJson) as Map<String, dynamic>);
+    _checkStatus(resp);
+  }
+
+  /// Holt das auf dem Server hinterlegte Einstellungs-Bundle (oder null).
+  Future<String?> downloadSettings() async {
+    final resp = await _get('/sync/settings');
+    if (resp.statusCode == 404) return null;
+    _checkStatus(resp);
+    return resp.body;
+  }
+
   // ── Attachment download ────────────────────────────────────────────────────
 
   Future<List<int>> downloadAttachment(String attachmentId) async {
