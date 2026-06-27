@@ -19,18 +19,15 @@ import '../../services/enrichment/api_field_prefs.dart';
 import '../../services/enrichment/api_keys.dart';
 import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
-import '../../services/openrouter_service.dart';
 import '../../services/searxng_service.dart';
+import '../../services/url_metadata_service.dart';
 import '../settings/sync_settings_screen.dart';
+import 'ai_profiles_screen.dart';
+import 'settings_backup_tiles.dart';
 import '../../core/constants.dart';
 import '../../sync/sync_provider.dart';
 import 'package:go_router/go_router.dart';
 
-const _keyApiKey = 'openrouter_api_key';
-const _keyAiModel = 'openrouter_model';
-const _keyTemperature = 'openrouter_temperature';
-const _keyMaxTokens = 'openrouter_max_tokens';
-const _keyMaxInputChars = 'openrouter_max_input_chars';
 const _keySearxngUrl = 'searxng_base_url';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -47,30 +44,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _backupsLoaded = false;
   String? _activeVaultPath; // null = Default-Vault
 
-  // AI Settings
-  final _apiKeyCtrl = TextEditingController();
-  bool _apiKeySaved = false;
-  bool _apiKeyVisible = false;
-  String _selectedModel = '';
-  double _temperature = 0.3;
-  int _maxTokens = 400;
-  int _maxInputChars = 1500;
-
-  // Modell-Picker
-  List<Map<String, dynamic>> _models = [];
-  bool _loadingModels = false;
-  bool _freeOnly = true;
-  String _modelSearch = '';
-
   // API-Feld-Präferenzen (katalog-getrieben)
   ApiFieldPrefs _apiPrefs = const ApiFieldPrefs({});
 
   // Quellen-API-Keys (YouTube Data API v3)
   final _youtubeKeyCtrl = TextEditingController();
-
-  // Verbindungstest
-  String _testState = 'idle'; // idle | loading | ok | error
-  String _testError = '';
+  String _ytTestState = 'idle'; // idle | loading | ok | error
+  String _ytTestMsg = '';
 
   // SearXNG (eigene Recherche-Schicht)
   final _searxngUrlCtrl = TextEditingController();
@@ -88,28 +68,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
-    _apiKeyCtrl.dispose();
     _searxngUrlCtrl.dispose();
     _youtubeKeyCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadAiSettings() async {
-    final key = await secureRead(_keyApiKey) ?? '';
-    final model = await secureRead(_keyAiModel) ?? '';
-    final tempStr = await secureRead(_keyTemperature);
-    final tokStr = await secureRead(_keyMaxTokens);
-    final charStr = await secureRead(_keyMaxInputChars);
     final searx = await secureRead(_keySearxngUrl) ?? '';
     final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
     if (mounted) {
       setState(() {
-        _apiKeyCtrl.text = key;
-        _apiKeySaved = key.isNotEmpty;
-        _selectedModel = model;
-        _temperature = double.tryParse(tempStr ?? '') ?? 0.3;
-        _maxTokens = int.tryParse(tokStr ?? '') ?? 400;
-        _maxInputChars = int.tryParse(charStr ?? '') ?? 1500;
         _searxngUrlCtrl.text = searx;
         _youtubeKeyCtrl.text = youtubeKey;
       });
@@ -121,62 +89,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mounted) _showSnack('YouTube-API-Key gespeichert', success: true);
   }
 
+  Future<void> _testYoutubeKey() async {
+    await secureWrite(ApiKeyStore.youtube, _youtubeKeyCtrl.text.trim());
+    setState(() {
+      _ytTestState = 'loading';
+      _ytTestMsg = '';
+    });
+    final err =
+        await UrlMetadataService.testYoutubeKey(_youtubeKeyCtrl.text.trim());
+    if (!mounted) return;
+    setState(() {
+      _ytTestState = err == null ? 'ok' : 'error';
+      _ytTestMsg = err ?? '';
+    });
+  }
+
   Future<void> _saveAiSettings() async {
-    await secureWrite(_keyApiKey, _apiKeyCtrl.text.trim());
-    await secureWrite(_keyAiModel, _selectedModel);
-    await secureWrite(_keyTemperature, _temperature.toString());
-    await secureWrite(_keyMaxTokens, _maxTokens.toString());
-    await secureWrite(_keyMaxInputChars, _maxInputChars.toString());
     await secureWrite(_keySearxngUrl, _searxngUrlCtrl.text.trim());
     if (mounted) {
-      setState(() => _apiKeySaved = _apiKeyCtrl.text.trim().isNotEmpty);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('AI-Einstellungen gespeichert.'),
+        content: Text('Gespeichert.'),
         behavior: SnackBarBehavior.floating,
       ));
-    }
-  }
-
-  Future<void> _loadModels() async {
-    final key = _apiKeyCtrl.text.trim();
-    if (key.isEmpty) {
-      _showSnack('Bitte zuerst API-Key eingeben.', success: false);
-      return;
-    }
-    setState(() => _loadingModels = true);
-    try {
-      final models = await OpenRouterService.getModels(key);
-      if (mounted) setState(() { _models = models; _loadingModels = false; });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loadingModels = false);
-        _showSnack('Modelle konnten nicht geladen werden: $e', success: false);
-      }
-    }
-  }
-
-  Future<void> _testConnection() async {
-    final key = _apiKeyCtrl.text.trim();
-    if (key.isEmpty) {
-      setState(() { _testState = 'error'; _testError = 'Kein API-Key eingegeben'; });
-      return;
-    }
-    setState(() { _testState = 'loading'; _testError = ''; });
-    try {
-      final svc = OpenRouterService(
-        apiKey: key,
-        model: _selectedModel.isNotEmpty ? _selectedModel : OpenRouterService.defaultModel,
-      );
-      await svc.testConnection();
-      if (mounted) setState(() => _testState = 'ok');
-    } catch (e) {
-      if (mounted) {
-        final msg = e.toString().replaceFirst('Exception: ', '');
-        setState(() {
-          _testState = 'error';
-          _testError = msg.length > 150 ? '${msg.substring(0, 150)}…' : msg;
-        });
-      }
     }
   }
 
@@ -195,35 +129,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ? ''
           : (err.length > 150 ? '${err.substring(0, 150)}…' : err);
     });
-  }
-
-  List<Map<String, dynamic>> get _filteredModels {
-    return _models.where((m) {
-      final id = (m['id'] as String? ?? '').toLowerCase();
-      final name = (m['name'] as String? ?? '').toLowerCase();
-      final isFree = id.endsWith(':free') ||
-          ((m['pricing'] as Map?)?.entries.every(
-                (e) => e.value == '0' || e.value == null,
-              ) ??
-              false);
-      if (_freeOnly && !isFree) return false;
-      if (_modelSearch.isNotEmpty) {
-        final q = _modelSearch.toLowerCase();
-        if (!id.contains(q) && !name.contains(q)) return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  String _priceLabel(Map<String, dynamic> m) {
-    final id = (m['id'] as String? ?? '');
-    final pricing = m['pricing'] as Map?;
-    final isFree = id.endsWith(':free') ||
-        (pricing?.entries.every((e) => e.value == '0' || e.value == null) ?? false);
-    if (isFree) return 'Free';
-    final p = double.tryParse(pricing?['prompt']?.toString() ?? '') ?? 0;
-    if (p > 0) return '\$${(p * 1000000).toStringAsFixed(2)}/M';
-    return '—';
   }
 
   Future<void> _loadBackups() async {
@@ -695,6 +600,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionHeader('DATENSICHERUNG'),
           const SizedBox(height: 8),
 
+          const SettingsBackupTiles(),
+          const SizedBox(height: 10),
           _SettingsTile(
             icon: Icons.cloud_upload_outlined,
             iconColor: MFColors.teal,
@@ -820,411 +727,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ─── AI ───────────────────────────────────────────────────────────
           const SizedBox(height: 28),
-          _SectionHeader('KI-ANREICHERUNG (OPENROUTER)'),
+          _SectionHeader('KI-PROFILE & MODELLE'),
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: MFColors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: MFColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(children: [
-                  Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF8B5CF6).withAlpha(25),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.auto_awesome_outlined,
-                        size: 18, color: Color(0xFF8B5CF6)),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('OpenRouter API',
-                            style: TextStyle(fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: MFColors.textPrimary)),
-                        Text(
-                            _apiKeySaved ? 'API-Key gespeichert ✓' : 'API-Key nicht gesetzt',
-                            style: TextStyle(fontSize: 11,
-                                color: _apiKeySaved ? MFColors.teal : MFColors.textMuted)),
-                      ],
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 14),
-
-                // API-Key
-                TextField(
-                  controller: _apiKeyCtrl,
-                  obscureText: !_apiKeyVisible,
-                  style: const TextStyle(fontSize: 13,
-                      color: MFColors.textPrimary, fontFamily: 'monospace'),
-                  decoration: InputDecoration(
-                    labelText: 'API-Key (openrouter.ai)',
-                    labelStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
-                    hintText: 'sk-or-...',
-                    hintStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
-                    filled: true, fillColor: MFColors.bg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.teal)),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                          _apiKeyVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                          size: 18, color: MFColors.textMuted),
-                      onPressed: () => setState(() => _apiKeyVisible = !_apiKeyVisible),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                // ── Modell-Picker ──────────────────────────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Modell', style: TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w600,
-                        color: MFColors.textSecondary)),
-                    Row(children: [
-                      Checkbox(
-                        value: _freeOnly,
-                        onChanged: (v) => setState(() => _freeOnly = v ?? true),
-                        visualDensity: VisualDensity.compact,
-                        activeColor: MFColors.teal,
-                      ),
-                      const Text('Nur Free',
-                          style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
-                      const SizedBox(width: 8),
-                      _SmallBtn(
-                        label: _loadingModels ? 'Lädt…' : 'Laden',
-                        onTap: _loadingModels ? null : _loadModels,
-                        icon: _loadingModels
-                            ? const SizedBox(width: 10, height: 10,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 1.5, color: MFColors.teal))
-                            : const Icon(Icons.refresh, size: 12, color: MFColors.teal),
-                      ),
-                    ]),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                if (_models.isNotEmpty) ...[
-                  TextField(
-                    onChanged: (v) => setState(() => _modelSearch = v),
-                    style: const TextStyle(fontSize: 12, color: MFColors.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: 'Filter…',
-                      hintStyle: const TextStyle(fontSize: 12, color: MFColors.textMuted),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      filled: true, fillColor: MFColors.bg,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: MFColors.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: MFColors.border)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: MFColors.teal)),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    height: 180,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: MFColors.border),
-                      borderRadius: BorderRadius.circular(8),
-                      color: MFColors.bg,
-                    ),
-                    child: _filteredModels.isEmpty
-                        ? const Center(child: Text('Keine Modelle gefunden',
-                            style: TextStyle(fontSize: 11, color: MFColors.textMuted)))
-                        : ListView.builder(
-                            itemCount: _filteredModels.length,
-                            itemBuilder: (ctx, i) {
-                              final m = _filteredModels[i];
-                              final id = m['id'] as String? ?? '';
-                              final name = m['name'] as String? ?? id;
-                              final isFree = id.endsWith(':free') ||
-                                  ((m['pricing'] as Map?)?.entries.every(
-                                        (e) => e.value == '0' || e.value == null) ?? false);
-                              final selected = id == _selectedModel;
-                              return InkWell(
-                                onTap: () => setState(() => _selectedModel = id),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 7),
-                                  decoration: BoxDecoration(
-                                    color: selected
-                                        ? MFColors.teal.withAlpha(25)
-                                        : Colors.transparent,
-                                    border: selected
-                                        ? const Border(
-                                            left: BorderSide(
-                                                color: MFColors.teal, width: 2))
-                                        : null,
-                                  ),
-                                  child: Row(children: [
-                                    Expanded(child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(name,
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                color: selected
-                                                    ? MFColors.teal
-                                                    : MFColors.textPrimary),
-                                            overflow: TextOverflow.ellipsis),
-                                        Text(id,
-                                            style: const TextStyle(
-                                                fontSize: 10,
-                                                color: MFColors.textMuted,
-                                                fontFamily: 'monospace'),
-                                            overflow: TextOverflow.ellipsis),
-                                      ],
-                                    )),
-                                    Text(
-                                      _priceLabel(m),
-                                      style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: isFree
-                                              ? MFColors.teal
-                                              : MFColors.textMuted),
-                                    ),
-                                  ]),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                  if (_selectedModel.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('✓ $_selectedModel',
-                        style: const TextStyle(
-                            fontSize: 10, color: MFColors.teal,
-                            fontFamily: 'monospace'),
-                        overflow: TextOverflow.ellipsis),
-                  ],
-                ] else ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: MFColors.bg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: MFColors.border),
-                    ),
-                    child: Text(
-                      _selectedModel.isNotEmpty
-                          ? _selectedModel
-                          : 'meta-llama/llama-3.1-8b-instruct:free',
-                      style: const TextStyle(
-                          fontSize: 12, color: MFColors.textSecondary,
-                          fontFamily: 'monospace'),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    '← „Laden" drücken um Modelle von OpenRouter abzurufen',
-                    style: TextStyle(fontSize: 10, color: MFColors.textMuted),
-                  ),
-                ],
-                const SizedBox(height: 16),
-
-                // ── Temperature ────────────────────────────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Temperature',
-                        style: TextStyle(fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: MFColors.textSecondary)),
-                    Text(_temperature.toStringAsFixed(2),
-                        style: const TextStyle(
-                            fontSize: 11, color: MFColors.teal,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Slider(
-                  value: _temperature,
-                  min: 0.0, max: 2.0, divisions: 40,
-                  activeColor: MFColors.teal,
-                  inactiveColor: MFColors.border,
-                  onChanged: (v) => setState(() => _temperature = v),
-                ),
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Präzise (0.0)',
-                        style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
-                    Text('Kreativ (2.0)',
-                        style: TextStyle(fontSize: 10, color: MFColors.textMuted)),
-                  ],
-                ),
-                const SizedBox(height: 14),
-
-                // ── Max Output-Tokens ──────────────────────────────────────
-                const Text('Max Output-Tokens',
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: MFColors.textSecondary)),
-                const SizedBox(height: 6),
-                TextFormField(
-                  initialValue: _maxTokens.toString(),
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(fontSize: 13,
-                      color: MFColors.textPrimary, fontFamily: 'monospace'),
-                  onChanged: (v) {
-                    final n = int.tryParse(v);
-                    if (n != null && n >= 64) setState(() => _maxTokens = n);
-                  },
-                  decoration: InputDecoration(
-                    hintText: '400',
-                    helperText: 'Erhöhen wenn Antworten abgeschnitten werden',
-                    helperStyle: const TextStyle(
-                        fontSize: 10, color: MFColors.textMuted),
-                    filled: true, fillColor: MFColors.bg,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 10),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.teal)),
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                // ── Max Input-Zeichen (übertragener Kontext) ───────────────
-                const Text('Max Input-Zeichen',
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: MFColors.textSecondary)),
-                const SizedBox(height: 6),
-                TextFormField(
-                  initialValue: _maxInputChars.toString(),
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(fontSize: 13,
-                      color: MFColors.textPrimary, fontFamily: 'monospace'),
-                  onChanged: (v) {
-                    final n = int.tryParse(v);
-                    if (n != null && n >= 200) setState(() => _maxInputChars = n);
-                  },
-                  decoration: InputDecoration(
-                    hintText: '1500',
-                    helperText: 'Wie viel Inhalt an die KI geht. Größere Modelle '
-                        'verstehen mit mehr Zeichen oft besser (z.B. 4000–8000).',
-                    helperMaxLines: 2,
-                    helperStyle: const TextStyle(
-                        fontSize: 10, color: MFColors.textMuted),
-                    filled: true, fillColor: MFColors.bg,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 10),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.border)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: MFColors.teal)),
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                // ── Verbindungstest + Speichern ────────────────────────────
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _testState == 'loading' ? null : _testConnection,
-                      icon: _testState == 'loading'
-                          ? const SizedBox(width: 14, height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: MFColors.teal))
-                          : Icon(
-                              _testState == 'ok'
-                                  ? Icons.check_circle_outline
-                                  : _testState == 'error'
-                                      ? Icons.error_outline
-                                      : Icons.wifi_tethering,
-                              size: 15),
-                      label: Text(
-                        _testState == 'loading'
-                            ? 'Teste…'
-                            : _testState == 'ok'
-                                ? 'Verbunden'
-                                : _testState == 'error'
-                                    ? 'Fehler'
-                                    : 'Verbindung testen',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _testState == 'ok'
-                            ? MFColors.teal
-                            : _testState == 'error'
-                                ? Colors.redAccent
-                                : MFColors.textSecondary,
-                        side: BorderSide(
-                          color: _testState == 'ok'
-                              ? MFColors.teal
-                              : _testState == 'error'
-                                  ? Colors.redAccent
-                                  : MFColors.border,
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _saveAiSettings,
-                      icon: const Icon(Icons.save_outlined, size: 15),
-                      label: const Text('Speichern',
-                          style: TextStyle(fontSize: 12)),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: MFColors.teal,
-                        foregroundColor: MFColors.bg,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ]),
-                if (_testState == 'error' && _testError.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(_testError,
-                      style: const TextStyle(
-                          fontSize: 10, color: Colors.redAccent)),
-                ],
-                const SizedBox(height: 6),
-                const Text(
-                  'Kostenloser Account auf openrouter.ai reicht aus. '
-                  'Free-Tier Modelle haben ein Rate-Limit.',
-                  style: TextStyle(fontSize: 10, color: MFColors.textMuted),
-                ),
-              ],
-            ),
+          _SettingsTile(
+            icon: Icons.smart_toy_outlined,
+            iconColor: const Color(0xFF8B5CF6),
+            title: 'KI-Profile & Modelle',
+            subtitle: 'Anbieter, Fallback-Ketten je Vorgang, Vision, Test',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const AiProfilesScreen())),
           ),
 
           // ─── SearXNG (Recherche) ───────────────────────────────────────────
@@ -1433,6 +944,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   onSubmitted: (_) => _saveYoutubeKey(),
                 ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  TextButton.icon(
+                    onPressed:
+                        _ytTestState == 'loading' ? null : _testYoutubeKey,
+                    icon: Icon(
+                      switch (_ytTestState) {
+                        'ok' => Icons.check_circle_outline,
+                        'error' => Icons.error_outline,
+                        _ => Icons.wifi_tethering,
+                      },
+                      size: 16,
+                      color: _ytTestState == 'ok'
+                          ? const Color(0xFF22C55E)
+                          : _ytTestState == 'error'
+                              ? Colors.redAccent
+                              : MFColors.teal,
+                    ),
+                    label: Text(
+                      switch (_ytTestState) {
+                        'loading' => 'Teste…',
+                        'ok' => 'Key gültig',
+                        'error' => 'Fehler',
+                        _ => 'Speichern & testen',
+                      },
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: _ytTestState == 'error'
+                              ? Colors.redAccent
+                              : MFColors.teal),
+                    ),
+                  ),
+                  if (_ytTestState == 'error' && _ytTestMsg.isNotEmpty)
+                    Expanded(
+                      child: Text(_ytTestMsg,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.redAccent)),
+                    ),
+                ]),
               ],
             ),
           ),
@@ -2468,32 +2020,6 @@ class _ApiToggle extends StatelessWidget {
               activeColor: MFColors.teal,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-          ]),
-        ),
-      );
-}
-
-class _SmallBtn extends StatelessWidget {
-  final String label;
-  final VoidCallback? onTap;
-  final Widget? icon;
-  const _SmallBtn({required this.label, this.onTap, this.icon});
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            border: Border.all(color: MFColors.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (icon != null) ...[icon!, const SizedBox(width: 4)],
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: MFColors.textSecondary)),
           ]),
         ),
       );

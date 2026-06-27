@@ -18,11 +18,14 @@ import '../../data/db/app_database.dart' hide Container;
 import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
-import '../../services/openrouter_service.dart';
+import '../../services/ai/ai_service.dart';
+import '../../services/ai/llm_profile.dart';
+import '../../services/ai/llm_profiles_store.dart';
 import '../../services/app_settings.dart';
 import '../../services/url_metadata_service.dart';
 import '../../services/enrichment/metadata_record.dart';
 import '../capture/field_import_sheet.dart';
+import '../capture/vision_flow.dart';
 import '../../features/tasks/widgets/task_body_widget.dart';
 import '../../features/tasks/task_provider.dart'
     show tasksBySourceNoteProvider, subtasksByParentProvider;
@@ -204,48 +207,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
         ));
         return;
       }
-      final record = MetadataRecord.fromUrlMetadata(meta, url: sourceUrl);
-      final picked = await FieldImportSheet.show(
-        context,
-        record: record,
-        prefs: AppSettings.loadApiFieldPrefs(),
-      );
-      if (picked == null || !mounted) return;
-
-      final dao = ref.read(propertyDaoProvider);
-      final existing = await dao.watchByEntry(entryId).first;
-      final pickedKeys = picked.map((f) => f.storageKey).toSet();
-      // Bestehende Properties behalten, außer sie werden neu gesetzt.
-      final merged = <EntryPropertiesCompanion>[
-        for (final p in existing)
-          if (!pickedKeys.contains(p.key))
-            EntryPropertiesCompanion(
-              id: drift.Value(p.id),
-              entryId: drift.Value(p.entryId),
-              key: drift.Value(p.key),
-              value: drift.Value(p.value),
-              type: drift.Value(p.type),
-            ),
-      ];
-      var i = 0;
-      for (final f in picked) {
-        merged.add(EntryPropertiesCompanion(
-          id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
-          entryId: drift.Value(entryId),
-          key: drift.Value(f.storageKey),
-          value: drift.Value(f.value),
-          type: drift.Value(f.propType),
-        ));
-      }
-      await dao.setProperties(entryId, merged);
-      // Eintrag touchen, damit Streams/Feed neu emittieren.
-      await ref.read(entryRepositoryProvider).updateEntry(entryId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Metadaten aktualisiert.'),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      await _importMetadataToEntry(entryId, meta, sourceUrl: sourceUrl);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -258,12 +220,136 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     }
   }
 
+  /// Löscht einen Anhang (per Long-Press) nach Rückfrage.
+  Future<void> _deleteAttachment(Attachment a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MFColors.surface,
+        title: const Text('Anhang löschen?',
+            style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+        content: Text(a.fileName ?? 'Diese Datei',
+            style: const TextStyle(color: MFColors.textSecondary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Löschen',
+                  style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(attachmentDaoProvider).deleteById(a.id);
+    try {
+      if ((a.localPath).isNotEmpty) await File(a.localPath).delete();
+    } catch (_) {}
+    // Eintrag touchen → Detail/Feed-Stream neu emittieren.
+    await ref.read(entryRepositoryProvider).updateEntry(a.entryId);
+    if (mounted) _snack('Anhang gelöscht.', error: false);
+  }
+
+  /// Zeigt das Review-Sheet für [meta] und merged die bestätigten Felder als
+  /// Properties (bestehende Keys werden überschrieben). Geteilt von „Metadaten
+  /// neu abholen" und „KI aus Bild".
+  Future<void> _importMetadataToEntry(String entryId, UrlMetadata meta,
+      {String? sourceUrl}) async {
+    final record = MetadataRecord.fromUrlMetadata(meta, url: sourceUrl ?? '');
+    if (!mounted) return;
+    final picked = await FieldImportSheet.show(
+      context,
+      record: record,
+      prefs: AppSettings.loadApiFieldPrefs(),
+    );
+    if (picked == null || !mounted) return;
+
+    final dao = ref.read(propertyDaoProvider);
+    final existing = await dao.watchByEntry(entryId).first;
+    final pickedKeys = picked.map((f) => f.storageKey).toSet();
+    final merged = <EntryPropertiesCompanion>[
+      for (final p in existing)
+        if (!pickedKeys.contains(p.key))
+          EntryPropertiesCompanion(
+            id: drift.Value(p.id),
+            entryId: drift.Value(p.entryId),
+            key: drift.Value(p.key),
+            value: drift.Value(p.value),
+            type: drift.Value(p.type),
+          ),
+    ];
+    var i = 0;
+    for (final f in picked) {
+      merged.add(EntryPropertiesCompanion(
+        id: drift.Value('prop-${DateTime.now().microsecondsSinceEpoch}-${i++}'),
+        entryId: drift.Value(entryId),
+        key: drift.Value(f.storageKey),
+        value: drift.Value(f.value),
+        type: drift.Value(f.propType),
+      ));
+    }
+    await dao.setProperties(entryId, merged);
+    await ref.read(entryRepositoryProvider).updateEntry(entryId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Metadaten aktualisiert.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  /// Analysiert den ersten Bild-Anhang per Vision-Profil und ergänzt die Notiz
+  /// (Titel/Body/Tags) (#34).
+  Future<void> _analyzeImageNote(
+      String entryId, List<Attachment> attachments) async {
+    final att = attachments.where((a) => a.type == 'image').firstOrNull;
+    if (att == null || (att.localPath ?? '').isEmpty) {
+      _snack('Kein Bild-Anhang gefunden.');
+      return;
+    }
+    Uint8List bytes;
+    try {
+      bytes = await File(att.localPath!).readAsBytes();
+    } catch (e) {
+      _snack('Bild nicht lesbar: $e');
+      return;
+    }
+    if (!mounted) return;
+    final existing = await ref.read(tagDaoProvider).getAllTagNames();
+    if (!mounted) return;
+    final outcome =
+        await runVisionFlow(context, ref, bytes, existingTags: existing);
+    if (outcome == null) return;
+    final repo = ref.read(entryRepositoryProvider);
+    final cur = (await repo.getById(entryId))?.entry;
+    if ((outcome.title ?? '').isNotEmpty &&
+        (cur?.title == null || cur!.title!.isEmpty)) {
+      await repo.updateEntry(entryId, title: outcome.title);
+    }
+    // Echte Quelle erkannt → Cover + Eigenschaften wie beim Link-Eintrag.
+    if (outcome.metadata != null) {
+      await _importMetadataToEntry(entryId, outcome.metadata!);
+      return;
+    }
+    // Sonst KI-Zusammenfassung/Tags an den Body anhängen.
+    final add = <String>[];
+    if ((outcome.summary ?? '').isNotEmpty) add.add(outcome.summary!);
+    if (outcome.tags.isNotEmpty) {
+      add.add(outcome.tags.map((t) => '#$t').join(' '));
+    }
+    if (add.isNotEmpty) {
+      final b = (await repo.getById(entryId))?.entry.body ?? '';
+      await repo.updateEntry(entryId, body: '$b\n\n${add.join('\n\n')}'.trim());
+    }
+    if (mounted) _snack('Aus Bild ergänzt.', error: false);
+  }
+
   Future<void> _enrichWithAi(String entryId, String body, String? title) async {
-    final apiKey = await secureRead(_keyApiKey) ?? '';
-    if (apiKey.isEmpty) {
+    if (ref.read(llmProfilesProvider).chainFor(LlmTask.enrichment).isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Kein OpenRouter API-Key in Einstellungen gesetzt.'),
+          content: Text('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.'),
           behavior: SnackBarBehavior.floating,
         ));
       }
@@ -302,34 +388,30 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       final detailContent =
           hiddenText('_transcript') ?? hiddenText('_pagetext') ?? body;
 
-      final model = await secureRead(_keyAiModel) ?? '';
-      final tempStr = await secureRead('openrouter_temperature');
-      final tokStr = await secureRead('openrouter_max_tokens');
-      final charStr = await secureRead('openrouter_max_input_chars');
-      final svc = OpenRouterService(
-        apiKey: apiKey,
-        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-        temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-        maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-        maxInputChars: int.tryParse(charStr ?? '') ??
-            OpenRouterService.defaultMaxInputChars,
-      );
-
-      final result = await svc.enrichEntry(
-        opts.enrichBody ? detailContent : '',
-        existingTitle: title,
-        extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
-        existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
+      final existingTagNames = await ref.read(tagDaoProvider).getAllTagNames();
+      final result = await AiService.runForTask(
+        ref,
+        LlmTask.enrichment,
+        (svc) => svc.enrichEntry(
+          opts.enrichBody ? detailContent : '',
+          existingTitle: title,
+          extraContext: extraParts.isNotEmpty ? extraParts.join('\n') : null,
+          existingTags: existingTagNames,
+        ),
       );
 
       int changes = 0;
 
       // Strukturierte Notiz (typ-erkennend, volles Transkript) in den Body
       if (opts.enrichDetailedSummary && detailContent.trim().isNotEmpty) {
-        final structured = await svc.generateStructuredNote(detailContent,
-            existingTitle: title,
-            sourceUrl: (await ref.read(entryRepositoryProvider).getById(entryId))
-                ?.entry.sourceUrl);
+        final srcUrl =
+            (await ref.read(entryRepositoryProvider).getById(entryId))
+                ?.entry.sourceUrl;
+        final structured = await AiService.runForTask(
+            ref,
+            LlmTask.structuredNote,
+            (svc) => svc.generateStructuredNote(detailContent,
+                existingTitle: title, sourceUrl: srcUrl));
         if (structured != null && structured.trim().isNotEmpty) {
           final cur = (await ref.read(entryRepositoryProvider).getById(entryId))
                   ?.entry.body ?? '';
@@ -347,17 +429,25 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
 
       // Tags hinzufügen
-      if (opts.enrichTags && result.tags.isNotEmpty) {
-        // Wenn Genres vorhanden: Genres als Tags verwenden statt KI-Tags
-        final tagsToAdd = (genresText?.isNotEmpty == true && body.trim().isEmpty)
-            ? genresText!.split(',').map((g) => g.trim().toLowerCase().replaceAll(' ', '-')).where((g) => g.isNotEmpty).toList()
-            : result.tags;
-        if (tagsToAdd.isNotEmpty) {
-          final current = (await ref.read(entryRepositoryProvider).getById(entryId))?.entry.body ?? body;
-          final tagLine = tagsToAdd.map((t) => '#$t').join(' ');
-          // Bestehende Tag-Zeile nicht doppeln
-          if (!current.contains(tagLine)) {
-            await ref.read(entryRepositoryProvider).updateEntry(entryId, body: '$current\n$tagLine');
+      if (opts.enrichTags) {
+        // Genres (falls vorhanden) zusätzlich zu den KI-Tags übernehmen.
+        final genreTags = (genresText?.isNotEmpty == true)
+            ? genresText!
+                .split(',')
+                .map((g) => g.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '-'))
+                .where((g) => g.isNotEmpty)
+            : const <String>[];
+        final addTags = {...result.tags, ...genreTags}.toList();
+        if (addTags.isNotEmpty) {
+          // In die Tag-Relation MERGEN (Bestand bleibt erhalten) — nicht den
+          // Body ersetzen, sonst würden vorhandene Relations-Tags verloren gehen.
+          final existing =
+              await ref.read(tagDaoProvider).getTagNamesForEntry(entryId);
+          final merged = {...existing, ...addTags}.toList();
+          if (merged.length != existing.length) {
+            await ref.read(tagDaoProvider).setEntryTags(entryId, merged);
+            // Eintrag touchen → Streams neu emittieren.
+            await ref.read(entryRepositoryProvider).updateEntry(entryId);
             changes++;
           }
         }
@@ -435,11 +525,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   /// Recherchiert einen Link über SearXNG und erzeugt daraus per LLM eine
   /// strukturierte Notiz, die als eigener Block in den Body eingefügt wird.
   Future<void> _researchLink(String entryId, String? url, String? title) async {
-    final apiKey = await secureRead(_keyApiKey) ?? '';
     final searxUrl = (await secureRead(_keySearxngUrl) ?? '').trim();
     if (!mounted) return;
-    if (apiKey.isEmpty) {
-      _snack('Kein OpenRouter API-Key in Einstellungen gesetzt.');
+    if (ref.read(llmProfilesProvider).chainFor(LlmTask.researchedNote).isEmpty) {
+      _snack('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.');
       return;
     }
     if (searxUrl.isEmpty) {
@@ -468,24 +557,15 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
               p.key.toLowerCase() == 'description')
           .firstOrNull;
 
-      final model = await secureRead(_keyAiModel) ?? '';
-      final tempStr = await secureRead('openrouter_temperature');
-      final tokStr = await secureRead('openrouter_max_tokens');
-      final charStr = await secureRead('openrouter_max_input_chars');
-      final svc = OpenRouterService(
-        apiKey: apiKey,
-        model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-        temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-        maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-        maxInputChars: int.tryParse(charStr ?? '') ??
-            OpenRouterService.defaultMaxInputChars,
-      );
-
-      final note = await svc.generateResearchedNote(
-        title: query,
-        sourceUrl: url,
-        knownDescription: descProp?.value,
-        searchContext: context,
+      final note = await AiService.runForTask(
+        ref,
+        LlmTask.researchedNote,
+        (svc) => svc.generateResearchedNote(
+          title: query,
+          sourceUrl: url,
+          knownDescription: descProp?.value,
+          searchContext: context,
+        ),
       );
       if (note == null || note.trim().isEmpty) {
         throw Exception('Modell lieferte keine Notiz');
@@ -925,6 +1005,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   if (v == 'refetch') {
                     await _refetchMetadata(entry.id, entry.sourceUrl);
                   }
+                  if (v == 'vision') {
+                    await _analyzeImageNote(entry.id, item.attachments);
+                  }
                   if (v == 'done' || v == 'inbox' || v == 'archive') {
                     await ref.read(entryRepositoryProvider).updateEntry(
                         entry.id, status: v == 'archive' ? 'archived' : v);
@@ -949,6 +1032,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                       _refetching ? Icons.hourglass_top_rounded : Icons.download_outlined,
                       _refetching ? 'Wird abgerufen…' : 'Metadaten neu abholen',
                       color: const Color(0xFF38BDF8)),
+                  if (item.attachments.any((a) => a.type == 'image'))
+                    _popItem('vision', Icons.image_search_outlined,
+                        'KI aus Bild',
+                        color: const Color(0xFF8B5CF6)),
                   const PopupMenuDivider(),
                   if (entry.status != 'done')
                     _popItem('done', Icons.check_circle_outline, 'Erledigt'),
@@ -1224,12 +1311,18 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                               runSpacing: 8,
                               children: imageAttachments.map((a) {
                                 final gi = imageAtts.indexWhere((x) => x.id == a.id);
-                                return _AttachmentTile(a,
-                                    gallery: gallery,
-                                    galleryIndex: gi < 0 ? 0 : gi);
+                                return GestureDetector(
+                                  onLongPress: () => _deleteAttachment(a),
+                                  child: _AttachmentTile(a,
+                                      gallery: gallery,
+                                      galleryIndex: gi < 0 ? 0 : gi),
+                                );
                               }).toList(),
                             ),
-                          ...otherAttachments.map((a) => _AttachmentTile(a)),
+                          ...otherAttachments.map((a) => GestureDetector(
+                                onLongPress: () => _deleteAttachment(a),
+                                child: _AttachmentTile(a),
+                              )),
                         ],
                       );
                     }),

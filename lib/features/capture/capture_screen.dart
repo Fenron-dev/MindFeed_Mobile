@@ -16,6 +16,8 @@ import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
+import '../../services/ai/ai_service.dart';
+import '../../services/ai/llm_profile.dart';
 import '../../services/enrichment/metadata_record.dart';
 import '../../services/openrouter_service.dart';
 import '../../services/url_metadata_service.dart';
@@ -24,6 +26,7 @@ import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/format_toolbar.dart';
 import '../../widgets/wikilink_text_field.dart';
+import 'vision_flow.dart';
 
 const _storage = FlutterSecureStorage();
 const _keyApiKey = 'openrouter_api_key';
@@ -235,6 +238,46 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _pendingImages.addAll(images.map((f) => XFile(f.path!)));
       });
     }
+  }
+
+  /// Analysiert das erste angehängte Bild per Vision-Profil und füllt
+  /// Titel/Body/Tags der Notiz (#34).
+  Future<void> _analyzeImage() async {
+    if (_pendingImages.isEmpty) return;
+    final bytes = await _pendingImages.first.readAsBytes();
+    if (!mounted) return;
+    final existing = await ref.read(tagDaoProvider).getAllTagNames();
+    if (!mounted) return;
+    final outcome =
+        await runVisionFlow(context, ref, bytes, existingTags: existing);
+    if (outcome == null || !mounted) return;
+    setState(() {
+      if (outcome.metadata != null) {
+        // Echte Quelle erkannt → wie ein eingegebener Link aufbauen: Cover +
+        // Auto-Template + Eigenschaften beim Speichern. Das Foto bleibt Anhang.
+        _urlPreview = outcome.metadata;
+        if (outcome.metadata!.title.isNotEmpty) {
+          _titleCtrl.text = outcome.metadata!.title;
+          _showTitle = true;
+        }
+        return;
+      }
+      // Kein Quell-Treffer → KI-Titel/Zusammenfassung/Tags in die Notiz.
+      if ((outcome.title ?? '').isNotEmpty) {
+        _titleCtrl.text = outcome.title!;
+        _showTitle = true;
+      }
+      final parts = <String>[];
+      if ((outcome.summary ?? '').isNotEmpty) parts.add(outcome.summary!);
+      if (outcome.tags.isNotEmpty) {
+        parts.add(outcome.tags.map((t) => '#$t').join(' '));
+      }
+      if (parts.isNotEmpty) {
+        final cur = _bodyCtrl.text.trim();
+        _bodyCtrl.text =
+            cur.isEmpty ? parts.join('\n\n') : '$cur\n\n${parts.join('\n\n')}';
+      }
+    });
   }
 
   Future<void> _pickImage() async {
@@ -721,63 +764,48 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         await _autoApplyTemplate(createdEntry.entry.id, mediaType);
       }
 
-      // Auto-KI Anreicherung wenn Toggle aktiv
+      // Auto-KI Anreicherung wenn Toggle aktiv (über die Profil-Kette).
       if (_autoAi) {
-        final apiKey = await _storage.read(key: _keyApiKey) ?? '';
-        if (apiKey.isNotEmpty) {
-          try {
-            final model = await _storage.read(key: _keyAiModel) ?? '';
-            final tempStr = await _storage.read(key: 'openrouter_temperature');
-            final tokStr = await _storage.read(key: 'openrouter_max_tokens');
-            final charStr = await _storage.read(key: 'openrouter_max_input_chars');
-            final svc = OpenRouterService(
-              apiKey: apiKey,
-              model: model.isNotEmpty ? model : OpenRouterService.defaultModel,
-              temperature: double.tryParse(tempStr ?? '') ?? 0.3,
-              maxTokens: int.tryParse(tokStr ?? '') ?? 400,
-              maxInputChars: int.tryParse(charStr ?? '') ??
-                  OpenRouterService.defaultMaxInputChars,
-            );
-            // Der KI den VOLLEN abgerufenen Feld-Satz als Kontext geben —
-            // auch Felder, die der Nutzer nicht importiert hat, damit sie in
-            // generierte Texte einfließen können.
-            final ctxParts = <String>[];
-            if (_urlPreview != null) {
-              final fields = MetadataRecord.fromUrlMetadata(_urlPreview!,
-                      url: detectedUrl ?? '')
-                  .aiContext();
-              if (fields.isNotEmpty) ctxParts.add(fields);
-            }
-            // Haupttext der Seite als KI-Treibstoff (#27) — Variable stammt aus
-            // dem äußeren Scope (oben bei der Eintragserstellung gesetzt).
-            if (pageText.isNotEmpty) ctxParts.add('SEITENINHALT:\n$pageText');
-            final aiCtx = ctxParts.join('\n\n');
-            final result = await svc.enrichEntry(
+        try {
+          // Der KI den vollen Feld-Satz + Seiten-Haupttext als Kontext geben.
+          final ctxParts = <String>[];
+          if (_urlPreview != null) {
+            final fields = MetadataRecord.fromUrlMetadata(_urlPreview!,
+                    url: detectedUrl ?? '')
+                .aiContext();
+            if (fields.isNotEmpty) ctxParts.add(fields);
+          }
+          if (pageText.isNotEmpty) ctxParts.add('SEITENINHALT:\n$pageText');
+          final aiCtx = ctxParts.join('\n\n');
+          final existingTagNames =
+              await ref.read(tagDaoProvider).getAllTagNames();
+          final result = await AiService.runForTask(
+            ref,
+            LlmTask.enrichment,
+            (svc) => svc.enrichEntry(
               createdEntry.entry.body,
               existingTitle: createdEntry.entry.title,
               extraContext: aiCtx.isNotEmpty ? aiCtx : null,
-              existingTags: await ref.read(tagDaoProvider).getAllTagNames(),
-            );
-            if (result.tags.isNotEmpty || result.title != null) {
-              // Titel aktualisieren (Body bleibt unverändert — keine Tag-Zeile anhängen)
-              await ref.read(entryRepositoryProvider).updateEntry(
-                    createdEntry.entry.id,
-                    title: result.title ?? createdEntry.entry.title,
-                  );
-              // KI-Tags direkt in die Tag-Relation schreiben (nicht in den Body)
-              if (result.tags.isNotEmpty) {
-                final existingTags = await ref
-                    .read(tagDaoProvider)
-                    .getTagNamesForEntry(createdEntry.entry.id);
-                final merged = {...existingTags, ...result.tags}.toList();
-                await ref
-                    .read(tagDaoProvider)
-                    .setEntryTags(createdEntry.entry.id, merged);
-              }
+              existingTags: existingTagNames,
+            ),
+          );
+          if (result.tags.isNotEmpty || result.title != null) {
+            await ref.read(entryRepositoryProvider).updateEntry(
+                  createdEntry.entry.id,
+                  title: result.title ?? createdEntry.entry.title,
+                );
+            if (result.tags.isNotEmpty) {
+              final existingTags = await ref
+                  .read(tagDaoProvider)
+                  .getTagNamesForEntry(createdEntry.entry.id);
+              final merged = {...existingTags, ...result.tags}.toList();
+              await ref
+                  .read(tagDaoProvider)
+                  .setEntryTags(createdEntry.entry.id, merged);
             }
-          } catch (_) {
-            // KI-Fehler still ignorieren — Eintrag ist gespeichert
           }
+        } catch (_) {
+          // KI-Fehler still ignorieren — Eintrag ist gespeichert
         }
       }
 
@@ -1009,6 +1037,31 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             ),
 
           // Bild-Thumbnails
+          if (_pendingImages.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: InkWell(
+                  onTap: _analyzeImage,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF8B5CF6)),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.auto_awesome, size: 14, color: Color(0xFF8B5CF6)),
+                      SizedBox(width: 6),
+                      Text('KI aus Bild',
+                          style: TextStyle(color: Color(0xFF8B5CF6), fontSize: 12)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
           if (_pendingImages.isNotEmpty)
             Container(
               height: 72,

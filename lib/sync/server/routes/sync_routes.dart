@@ -435,6 +435,36 @@ Router syncRouter(AppDatabase db, SyncServer server) {
 
   // ── GET /sync/clients — Liste verbundener Clients (Server-Info) ────────────
 
+  // ── Einstellungs-Bundle (Profile ohne Keys, SearXNG …) (#39) ───────────────
+
+  router.get('/sync/settings', (Request req) async {
+    final authErr = _requireAuth(req);
+    if (authErr != null) return authErr;
+    final bundle = server.settingsBundle;
+    if (bundle == null || bundle.isEmpty) {
+      return Response.notFound(
+          jsonEncode({'error': 'Keine Einstellungen hinterlegt'}),
+          headers: {'content-type': 'application/json'});
+    }
+    return Response.ok(bundle, headers: {'content-type': 'application/json'});
+  });
+
+  router.post('/sync/settings', (Request req) async {
+    final authErr = _requireAuth(req);
+    if (authErr != null) return authErr;
+    final body = await req.readAsString();
+    if (body.trim().isEmpty) {
+      return Response(400,
+          body: jsonEncode({'error': 'Leeres Bundle'}),
+          headers: {'content-type': 'application/json'});
+    }
+    await server.setSettingsBundle(body);
+    return Response.ok(jsonEncode({'ok': true}),
+        headers: {'content-type': 'application/json'});
+  });
+
+  // ── GET /sync/clients — Liste verbundener Clients (Server-Info) ────────────
+
   router.get('/sync/clients', (Request req) async {
     final authErr = _requireAuth(req);
     if (authErr != null) return authErr;

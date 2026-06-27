@@ -206,6 +206,7 @@ class _TagsRow extends ConsumerWidget {
               children: [
                 ...tags.map((t) => _TagChip(
                       tag: t,
+                      onLongPress: () => _showRenameTag(context, ref, t),
                       onRemove: editable
                           ? () => onRemoveTag != null
                               ? onRemoveTag!(t)
@@ -228,10 +229,18 @@ class _TagsRow extends ConsumerWidget {
 class _TagChip extends StatelessWidget {
   final String tag;
   final VoidCallback? onRemove;
-  const _TagChip({required this.tag, this.onRemove});
+  final VoidCallback? onLongPress;
+  const _TagChip({required this.tag, this.onRemove, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: _chip(),
+    );
+  }
+
+  Widget _chip() {
     return Container(
       padding: EdgeInsets.fromLTRB(8, 3, onRemove != null ? 4 : 8, 3),
       decoration: BoxDecoration(
@@ -253,6 +262,54 @@ class _TagChip extends StatelessWidget {
         ],
       ]),
     );
+  }
+}
+
+/// Tag in allen Einträgen umbenennen (z.B. `ai_x` → `ai/x` für Hierarchie).
+Future<void> _showRenameTag(
+    BuildContext context, WidgetRef ref, String oldTag) async {
+  final ctrl = TextEditingController(text: oldTag);
+  final newName = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: MFColors.surface,
+      title: const Text('Tag umbenennen',
+          style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: MFColors.textPrimary),
+          decoration: const InputDecoration(
+            prefixText: '#',
+            labelText: 'Neuer Name',
+            helperText: '„/" erzeugt Unter-Tags, z.B. ai/bildgeneration',
+            helperStyle: TextStyle(color: MFColors.textMuted, fontSize: 11),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text('Gilt für alle Einträge mit diesem Tag.',
+            style: TextStyle(color: MFColors.textMuted, fontSize: 11)),
+      ]),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Abbrechen')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+          onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+          child: const Text('Umbenennen'),
+        ),
+      ],
+    ),
+  );
+  if (newName == null || newName.isEmpty || newName == oldTag) return;
+  final n = await ref.read(entryRepositoryProvider).renameTag(oldTag, newName);
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Tag in $n Eintrag/Einträgen umbenannt.'),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 }
 
@@ -456,16 +513,89 @@ class _PropValueState extends ConsumerState<_PropValue> {
         );
       default:
         // text / number / select / tags-string
+        // Lange Werte gekürzt anzeigen (max. 5 Zeilen) → Antippen öffnet die
+        // Vollansicht. Gespeichert wird immer der volle Text.
+        final isLong = val.length > 140 || '\n'.allMatches(val).length >= 4;
         return Row(children: [
           Expanded(
-            child: Text(val.isEmpty ? '—' : val,
-                style: TextStyle(
-                    fontSize: 13,
-                    color: val.isEmpty ? MFColors.textMuted : MFColors.textPrimary)),
+            child: GestureDetector(
+              onTap: isLong
+                  ? () => _showFullValue(context, widget.prop.key, val)
+                  : null,
+              child: Text(val.isEmpty ? '—' : val,
+                  maxLines: 5,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: val.isEmpty
+                          ? MFColors.textMuted
+                          : MFColors.textPrimary)),
+            ),
           ),
+          if (isLong)
+            IconButton(
+              icon: const Icon(Icons.open_in_full_rounded,
+                  size: 15, color: MFColors.textMuted),
+              tooltip: 'Voll anzeigen',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _showFullValue(context, widget.prop.key, val),
+            ),
           if (widget.editable) _EditIcon(onTap: () => _openEditor(type)),
         ]);
     }
+  }
+
+  /// Zeigt einen langen Property-Wert formatiert in voller Länge.
+  void _showFullValue(BuildContext context, String title, String value) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: MFColors.surface,
+        insetPadding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.82,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(title,
+                        style: const TextStyle(
+                            color: MFColors.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: MFColors.textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ]),
+              ),
+              const Divider(height: 1, color: MFColors.border),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    value,
+                    style: const TextStyle(
+                        color: MFColors.textSecondary,
+                        fontSize: 14,
+                        height: 1.6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openEditor(PropType type) async {

@@ -435,6 +435,35 @@ class EntryRepository {
         id: Value(entryId), updatedAt: Value(DateTime.now().toUtc())));
   }
 
+  /// Benennt einen Tag in ALLEN Einträgen um (z.B. `ai_x` → `ai/x` für
+  /// Hierarchie). Schreibt `#oldTag` im Body um (wo vorhanden) und aktualisiert
+  /// sonst die Tag-Relation; der alte Tag wird danach entfernt.
+  /// Gibt die Anzahl betroffener Einträge zurück.
+  Future<int> renameTag(String oldName, String newName) async {
+    final oldN = oldName.trim().toLowerCase().replaceAll(RegExp(r'^#'), '');
+    final newN = newName.trim().toLowerCase().replaceAll(RegExp(r'^#'), '');
+    if (oldN.isEmpty || newN.isEmpty || oldN == newN) return 0;
+    final ids = await tagDao.entryIdsWithTag(oldN);
+    final re = RegExp(
+        '#${RegExp.escape(oldN)}(?![A-Za-z0-9_\\-/äöüÄÖÜß])',
+        caseSensitive: false);
+    for (final id in ids) {
+      final e = await entryDao.getById(id);
+      if (e == null) continue;
+      if (re.hasMatch(e.body)) {
+        // Body umschreiben → updateEntry re-parst die Tags in die Relation.
+        await updateEntry(id, body: e.body.replaceAll(re, '#$newN'));
+      } else {
+        await tagDao.removeEntryTag(id, oldN);
+        await tagDao.addEntryTag(id, newN);
+        await entryDao.upsert(EntriesCompanion(
+            id: Value(id), updatedAt: Value(DateTime.now().toUtc())));
+      }
+    }
+    await tagDao.deleteByName(oldN);
+    return ids.length;
+  }
+
   /// Aktualisiert genau eine Property in-place (für Toggle/Rating/Wert-Edit).
   /// Kein Lösch-/Neu-Schreiben aller Properties → kein Scroll-Sprung, kein
   /// Changelog-Spam. Touch der updatedAt für Sync.

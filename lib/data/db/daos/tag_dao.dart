@@ -70,6 +70,23 @@ class TagDao extends DatabaseAccessor<AppDatabase> with _$TagDaoMixin {
     }
   }
 
+  /// Entry-IDs, die den Tag [tagName] tragen (für Umbenennen).
+  Future<List<String>> entryIdsWithTag(String tagName) async {
+    final tag = await getByName(tagName);
+    if (tag == null) return [];
+    final rows =
+        await (select(entryTags)..where((et) => et.tagId.equals(tag.id))).get();
+    return rows.map((r) => r.entryId).toList();
+  }
+
+  /// Entfernt einen Tag vollständig (Relation + Tag-Eintrag).
+  Future<void> deleteByName(String name) async {
+    final tag = await getByName(name);
+    if (tag == null) return;
+    await (delete(entryTags)..where((et) => et.tagId.equals(tag.id))).go();
+    await (delete(tags)..where((t) => t.id.equals(tag.id))).go();
+  }
+
   Future<List<String>> getTagNamesForEntry(String entryId) async {
     final rows = await (select(entryTags)
           ..where((et) => et.entryId.equals(entryId)))

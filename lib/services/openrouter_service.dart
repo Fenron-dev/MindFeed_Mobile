@@ -15,8 +15,72 @@ class AiEnrichment {
   });
 }
 
+/// Ergebnis der Bild-Analyse (#34).
+class VisionResult {
+  final String? title;
+  final String? summary;
+  final List<String> tags;
+  final String? lang;
+  final String? mediaType; // z.B. 'anime', 'movie', 'series', 'youtube', 'shop'
+  final String? recognizedTitle; // erkannter Werk-/Seitentitel für die Suche
+  final String? url; // im Bild sichtbare URL (z.B. Adressleiste), falls erkannt
+
+  const VisionResult({
+    this.title,
+    this.summary,
+    this.tags = const [],
+    this.lang,
+    this.mediaType,
+    this.recognizedTitle,
+    this.url,
+  });
+}
+
+/// Signalisiert, dass das aktuelle Profil/Modell nicht verfügbar ist
+/// (Rate-Limit/Guthaben/Modell weg/Server/Netz) → `AiService` wechselt auf das
+/// nächste Kettenglied und legt das Profil ggf. in Cooldown.
+class AiUnavailableException implements Exception {
+  final int status; // HTTP-Status (0 = Netz/Timeout)
+  final String message;
+  final Duration? retryAfter; // aus Retry-After/Reset-Header, falls vorhanden
+  const AiUnavailableException(this.status, this.message, {this.retryAfter});
+
+  /// Quota-/Limit-Fehler, die einen Cooldown auslösen.
+  bool get isLimit => status == 429 || status == 402;
+
+  @override
+  String toString() => 'AiUnavailable($status): $message';
+
+  static bool isRetryableStatus(int s) =>
+      s == 429 || s == 402 || s == 404 || s >= 500;
+
+  /// Liest `Retry-After` (Sekunden) bzw. `x-ratelimit-reset` (Sekunden/Epoch-ms).
+  static Duration? retryAfterFrom(Map<String, String> headers) {
+    final ra = headers['retry-after'];
+    if (ra != null) {
+      final secs = int.tryParse(ra.trim());
+      if (secs != null && secs > 0) return Duration(seconds: secs);
+    }
+    final reset = headers['x-ratelimit-reset'];
+    if (reset != null) {
+      final n = int.tryParse(reset.trim());
+      if (n != null) {
+        // > 10^12 ⇒ Epoch-Millis, sonst Sekunden bis Reset.
+        if (n > 1000000000000) {
+          final d = DateTime.fromMillisecondsSinceEpoch(n)
+              .difference(DateTime.now());
+          if (d > Duration.zero) return d;
+        } else if (n > 0 && n < 86400) {
+          return Duration(seconds: n);
+        }
+      }
+    }
+    return null;
+  }
+}
+
 class OpenRouterService {
-  static const _endpoint =
+  static const _defaultEndpoint =
       'https://openrouter.ai/api/v1/chat/completions';
 
   // Standard Free-Tier Modell
@@ -31,6 +95,10 @@ class OpenRouterService {
   final double temperature;
   final int maxTokens;
 
+  /// OpenAI-kompatibler `/chat/completions`-Endpoint. Default = OpenRouter;
+  /// für andere Profile (Groq, lokal …) wird die Profil-`chatUrl` übergeben.
+  final String chatUrl;
+
   /// Max. Zeichen des übertragenen Inhalts (Body). Bei größeren Modellen höher
   /// setzen für besseren Kontext. Der Zusatzkontext bekommt anteilig ein Drittel.
   final int maxInputChars;
@@ -41,7 +109,121 @@ class OpenRouterService {
     this.temperature = 0.3,
     this.maxTokens = 400,
     this.maxInputChars = defaultMaxInputChars,
+    this.chatUrl = _defaultEndpoint,
   });
+
+  /// Wirft bei verfügbarkeitsbedingten HTTP-Fehlern eine [AiUnavailableException]
+  /// (für den Fallback), sonst eine normale Exception.
+  static void _checkStatus(http.Response res) {
+    if (res.statusCode == 200) return;
+    String errMsg;
+    if (res.statusCode == 429) {
+      errMsg = 'Rate-Limit erreicht.';
+    } else if (res.statusCode == 402) {
+      errMsg = 'Kein Guthaben / Limit erreicht.';
+    } else if (res.statusCode == 404) {
+      errMsg = 'Modell nicht gefunden.';
+    } else {
+      try {
+        final j = jsonDecode(res.body) as Map<String, dynamic>;
+        errMsg = (j['error']?['message'] as String?) ??
+            res.body.substring(0, res.body.length.clamp(0, 200));
+      } catch (_) {
+        errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
+      }
+    }
+    if (AiUnavailableException.isRetryableStatus(res.statusCode)) {
+      throw AiUnavailableException(res.statusCode, errMsg,
+          retryAfter: AiUnavailableException.retryAfterFrom(res.headers));
+    }
+    throw Exception('AI ${res.statusCode}: $errMsg');
+  }
+
+  /// Analysiert ein Bild (multimodal) und erzeugt daraus eine Notiz-Vorlage:
+  /// erkennt Quelle/Medium + Titel + Inhalt. [imageDataUrl] ist eine
+  /// `data:image/...;base64,…`-URL (via ImageVision.toDataUrl). Braucht ein
+  /// vision-fähiges Modell.
+  Future<VisionResult> analyzeImage(String imageDataUrl,
+      {String? userHint, List<String> existingTags = const []}) async {
+    final tagPool =
+        existingTags.where((t) => t.trim().isNotEmpty).take(200).toList();
+    final tagHint = tagPool.isEmpty
+        ? ''
+        : '\nBevorzuge passende Tags aus: ${tagPool.join(', ')}';
+    final prompt =
+        '''Analysiere das Bild (oft ein Screenshot). Erkenne, um welche Quelle/Plattform und welches Werk es geht (z.B. YouTube-Video, Crunchyroll/Anime, Film, Serie, Buch, Shop-Produkt) und worum es inhaltlich geht.${userHint != null && userHint.isNotEmpty ? '\nHinweis des Nutzers: $userHint' : ''}
+
+Gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit diesen Schlüsseln:
+- "title": prägnanter Titel für die Notiz (max 70 Zeichen)
+- "summary": 2-3 Sätze NUR auf Basis dessen, was im Bild sichtbar ist (Titel, Beschreibung, Thumbnail). Erfinde KEINEN Inhalt, den du nicht siehst
+- "tags": 3-6 kleingeschriebene Schlagwörter
+- "lang": ISO-639-1 Sprachcode
+- "media_type": eines von "anime","manga","movie","series","youtube","book","game","shop","web","other"
+- "recognized_title": der konkrete Werk-/Seitentitel zur Nachschlage-Suche (oder null)
+- "url": die im Bild sichtbare URL (z.B. Browser-Adressleiste, YouTube-Link) exakt abgetippt, sonst null
+- Tags klein, einzelne Wörter mit Bindestrich verbinden (z.B. "slice-of-life")$tagHint''';
+
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': prompt},
+            {
+              'type': 'image_url',
+              'image_url': {'url': imageDataUrl},
+            },
+          ],
+        },
+      ],
+      'max_tokens': maxTokens < 800 ? 800 : maxTokens,
+      'temperature': temperature,
+    });
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+
+    final res = await http
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
+        .timeout(const Duration(seconds: 45));
+    _checkStatus(res);
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    final responseText = (msg?['content'] as String?) ?? '';
+    final jsonStr = _extractJson(responseText);
+    if (jsonStr == null) {
+      throw Exception('Bild-Analyse: keine verwertbare Antwort.');
+    }
+    final p = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final tags = (p['tags'] as List?)
+            ?.map((t) => '$t'
+                .trim()
+                .toLowerCase()
+                .replaceAll(RegExp(r'\s+'), '-')
+                .replaceAll(RegExp(r'[^a-z0-9\-äöüß]'), '')
+                .replaceAll(RegExp(r'-+'), '-')
+                .replaceAll(RegExp(r'^-|-$'), ''))
+            .where((t) => t.length > 1)
+            .toList() ??
+        [];
+    String? str(dynamic v) =>
+        (v is String && v.trim().isNotEmpty && v != 'null') ? v.trim() : null;
+    return VisionResult(
+      title: str(p['title']),
+      summary: str(p['summary']),
+      tags: tags,
+      lang: str(p['lang']),
+      mediaType: str(p['media_type'])?.toLowerCase(),
+      recognizedTitle: str(p['recognized_title']),
+      url: str(p['url']),
+    );
+  }
 
   /// Reichert einen Eintrag mit Tags, Titel und Zusammenfassung an.
   /// [extraContext] kann zusätzliche Metadaten enthalten (z.B. URL-Beschreibung, Genres).
@@ -86,7 +268,7 @@ Erzeuge ein JSON-Objekt mit GENAU diesen Schlüsseln. Befülle jeden Wert mit de
 
 - "title": Verbesserter, konkreter Titel des Themas/Tools/Projekts (max 70 Zeichen). null, wenn der vorhandene Titel bereits gut ist.
 - "summary": 2-4 vollständige, eigene Sätze, die konkret beschreiben, worum es geht, was es kann/macht und für wen es nützlich ist. Bezieh dich auf konkrete Inhalte, keine Floskeln.
-- "tags": 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen). Kleingeschrieben, nur Buchstaben/Zahlen/Bindestriche.
+- "tags": IMMER 3-6 echte thematische Schlagwörter (Technologien, Konzepte, Domänen), niemals leer — notfalls aus Titel/Kontext ableiten. Kleingeschrieben, Wörter mit Bindestrich verbinden (z.B. "open-source"), nur Buchstaben/Zahlen/Bindestriche.
 - "lang": ISO-639-1-Sprachcode des Hauptinhalts (z.B. "de", "en").$tagHint
 
 Beispiel für das FORMAT (Inhalt ignorieren, nur Struktur):
@@ -117,35 +299,18 @@ Regeln:
     };
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 30));
 
     // Bei Rate-Limit (429) einmal nach kurzer Pause wiederholen
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 30));
     }
 
-    if (res.statusCode != 200) {
-      String errMsg;
-      if (res.statusCode == 429) {
-        errMsg = 'Rate-Limit des Free-Modells erreicht. Warte kurz oder wähle ein anderes Modell in den Einstellungen.';
-      } else if (res.statusCode == 404) {
-        errMsg = 'Modell "$model" nicht gefunden. Bitte in den Einstellungen ein verfügbares Modell auswählen.';
-      } else {
-        try {
-          final errJson = jsonDecode(res.body) as Map<String, dynamic>;
-          errMsg = (errJson['error']?['message'] as String?) ??
-              errJson['error']?.toString() ??
-              res.body.substring(0, res.body.length.clamp(0, 200));
-        } catch (_) {
-          errMsg = res.body.substring(0, res.body.length.clamp(0, 200));
-        }
-      }
-      throw Exception('OpenRouter ${res.statusCode}: $errMsg');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -323,17 +488,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     });
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 90));
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 90));
     }
-    if (res.statusCode != 200) {
-      throw Exception('OpenRouter ${res.statusCode}');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -423,17 +586,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     });
 
     var res = await http
-        .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
         .timeout(const Duration(seconds: 90));
     if (res.statusCode == 429) {
       await Future.delayed(const Duration(seconds: 6));
       res = await http
-          .post(Uri.parse(_endpoint), headers: reqHeaders, body: reqBody)
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
           .timeout(const Duration(seconds: 90));
     }
-    if (res.statusCode != 200) {
-      throw Exception('OpenRouter ${res.statusCode}');
-    }
+    _checkStatus(res);
 
     final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
         as Map<String, dynamic>;
@@ -499,7 +660,7 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
   Future<void> testConnection() async {
     final res = await http
         .post(
-          Uri.parse(_endpoint),
+          Uri.parse(chatUrl),
           headers: {
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json',
@@ -535,12 +696,15 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     }
   }
 
-  /// Holt verfügbare Modelle von OpenRouter
-  static Future<List<Map<String, dynamic>>> getModels(String apiKey) async {
+  /// Holt verfügbare Modelle vom (OpenAI-kompatiblen) Endpoint.
+  static Future<List<Map<String, dynamic>>> getModels(String apiKey,
+      {String modelsUrl = 'https://openrouter.ai/api/v1/models'}) async {
     final res = await http
         .get(
-          Uri.parse('https://openrouter.ai/api/v1/models'),
-          headers: {'Authorization': 'Bearer $apiKey'},
+          Uri.parse(modelsUrl),
+          headers: {
+            if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+          },
         )
         .timeout(const Duration(seconds: 10));
 

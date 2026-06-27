@@ -334,6 +334,140 @@ class UrlMetadataService {
     }
   }
 
+  /// Sucht ein Werk per **Titel** auf AniList (für die Bild-/Vision-Erkennung).
+  /// [kind] = 'anime' | 'manga'. Liefert echte Metadaten + Cover oder null.
+  static Future<UrlMetadata?> searchAniList(String query,
+      {String kind = 'anime'}) async {
+    if (query.trim().isEmpty) return null;
+    final type = kind.toLowerCase() == 'manga' ? 'MANGA' : 'ANIME';
+    const gql = r'''
+      query ($q: String, $type: MediaType) {
+        Media(search: $q, type: $type, sort: SEARCH_MATCH) {
+          title { romaji english }
+          description(asHtml: false)
+          coverImage { extraLarge large }
+          genres averageScore type format episodes chapters
+          startDate { year }
+          studios(isMain: true) { nodes { name } }
+        }
+      }''';
+    try {
+      final res = await http
+          .post(Uri.parse('https://graphql.anilist.co'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              },
+              body: jsonEncode({
+                'query': gql,
+                'variables': {'q': query.trim(), 'type': type},
+              }))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final media = jsonDecode(_decodeBody(res))['data']?['Media'];
+      if (media == null) return null;
+
+      final t = media['title'] as Map<String, dynamic>?;
+      final title = (t?['english'] as String?)?.isNotEmpty == true
+          ? t!['english'] as String
+          : (t?['romaji'] as String?) ?? query.trim();
+      final desc = ((media['description'] as String?) ?? '')
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#039;', "'")
+          .trim();
+      final cover = media['coverImage'] as Map<String, dynamic>?;
+      final studioNodes = media['studios']?['nodes'] as List?;
+      return UrlMetadata(
+        title: title,
+        description: desc,
+        image: (cover?['extraLarge'] as String?) ?? (cover?['large'] as String?),
+        domain: 'anilist.co',
+        genres: (media['genres'] as List?)?.map((g) => '$g').toList() ?? [],
+        score: media['averageScore'] as int?,
+        mediaType: media['type'] as String?,
+        anilistFormat: media['format'] as String?,
+        anilistEpisodes: media['episodes'] as int?,
+        anilistChapters: media['chapters'] as int?,
+        anilistYear: (media['startDate'] as Map?)?['year'] as int?,
+        anilistStudio: studioNodes?.isNotEmpty == true
+            ? (studioNodes!.first as Map)['name'] as String?
+            : null,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sucht per **Titel** das passende YouTube-Video (Data API) und liefert
+  /// dessen echte Metadaten (Thumbnail, Kanal, Beschreibung …). Braucht einen
+  /// YouTube-Data-API-Key. So wird die Bild-Erkennung auf das reale Video
+  /// geerdet statt zu halluzinieren.
+  static Future<UrlMetadata?> searchYoutube(String query, String apiKey,
+      {List<String>? trace}) async {
+    if (apiKey.isEmpty || query.trim().isEmpty) return null;
+    // Marketing-Klammerzusätze entfernen → bessere Treffer.
+    final q = query.replaceAll(RegExp(r'\([^)]*\)'), '').trim();
+    try {
+      final uri = Uri.parse(
+          'https://www.googleapis.com/youtube/v3/search'
+          '?part=snippet&type=video&maxResults=1'
+          '&q=${Uri.encodeQueryComponent(q.isEmpty ? query.trim() : q)}&key=$apiKey');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) {
+        String reason = 'HTTP ${res.statusCode}';
+        try {
+          final err = (jsonDecode(res.body)['error']) as Map?;
+          final r = (err?['errors'] as List?)?.isNotEmpty == true
+              ? (err!['errors'] as List).first['reason']
+              : null;
+          reason = '$reason ${r ?? err?['message'] ?? ''}'.trim();
+        } catch (_) {}
+        trace?.add('  ⚠︎ YouTube-API: $reason');
+        return null;
+      }
+      final items = jsonDecode(res.body)['items'] as List?;
+      if (items == null || items.isEmpty) {
+        trace?.add('  ⚠︎ YouTube-API: 0 Suchergebnisse');
+        return null;
+      }
+      final idObj = (items.first as Map)['id'];
+      final id = idObj is Map ? idObj['videoId'] as String? : null;
+      if (id == null) return null;
+      // Volle Metadaten über den bestehenden Data-API-Pfad.
+      return YoutubeApiSource.fetch(id, apiKey);
+    } catch (e) {
+      trace?.add('  ⚠︎ YouTube-Suche-Fehler: $e');
+      return null;
+    }
+  }
+
+  /// Testet einen YouTube-Data-API-Key mit einem günstigen Aufruf (videos.list,
+  /// 1 Quota-Einheit). Liefert `null` bei Erfolg, sonst den Fehlergrund
+  /// (z.B. "API_KEY_INVALID", "accessNotConfigured", "ipRefererBlocked").
+  static Future<String?> testYoutubeKey(String key) async {
+    if (key.trim().isEmpty) return 'Kein Key eingegeben.';
+    try {
+      final uri = Uri.parse(
+          'https://www.googleapis.com/youtube/v3/videos'
+          '?part=id&id=dQw4w9WgXcQ&key=${key.trim()}');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return null;
+      String reason = 'HTTP ${res.statusCode}';
+      try {
+        final err = jsonDecode(res.body)['error'] as Map?;
+        final r = (err?['errors'] as List?)?.isNotEmpty == true
+            ? (err!['errors'] as List).first['reason']
+            : null;
+        reason = '${r ?? err?['message'] ?? reason}';
+      } catch (_) {}
+      return reason;
+    } catch (e) {
+      return '$e';
+    }
+  }
+
   // ─── Staffel-Kette traversieren ────────────────────────────────────────────
 
   static Future<int?> _fetchDirectRelationId(
