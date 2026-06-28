@@ -19,6 +19,7 @@ import '../../data/repositories/entry_repository.dart';
 import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/ai/ai_service.dart';
+import '../../services/ai/structure_template.dart';
 import '../../services/ai/llm_profile.dart';
 import '../../services/ai/llm_profiles_store.dart';
 import '../../services/app_settings.dart';
@@ -411,7 +412,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
             ref,
             LlmTask.structuredNote,
             (svc) => svc.generateStructuredNote(detailContent,
-                existingTitle: title, sourceUrl: srcUrl));
+                existingTitle: title,
+                sourceUrl: srcUrl,
+                templates: AppSettings.loadStructureTemplates(),
+                forcedType: opts.forcedType));
         if (structured != null && structured.trim().isNotEmpty) {
           final cur = (await ref.read(entryRepositoryProvider).getById(entryId))
                   ?.entry.body ?? '';
@@ -565,6 +569,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
           sourceUrl: url,
           knownDescription: descProp?.value,
           searchContext: context,
+          structure: AppSettings.getResearchStructure(),
         ),
       );
       if (note == null || note.trim().isEmpty) {
@@ -2001,12 +2006,16 @@ class _EnrichOptions {
   final bool enrichDetailedSummary;
   final bool enrichBody;
 
+  /// Erzwungener Struktur-Typ für die „strukturierte Notiz" (null = Auto).
+  final String? forcedType;
+
   const _EnrichOptions({
     required this.enrichTitle,
     required this.enrichTags,
     required this.enrichSummary,
     required this.enrichDetailedSummary,
     required this.enrichBody,
+    this.forcedType,
   });
 }
 
@@ -2024,6 +2033,11 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
   bool _detailedSummary = true;
   bool _body = true;
 
+  // null = Auto-Erkennung (Default); sonst Name einer Struktur-Vorlage.
+  String? _forcedType;
+  late final List<StructureTemplate> _templates =
+      AppSettings.loadStructureTemplates();
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -2032,6 +2046,7 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
           style: TextStyle(color: MFColors.textPrimary, fontSize: 15)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Welche Felder soll die KI bearbeiten?',
@@ -2042,6 +2057,7 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
           _CheckTile('Titel verbessern', _title, (v) => setState(() => _title = v!)),
           _CheckTile('Kurz-Zusammenfassung (1-2 Sätze)', _summary, (v) => setState(() => _summary = v!)),
           _CheckTile('Strukturierte Notiz erstellen (typ-erkennend, in den Text)', _detailedSummary, (v) => setState(() => _detailedSummary = v!)),
+          if (_detailedSummary) _buildTypeDropdown(),
           _CheckTile('Text des Eintrags einbeziehen', _body, (v) => setState(() => _body = v!)),
         ],
       ),
@@ -2060,6 +2076,7 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
                       enrichSummary: _summary,
                       enrichDetailedSummary: _detailedSummary,
                       enrichBody: _body,
+                      forcedType: _detailedSummary ? _forcedType : null,
                     ),
                   )
               : null,
@@ -2070,6 +2087,41 @@ class _EnrichOptionsDialogState extends State<_EnrichOptionsDialog> {
       ],
     );
   }
+
+  Widget _buildTypeDropdown() => Padding(
+        padding: const EdgeInsets.only(left: 38, top: 2, bottom: 4, right: 4),
+        child: Row(
+          children: [
+            const Text('Struktur-Typ:',
+                style: TextStyle(fontSize: 12, color: MFColors.textSecondary)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButton<String?>(
+                value: _forcedType,
+                isExpanded: true,
+                isDense: true,
+                dropdownColor: MFColors.surface,
+                underline: const SizedBox.shrink(),
+                style: const TextStyle(
+                    fontSize: 13, color: MFColors.textPrimary),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Automatisch erkennen'),
+                  ),
+                  for (final t in _templates)
+                    DropdownMenuItem<String?>(
+                      value: t.name,
+                      child: Text(t.name,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _forcedType = v),
+              ),
+            ),
+          ],
+        ),
+      );
 }
 
 class _CheckTile extends StatelessWidget {

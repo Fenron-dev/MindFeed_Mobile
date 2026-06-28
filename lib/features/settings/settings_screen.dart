@@ -14,6 +14,7 @@ import '../../core/vault_manager.dart';
 import '../../domain/prop_type.dart';
 import '../../main.dart' show onRestartApp;
 import '../../services/app_settings.dart';
+import '../../services/ai/structure_template.dart';
 import '../../services/enrichment/api_field_catalog.dart';
 import '../../services/enrichment/api_field_prefs.dart';
 import '../../services/enrichment/api_keys.dart';
@@ -882,6 +883,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionHeader('PROPERTY-TEMPLATES'),
           const SizedBox(height: 8),
           _TemplatesSection(),
+
+          // ─── KI-Struktur-Vorlagen (#38) ───────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionHeader('KI-STRUKTUR-VORLAGEN'),
+          const SizedBox(height: 8),
+          _StructureTemplatesSection(),
 
           // ─── Info-APIs ────────────────────────────────────────────────────
           const SizedBox(height: 28),
@@ -1787,6 +1794,476 @@ class _TemplateEditSheetState extends State<_TemplateEditSheet> {
         ],         // äußere Column-children Ende
       ),           // äußere Column Ende
     );             // Container Ende
+  }
+}
+
+// ─── KI-Struktur-Vorlagen (#38) ──────────────────────────────────────────────
+
+/// Zeigt die editierbaren Typ-Gerüste der „strukturierten Notiz" und die
+/// Struktur der „recherchierten Notiz" — Add/Edit/Delete + Reset.
+class _StructureTemplatesSection extends ConsumerWidget {
+  const _StructureTemplatesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final templates = ref.watch(structureTemplatesProvider);
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text(
+        'Die KI erkennt beim „strukturierte Notiz erstellen" automatisch den Typ '
+        'und formatiert nach dem passenden Gerüst. Hier kannst du diese Gerüste '
+        'ansehen und anpassen.',
+        style: TextStyle(fontSize: 11, color: MFColors.textMuted),
+      ),
+      const SizedBox(height: 10),
+      ...templates.map((t) => Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: ListTile(
+              title: Text(t.name,
+                  style: const TextStyle(
+                      fontSize: 13, color: MFColors.textPrimary)),
+              subtitle: Text(
+                t.hint.isEmpty ? '${_sectionCount(t.skeleton)} Abschnitte'
+                    : '${t.hint} · ${_sectionCount(t.skeleton)} Abschnitte',
+                style: const TextStyle(fontSize: 11, color: MFColors.textMuted),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined,
+                      size: 16, color: MFColors.textSecondary),
+                  onPressed: () => _edit(context, ref, t),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline,
+                      size: 16, color: Colors.redAccent),
+                  onPressed: () => _delete(ref, t.id),
+                ),
+              ]),
+            ),
+          )),
+      const SizedBox(height: 4),
+      GestureDetector(
+        onTap: () => _add(context, ref),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: MFColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: MFColors.border),
+          ),
+          child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add, size: 16, color: MFColors.teal),
+                SizedBox(width: 6),
+                Text('Typ hinzufügen',
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: MFColors.teal,
+                        fontWeight: FontWeight.w500)),
+              ]),
+        ),
+      ),
+      const SizedBox(height: 8),
+      Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          onPressed: () => _resetTemplates(ref),
+          icon: const Icon(Icons.restart_alt, size: 14, color: MFColors.textMuted),
+          label: const Text('Auf Standard zurücksetzen',
+              style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+        ),
+      ),
+
+      // ── Recherchierte Notiz ──────────────────────────────────────────────
+      const SizedBox(height: 14),
+      const Text('Recherchierte Notiz',
+          style: TextStyle(
+              fontSize: 12,
+              color: MFColors.textSecondary,
+              fontWeight: FontWeight.w600)),
+      const SizedBox(height: 4),
+      const Text(
+        'Struktur für die KI-Web-Recherche (Beschreibung, Alternativen, FAQ …).',
+        style: TextStyle(fontSize: 11, color: MFColors.textMuted),
+      ),
+      const SizedBox(height: 8),
+      Container(
+        decoration: BoxDecoration(
+          color: MFColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: MFColors.border),
+        ),
+        child: ListTile(
+          title: const Text('Struktur bearbeiten',
+              style: TextStyle(fontSize: 13, color: MFColors.textPrimary)),
+          trailing: const Icon(Icons.edit_outlined,
+              size: 16, color: MFColors.textSecondary),
+          onTap: () => _editResearch(context, ref),
+        ),
+      ),
+    ]);
+  }
+
+  static int _sectionCount(String skeleton) =>
+      RegExp(r'^##\s', multiLine: true).allMatches(skeleton).length;
+
+  void _delete(WidgetRef ref, String id) {
+    final updated =
+        ref.read(structureTemplatesProvider).where((t) => t.id != id).toList();
+    ref.read(structureTemplatesProvider.notifier).state = updated;
+    AppSettings.saveStructureTemplates(updated);
+  }
+
+  Future<void> _resetTemplates(WidgetRef ref) async {
+    await AppSettings.resetStructureTemplates();
+    ref.read(structureTemplatesProvider.notifier).state =
+        StructureTemplate.defaults;
+  }
+
+  Future<void> _add(BuildContext ctx, WidgetRef ref) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _StructureTemplateEditSheet(
+        onSave: (t) {
+          final updated = [...ref.read(structureTemplatesProvider), t];
+          ref.read(structureTemplatesProvider.notifier).state = updated;
+          AppSettings.saveStructureTemplates(updated);
+        },
+      ),
+    );
+  }
+
+  Future<void> _edit(
+      BuildContext ctx, WidgetRef ref, StructureTemplate template) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _StructureTemplateEditSheet(
+        existing: template,
+        onSave: (t) {
+          final updated = ref
+              .read(structureTemplatesProvider)
+              .map((x) => x.id == t.id ? t : x)
+              .toList();
+          ref.read(structureTemplatesProvider.notifier).state = updated;
+          AppSettings.saveStructureTemplates(updated);
+        },
+      ),
+    );
+  }
+
+  Future<void> _editResearch(BuildContext ctx, WidgetRef ref) async {
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ResearchStructureEditSheet(
+        initial: ref.read(researchStructureProvider),
+        onSave: (text) {
+          ref.read(researchStructureProvider.notifier).state = text.trim().isEmpty
+              ? StructureTemplate.defaultResearchStructure
+              : text;
+          AppSettings.saveResearchStructure(text);
+        },
+        onReset: () {
+          AppSettings.resetResearchStructure();
+          ref.read(researchStructureProvider.notifier).state =
+              StructureTemplate.defaultResearchStructure;
+        },
+      ),
+    );
+  }
+}
+
+/// Bottom-Sheet zum Bearbeiten einer Struktur-Vorlage (Name + Hinweis + Gerüst).
+class _StructureTemplateEditSheet extends StatefulWidget {
+  final StructureTemplate? existing;
+  final ValueChanged<StructureTemplate> onSave;
+  const _StructureTemplateEditSheet({this.existing, required this.onSave});
+
+  @override
+  State<_StructureTemplateEditSheet> createState() =>
+      _StructureTemplateEditSheetState();
+}
+
+class _StructureTemplateEditSheetState
+    extends State<_StructureTemplateEditSheet> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _hintCtrl;
+  late final TextEditingController _skeletonCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.existing;
+    _nameCtrl = TextEditingController(text: t?.name ?? '');
+    _hintCtrl = TextEditingController(text: t?.hint ?? '');
+    _skeletonCtrl = TextEditingController(text: t?.skeleton ?? '## ');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _hintCtrl.dispose();
+    _skeletonCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return;
+    final id = widget.existing?.id ??
+        'st-${DateTime.now().millisecondsSinceEpoch}';
+    widget.onSave(StructureTemplate(
+      id: id,
+      name: name,
+      hint: _hintCtrl.text.trim(),
+      skeleton: _skeletonCtrl.text.trim(),
+    ));
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.92;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      constraints: BoxConstraints(maxHeight: maxH),
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(
+                child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                  color: MFColors.border,
+                  borderRadius: BorderRadius.circular(99)),
+            )),
+            Text(widget.existing != null ? 'Typ bearbeiten' : 'Neuer Typ',
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: MFColors.textPrimary)),
+          ]),
+        ),
+        Flexible(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + bottom),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              TextField(
+                controller: _nameCtrl,
+                autofocus: widget.existing == null,
+                textCapitalization: TextCapitalization.characters,
+                style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+                decoration: const InputDecoration(
+                  labelText: 'Typname (z.B. REZEPT, TUTORIAL)',
+                  labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _hintCtrl,
+                style: const TextStyle(color: MFColors.textPrimary, fontSize: 14),
+                decoration: const InputDecoration(
+                  labelText: 'Erkennungs-Hinweis (z.B. Koch-/Backvideo)',
+                  helperText: 'Hilft der KI, diesen Typ zu erkennen.',
+                  helperStyle: TextStyle(color: MFColors.textMuted, fontSize: 10),
+                  labelStyle: TextStyle(color: MFColors.textMuted, fontSize: 12),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.border)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: MFColors.teal)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Gerüst (Markdown-Überschriften ##)',
+                  style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(
+                  color: MFColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: MFColors.border),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: TextField(
+                  controller: _skeletonCtrl,
+                  maxLines: null,
+                  minLines: 8,
+                  style: const TextStyle(
+                      color: MFColors.textPrimary,
+                      fontSize: 13,
+                      height: 1.4,
+                      fontFamily: 'monospace'),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: '## Überblick\n## Details\n…',
+                    hintStyle: TextStyle(color: MFColors.textMuted, fontSize: 13),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _save,
+                  style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+                  child: const Text('Speichern',
+                      style: TextStyle(
+                          color: MFColors.bg, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Bottom-Sheet zum Bearbeiten der Recherche-Struktur (ein großes Textfeld).
+class _ResearchStructureEditSheet extends StatefulWidget {
+  final String initial;
+  final ValueChanged<String> onSave;
+  final VoidCallback onReset;
+  const _ResearchStructureEditSheet({
+    required this.initial,
+    required this.onSave,
+    required this.onReset,
+  });
+
+  @override
+  State<_ResearchStructureEditSheet> createState() =>
+      _ResearchStructureEditSheetState();
+}
+
+class _ResearchStructureEditSheetState
+    extends State<_ResearchStructureEditSheet> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.92;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: MFColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      constraints: BoxConstraints(maxHeight: maxH),
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(
+                child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                  color: MFColors.border,
+                  borderRadius: BorderRadius.circular(99)),
+            )),
+            const Text('Recherche-Struktur',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: MFColors.textPrimary)),
+          ]),
+        ),
+        Flexible(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + bottom),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text(
+                  'Die Abschnitte, nach denen die recherchierte Notiz aufgebaut wird. '
+                  'Markdown-Überschriften (##) mit optionalen Hinweisen in Klammern.',
+                  style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  color: MFColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: MFColors.border),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: TextField(
+                  controller: _ctrl,
+                  maxLines: null,
+                  minLines: 12,
+                  autofocus: true,
+                  style: const TextStyle(
+                      color: MFColors.textPrimary,
+                      fontSize: 13,
+                      height: 1.4,
+                      fontFamily: 'monospace'),
+                  decoration: const InputDecoration(border: InputBorder.none),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                TextButton.icon(
+                  onPressed: () {
+                    widget.onReset();
+                    Navigator.pop(context);
+                  },
+                  icon: const Icon(Icons.restart_alt,
+                      size: 14, color: MFColors.textMuted),
+                  label: const Text('Standard',
+                      style: TextStyle(fontSize: 11, color: MFColors.textMuted)),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () {
+                    widget.onSave(_ctrl.text);
+                    Navigator.pop(context);
+                  },
+                  style: FilledButton.styleFrom(backgroundColor: MFColors.teal),
+                  child: const Text('Speichern',
+                      style: TextStyle(
+                          color: MFColors.bg, fontWeight: FontWeight.bold)),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ]),
+    );
   }
 }
 
