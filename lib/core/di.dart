@@ -9,6 +9,7 @@ import '../data/db/daos/change_log_dao.dart';
 import '../data/repositories/entry_repository.dart';
 import '../domain/feed_filter.dart';
 import '../services/app_settings.dart';
+import '../services/ai/structure_template.dart';
 // Sync providers are declared in sync/sync_provider.dart and imported where needed.
 // Registering them here would create a circular dependency.
 
@@ -59,6 +60,15 @@ final tagStyleProvider =
 
 final templatesProvider =
     StateProvider<List<PropTemplate>>((ref) => AppSettings.loadTemplates());
+
+/// KI-Struktur-Vorlagen der „strukturierten Notiz" (#38, reaktiv).
+final structureTemplatesProvider =
+    StateProvider<List<StructureTemplate>>(
+        (ref) => AppSettings.loadStructureTemplates());
+
+/// Editierbare Struktur der „recherchierten Notiz" (#38, reaktiv).
+final researchStructureProvider =
+    StateProvider<String>((ref) => AppSettings.getResearchStructure());
 
 /// Toggle: Aufgaben-Sektion in Notiz-Details anzeigen (reaktiv).
 final showTasksInNotesProvider =

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'ai/structure_template.dart';
 
 class AiEnrichment {
   final List<String> tags;
@@ -381,6 +382,80 @@ Regeln:
     return markers.any(t.contains);
   }
 
+  /// Baut den Prompt der „strukturierten Notiz" aus editierbaren [templates]
+  /// (#38). Feste Präambel/Regeln/Schluss bleiben hier; nur SCHRITT 1
+  /// (Typliste) und SCHRITT 2 (Gerüste) kommen aus den Vorlagen.
+  ///
+  /// Ist [forcedType] gesetzt und passt zu einer Vorlage, wird die
+  /// Typ-Erkennung übersprungen und direkt deren Gerüst erzwungen.
+  /// Statisch + ohne Netzwerk → unit-testbar.
+  static String buildStructuredNotePrompt({
+    required String body,
+    required String metaLines,
+    required List<StructureTemplate> templates,
+    String? forcedType,
+  }) {
+    const intro =
+        'Du bist ein Notiz-Assistent für ein persönliches Wissenssystem. Aus dem INHALT (z.B. einem Video-Transkript, Artikel oder Doku) erstellst du eine strukturierte, sachliche Notiz in deutschem Markdown.';
+    const rules =
+        'Allgemeine Regeln: sachlich und konkret zum INHALT, keine Emojis, keine Marketing-Sprache, keine Quellen-Hinweise wie [web:1]. Zitate nur 3-5 wirklich prägnante, als Blockquote mit Zeitstempel falls vorhanden. Verwende echte Markdown-Überschriften (##), Listen und Tabellen.';
+    const summaryLine =
+        'Beginne IMMER mit einer 2-4-Sätze-Zusammenfassung (ohne Überschrift), dann folgt das Gerüst:';
+    const closing =
+        'Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.';
+
+    final header = '$intro\n\n'
+        '${metaLines.isEmpty ? '' : '$metaLines\n'}INHALT:\n$body';
+
+    final forced = StructureTemplate.byName(templates, forcedType);
+
+    final String middle;
+    if (forced != null) {
+      middle = 'Strukturiere den INHALT als Typ ${forced.name} (nur sinnvolle '
+          'Abschnitte; leere weglassen). $rules\n\n'
+          '$summaryLine\n\n'
+          '${forced.name}:\n${forced.skeleton.trim()}';
+    } else {
+      middle = 'SCHRITT 1 — TYP ERKENNEN. Bestimme genau einen Typ:\n'
+          '${StructureTemplate.typeListLine(templates)}.\n\n'
+          'SCHRITT 2 — NOTIZ SCHREIBEN nach dem zum Typ passenden Gerüst (nur '
+          'sinnvolle Abschnitte; leere weglassen). $rules\n\n'
+          '$summaryLine\n\n'
+          '${StructureTemplate.skeletonBlock(templates)}';
+    }
+
+    return '$header\n\n$middle\n\n$closing';
+  }
+
+  /// Baut den Prompt der „recherchierten Notiz" mit editierbarer
+  /// [structure]-Sektion (#38). Regeln/Meta/Recherche-Scaffold bleiben fest.
+  static String buildResearchedNotePrompt({
+    required String meta,
+    required String research,
+    required String structure,
+  }) {
+    return '''Du erstellst eine sachliche, gut strukturierte deutsche Markdown-Notiz zu einem Link/Thema für ein persönliches Wissenssystem (Obsidian-kompatibel).
+
+$meta
+
+WEB-RECHERCHE (nummerierte Treffer — NUR diese und allgemein bekannten Kontext als Quelle verwenden; keine URLs erfinden):
+${research.isEmpty ? '(keine Recherche-Treffer verfügbar)' : research}
+
+REGELN:
+- Sachlich, neutral, präzise. Keine Marketing-Sprache, keine Emojis.
+- Keine Referenz-Hinweise wie [web:1] o.ä.
+- Echte Markdown-Überschriften (##), Listen und Tabellen.
+- Optionale Abschnitte nur, wenn inhaltlich sinnvoll; sonst weglassen.
+- Links als Markdown: [Name](https://…). Nur URLs aus der Recherche oder der Quelle verwenden.
+- KEIN YAML-Frontmatter ausgeben (Metadaten verwaltet das System separat).
+
+STRUKTUR (passende Abschnitte wählen):
+Beginne mit 2-4 Sätzen Zusammenfassung (ohne Überschrift), dann:
+$structure
+
+Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
+  }
+
   /// Erstellt aus dem (vollständigen) INHALT eine strukturierte Markdown-Notiz.
   /// Das Modell erkennt selbst den Typ (Tutorial/News/Review/Interview/
   /// Entertainment/Rezept bzw. generisch für Artikel/Tool) und nutzt das
@@ -391,7 +466,10 @@ Regeln:
   /// Summary gedacht) gekürzt, sondern ein großzügiges Limit genutzt, damit
   /// das komplette Transkript ausgewertet wird.
   Future<String?> generateStructuredNote(String content,
-      {String? existingTitle, String? sourceUrl}) async {
+      {String? existingTitle,
+      String? sourceUrl,
+      List<StructureTemplate>? templates,
+      String? forcedType}) async {
     // Großzügiges Eingabelimit: mindestens 16k, höchstens 48k Zeichen.
     final cap = maxInputChars > 16000
         ? (maxInputChars > 48000 ? 48000 : maxInputChars)
@@ -406,70 +484,12 @@ Regeln:
       if (sourceUrl?.isNotEmpty == true) 'Quelle: $sourceUrl',
     ].join('\n');
 
-    final prompt =
-        '''Du bist ein Notiz-Assistent für ein persönliches Wissenssystem. Aus dem INHALT (z.B. einem Video-Transkript, Artikel oder Doku) erstellst du eine strukturierte, sachliche Notiz in deutschem Markdown.
-
-${metaLines.isEmpty ? '' : '$metaLines\n'}INHALT:
-$body
-
-SCHRITT 1 — TYP ERKENNEN. Bestimme genau einen Typ:
-TUTORIAL (Anleitung/How-To/Erklärung), NEWS (News/Roundup/Liste), REVIEW (Test/Vergleich), INTERVIEW (Gespräch/Podcast), ENTERTAINMENT (Let's Play/Reaction), REZEPT (Koch-/Backvideo), oder GENERISCH (Artikel/Tool/sonstiges).
-
-SCHRITT 2 — NOTIZ SCHREIBEN nach dem zum Typ passenden Gerüst (nur sinnvolle Abschnitte; leere weglassen). Allgemeine Regeln: sachlich und konkret zum INHALT, keine Emojis, keine Marketing-Sprache, keine Quellen-Hinweise wie [web:1]. Zitate nur 3-5 wirklich prägnante, als Blockquote mit Zeitstempel falls vorhanden. Verwende echte Markdown-Überschriften (##), Listen und Tabellen.
-
-Beginne IMMER mit einer 2-4-Sätze-Zusammenfassung (ohne Überschrift), dann folgt das Gerüst:
-
-TUTORIAL:
-## Überblick
-## Voraussetzungen
-## Schritt-für-Schritt
-## Wichtige Aussagen
-## Hinweise & Risiken
-## Weiterführende Ressourcen
-
-NEWS:
-## Überblick
-## Themen & Neuigkeiten  (je Thema ### mit Zeitstempel + 3-6 Sätze)
-## Fazit
-## Weiterführende Ressourcen
-
-REVIEW:
-## Überblick
-## Getestetes / Verglichenes
-## Stärken
-## Schwächen
-## Fazit
-## Alternativen
-
-INTERVIEW:
-## Überblick
-## Personen
-## Besprochene Themen  (je Thema ### + Zusammenfassung)
-## Wichtige Aussagen
-## Kernaussagen & Erkenntnisse
-
-ENTERTAINMENT:
-## Überblick
-## Inhalt & Verlauf
-## Besondere Momente
-## Medieninfo
-
-REZEPT:
-## Überblick
-## Rahmendaten  (Markdown-Tabelle: Portionen, Zubereitungszeit, Kochzeit, Schwierigkeitsgrad, Küche)
-## Zutaten  (gruppiert, mit Mengen)
-## Zubereitung  (nummerierte Schritte, Zeitstempel falls vorhanden)
-## Tipps & Tricks
-## Wichtige Aussagen
-## Varianten & Alternativen
-
-GENERISCH:
-## Überblick
-## Wichtigste Inhalte  (Stichpunkte)
-## Details
-## Weiterführende Ressourcen
-
-Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
+    final prompt = buildStructuredNotePrompt(
+      body: body,
+      metaLines: metaLines,
+      templates: templates ?? StructureTemplate.defaults,
+      forcedType: forcedType,
+    );
 
     final needed = maxTokens < 2500 ? 2500 : maxTokens;
     final reqHeaders = {
@@ -524,6 +544,7 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
     String? sourceUrl,
     String? knownDescription,
     String searchContext = '',
+    String? structure,
   }) async {
     final research = searchContext.trim().length > 9000
         ? searchContext.trim().substring(0, 9000)
@@ -536,38 +557,13 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
       if (desc.isNotEmpty) 'Bekannte Beschreibung: ${desc.length > 1200 ? desc.substring(0, 1200) : desc}',
     ].join('\n');
 
-    final prompt =
-        '''Du erstellst eine sachliche, gut strukturierte deutsche Markdown-Notiz zu einem Link/Thema für ein persönliches Wissenssystem (Obsidian-kompatibel).
-
-$meta
-
-WEB-RECHERCHE (nummerierte Treffer — NUR diese und allgemein bekannten Kontext als Quelle verwenden; keine URLs erfinden):
-${research.isEmpty ? '(keine Recherche-Treffer verfügbar)' : research}
-
-REGELN:
-- Sachlich, neutral, präzise. Keine Marketing-Sprache, keine Emojis.
-- Keine Referenz-Hinweise wie [web:1] o.ä.
-- Echte Markdown-Überschriften (##), Listen und Tabellen.
-- Optionale Abschnitte nur, wenn inhaltlich sinnvoll; sonst weglassen.
-- Links als Markdown: [Name](https://…). Nur URLs aus der Recherche oder der Quelle verwenden.
-- KEIN YAML-Frontmatter ausgeben (Metadaten verwaltet das System separat).
-
-STRUKTUR (passende Abschnitte wählen):
-Beginne mit 2-4 Sätzen Zusammenfassung (ohne Überschrift), dann:
-## Beschreibung
-(10-30 Sätze: worum geht es, was kann/macht es, was hebt es hervor. Bei Medien: spoilerfreie Inhaltsangabe.)
-## Systemvoraussetzungen   (nur bei Software, wenn sinnvoll)
-## Installation             (nur bei Software, wenn sinnvoll)
-## Mögliche Risiken         (nur wenn relevant)
-## Mögliche Alternativen
-(3-10 Alternativen als Markdown-Tabelle: Name als Link, kurze Beschreibung, ggf. Preis in Euro / Vor- & Nachteile.)
-## Referenzen & weiterführende Informationen
-(Nummerierte Liste: **Titel** in Fett, darunter kurze Beschreibung und Link.)
-## Video & Audio            (passende YouTube-/Podcast-Treffer, falls vorhanden, max 10)
-## FAQ                       (häufige Fragen, nummeriert: **Frage** + Antwort darunter)
-## Begriffe                  (nur falls Fachbegriffe erklärt werden müssen)
-
-Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
+    final prompt = buildResearchedNotePrompt(
+      meta: meta,
+      research: research,
+      structure: (structure == null || structure.trim().isEmpty)
+          ? StructureTemplate.defaultResearchStructure
+          : structure,
+    );
 
     final needed = maxTokens < 2500 ? 2500 : maxTokens;
     final reqHeaders = {

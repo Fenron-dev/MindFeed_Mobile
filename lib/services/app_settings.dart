@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../domain/prop_type.dart';
 import '../domain/feed_filter.dart';
+import 'ai/structure_template.dart';
 import 'enrichment/api_field_prefs.dart';
 
 // ─── Sync-Einstellungen ───────────────────────────────────────────────────────
@@ -503,6 +504,56 @@ class AppSettings {
     );
   }
 
+  // ── KI-Struktur-Vorlagen (#38) ──────────────────────────────────────────────
+
+  /// Editierbare Typ-Gerüste der „strukturierten Notiz". Fallback = Defaults
+  /// (= bisheriges, fest verdrahtetes Verhalten).
+  static List<StructureTemplate> loadStructureTemplates() {
+    final raw = _prefs?.getStringList('ai_structure_templates');
+    if (raw == null || raw.isEmpty) return StructureTemplate.defaults;
+    try {
+      return raw
+          .map((s) =>
+              StructureTemplate.fromJson(jsonDecode(s) as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return StructureTemplate.defaults;
+    }
+  }
+
+  static Future<void> saveStructureTemplates(
+      List<StructureTemplate> templates) async {
+    await _prefs!.setStringList(
+      'ai_structure_templates',
+      templates.map((t) => jsonEncode(t.toJson())).toList(),
+    );
+  }
+
+  /// Auf Auslieferungs-Defaults zurücksetzen (entfernt die Speicherung).
+  static Future<void> resetStructureTemplates() async {
+    await _prefs?.remove('ai_structure_templates');
+  }
+
+  /// Editierbare Struktur der „recherchierten Notiz". Fallback = Default.
+  static String getResearchStructure() {
+    final v = _prefs?.getString('ai_research_structure');
+    return (v == null || v.trim().isEmpty)
+        ? StructureTemplate.defaultResearchStructure
+        : v;
+  }
+
+  static Future<void> saveResearchStructure(String text) async {
+    if (text.trim().isEmpty) {
+      await _prefs?.remove('ai_research_structure');
+    } else {
+      await _prefs?.setString('ai_research_structure', text);
+    }
+  }
+
+  static Future<void> resetResearchStructure() async {
+    await _prefs?.remove('ai_research_structure');
+  }
+
   // ── Settings-Export für Backup ─────────────────────────────────────────────
 
   static Map<String, dynamic> exportSettings() {
@@ -522,6 +573,10 @@ class AppSettings {
     if (hash != null) result['tag_hash'] = hash;
     final templates = p.getStringList('prop_templates');
     if (templates != null) result['prop_templates'] = templates;
+    final structTemplates = p.getStringList('ai_structure_templates');
+    if (structTemplates != null) result['ai_structure_templates'] = structTemplates;
+    final researchStructure = p.getString('ai_research_structure');
+    if (researchStructure != null) result['ai_research_structure'] = researchStructure;
     final vault = p.getString('vault_path');
     if (vault != null) result['vault_path'] = vault;
     return result;
