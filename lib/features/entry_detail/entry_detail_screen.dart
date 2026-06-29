@@ -7,7 +7,6 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -38,11 +37,10 @@ import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 import 'properties_block.dart';
 import '../../domain/tag_parser.dart';
-import '../../services/searxng_service.dart';
+import '../../services/web_search/web_search.dart';
 
 const _keyApiKey = 'openrouter_api_key';
 const _keyAiModel = 'openrouter_model';
-const _keySearxngUrl = 'searxng_base_url';
 
 class EntryDetailScreen extends ConsumerStatefulWidget {
   final String entryId;
@@ -529,14 +527,14 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   /// Recherchiert einen Link über SearXNG und erzeugt daraus per LLM eine
   /// strukturierte Notiz, die als eigener Block in den Body eingefügt wird.
   Future<void> _researchLink(String entryId, String? url, String? title) async {
-    final searxUrl = (await secureRead(_keySearxngUrl) ?? '').trim();
+    final provider = await resolveActiveWebSearchProvider();
     if (!mounted) return;
     if (ref.read(llmProfilesProvider).chainFor(LlmTask.researchedNote).isEmpty) {
       _snack('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.');
       return;
     }
-    if (searxUrl.isEmpty) {
-      _snack('Keine SearXNG-URL gesetzt (Einstellungen → Web-Recherche).');
+    if (provider == null) {
+      _snack('Kein Recherche-Provider konfiguriert (Einstellungen → Web-Recherche).');
       return;
     }
 
@@ -549,9 +547,8 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       if (query.isEmpty) throw Exception('Kein Suchbegriff (Titel/URL fehlt)');
 
       // Recherche
-      final results =
-          await SearxngService(baseUrl: searxUrl).search(query, language: 'de');
-      final context = SearxngService.resultsToContext(results);
+      final results = await provider.search(query, language: 'de');
+      final context = webResultsToContext(results);
 
       // Bekannte Beschreibung aus Properties (z.B. OG/AniList)
       final props = await ref.read(propertyDaoProvider).watchByEntry(entryId).first;

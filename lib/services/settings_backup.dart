@@ -29,6 +29,7 @@ class SettingsBackup {
     'omdb_api_key',
     'youtube_api_key',
     'searxng_base_url',
+    'brave_api_key',
   ];
 
   /// SharedPreferences-Keys, die geräte-/inhaltsspezifisch sind und NICHT
