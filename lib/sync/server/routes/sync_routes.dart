@@ -11,6 +11,19 @@ import '../../../services/app_settings.dart';
 import '../../../core/vault_manager.dart';
 import '../sync_server.dart';
 
+/// Ob eine Entität (Entry/Container) zum Pull-Delta seit [since] gehört.
+///
+/// Maßgeblich ist der SERVER-Empfangszeitpunkt [syncUpdatedAt], nicht das
+/// inhaltliche [updatedAt]: Eine Notiz kann mit einem alten updatedAt erst spät
+/// gepusht werden (z. B. auf Windows früher erstellte/angereicherte
+/// GitHub-/YouTube-Links). Filterte der Pull nach updatedAt, läge dieses vor dem
+/// Cursor des Clients und die Notiz erschiene nie auf anderen Clients (#25).
+/// Fallback auf [updatedAt] für Altbestand ohne syncUpdatedAt.
+bool isInPullDelta(DateTime? syncUpdatedAt, DateTime updatedAt, DateTime? since) {
+  if (since == null) return true; // Erstsync → alles
+  return (syncUpdatedAt ?? updatedAt).isAfter(since);
+}
+
 Router syncRouter(AppDatabase db, SyncServer server) {
   final router = Router();
 
@@ -53,9 +66,12 @@ Router syncRouter(AppDatabase db, SyncServer server) {
           ..where((e) => e.deletedAt.isNull()))
         .get();
 
+    // Delta nach dem Server-Empfangszeitpunkt filtern (siehe isInPullDelta, #25).
     final filteredEntries = since == null
         ? allEntries
-        : allEntries.where((e) => e.updatedAt.isAfter(since)).toList();
+        : allEntries
+            .where((e) => isInPullDelta(e.syncUpdatedAt, e.updatedAt, since))
+            .toList();
 
     // Fetch all active containers (not soft-deleted)
     final allContainers = await (db.select(db.containers)
@@ -64,7 +80,9 @@ Router syncRouter(AppDatabase db, SyncServer server) {
 
     final filteredContainers = since == null
         ? allContainers
-        : allContainers.where((c) => c.updatedAt.isAfter(since)).toList();
+        : allContainers
+            .where((c) => isInPullDelta(c.syncUpdatedAt, c.updatedAt, since))
+            .toList();
 
     // Build tombstones from soft-deleted entries and containers
     final tombstones = <SyncTombstone>[];
@@ -277,6 +295,8 @@ Router syncRouter(AppDatabase db, SyncServer server) {
             sortOrder: Value(incoming.sortOrder),
             viewMode: Value(incoming.viewMode),
             parentId: Value(incoming.parentId),
+            // Server-Empfangszeitpunkt → maßgeblich für den Pull-Delta (#25)
+            syncUpdatedAt: Value(DateTime.now().toUtc()),
           ));
         }
 
