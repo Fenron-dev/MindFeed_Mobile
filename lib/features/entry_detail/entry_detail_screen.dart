@@ -19,6 +19,7 @@ import '../../features/containers/container_provider.dart';
 import '../../services/notification_service.dart';
 import '../../services/ai/ai_service.dart';
 import '../../services/ai/structure_template.dart';
+import '../../services/ai/it_note_template.dart';
 import '../../services/ai/llm_profile.dart';
 import '../../services/ai/llm_profiles_store.dart';
 import '../../services/app_settings.dart';
@@ -57,6 +58,7 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
   bool _showPreview = false;
   bool _enriching = false;
   bool _researching = false;
+  bool _generatingIt = false;
   bool _refetching = false;
   final _titleCtrl = TextEditingController();
   final _bodyCtrl = TextEditingController();
@@ -593,6 +595,146 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     }
   }
 
+  /// Erzeugt aus der aktuellen Notiz eine strukturierte IT-Problem-/Lösungs-
+  /// Notiz (#31). Modus A recherchiert (Web), Modus B strukturiert nur. Setzt
+  /// den Body und die Metadaten (type/it-problem, state-Tag, status-Property).
+  Future<void> _generateItNote(Entry entry) async {
+    if (ref.read(llmProfilesProvider).chainFor(LlmTask.researchedNote).isEmpty) {
+      _snack('Kein KI-Profil für „Recherchierte Notiz" zugewiesen (Einstellungen).');
+      return;
+    }
+    final opts = await _askItOptions();
+    if (opts == null || !mounted) return;
+
+    setState(() => _generatingIt = true);
+    try {
+      final body = entry.body.trim();
+      final title = entry.title?.trim() ?? '';
+      if (body.isEmpty && title.isEmpty) {
+        throw Exception('Notiz ist leer – bitte zuerst das Problem beschreiben.');
+      }
+      final problem = [title, body].where((s) => s.isNotEmpty).join('\n\n');
+
+      var searchContext = '';
+      if (opts.mode == ItNoteMode.research) {
+        final provider = await resolveActiveWebSearchProvider();
+        if (!mounted) return;
+        if (provider == null) {
+          throw Exception(
+              'Kein Recherche-Provider konfiguriert (Einstellungen → Web-Recherche).');
+        }
+        final query = title.isNotEmpty ? title : body;
+        final results = await provider.search(query, language: 'de');
+        searchContext = webResultsToContext(results);
+      }
+
+      final note = await AiService.runForTask(
+        ref,
+        LlmTask.researchedNote,
+        (svc) => svc.generateItNote(
+          mode: opts.mode,
+          problem: problem,
+          searchContext: searchContext,
+        ),
+      );
+      if (note == null || note.trim().isEmpty) {
+        throw Exception('Modell lieferte keine Notiz');
+      }
+
+      final repo = ref.read(entryRepositoryProvider);
+      await repo.updateEntry(entry.id, body: note.trim());
+      await repo.addTag(entry.id, 'type/it-problem');
+      await repo.addTag(
+          entry.id, opts.status == 'gelöst' ? 'state/gelöst' : 'state/offen');
+      await repo.setPropertyByKey(entry.id, 'status', opts.status, 'text');
+
+      if (mounted) _snack('IT-Notiz erstellt.', error: false);
+    } catch (e) {
+      if (mounted) _snack(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _generatingIt = false);
+    }
+  }
+
+  /// Fragt Modus (A recherchieren / B strukturieren) und Status ab.
+  Future<({ItNoteMode mode, String status})?> _askItOptions() {
+    var mode = ItNoteMode.structure;
+    var status = 'gelöst';
+    return showDialog<({ItNoteMode mode, String status})>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: const Text('IT-Notiz erzeugen',
+              style: TextStyle(color: MFColors.textPrimary, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Modus',
+                  style: TextStyle(color: MFColors.textMuted, fontSize: 12)),
+              RadioListTile<ItNoteMode>(
+                value: ItNoteMode.structure,
+                groupValue: mode,
+                onChanged: (v) => setLocal(() => mode = v!),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('B – Problem + Lösung strukturieren',
+                    style: TextStyle(color: MFColors.textPrimary, fontSize: 13)),
+                subtitle: const Text('Nur ordnen, nichts erfinden',
+                    style: TextStyle(color: MFColors.textMuted, fontSize: 11)),
+              ),
+              RadioListTile<ItNoteMode>(
+                value: ItNoteMode.research,
+                groupValue: mode,
+                onChanged: (v) => setLocal(() {
+                  mode = v!;
+                  status = 'offen';
+                }),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('A – Nur Problem, KI recherchiert',
+                    style: TextStyle(color: MFColors.textPrimary, fontSize: 13)),
+                subtitle: const Text('Braucht Web-Recherche (Einstellungen)',
+                    style: TextStyle(color: MFColors.textMuted, fontSize: 11)),
+              ),
+              const SizedBox(height: 8),
+              const Text('Status',
+                  style: TextStyle(color: MFColors.textMuted, fontSize: 12)),
+              const SizedBox(height: 4),
+              DropdownButton<String>(
+                value: status,
+                isExpanded: true,
+                dropdownColor: MFColors.surface,
+                style: const TextStyle(color: MFColors.textPrimary, fontSize: 13),
+                items: const [
+                  DropdownMenuItem(value: 'offen', child: Text('offen')),
+                  DropdownMenuItem(value: 'gelöst', child: Text('gelöst')),
+                  DropdownMenuItem(value: 'workaround', child: Text('workaround')),
+                ],
+                onChanged: (v) => setLocal(() => status = v!),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: MFColors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, (mode: mode, status: status)),
+              style: FilledButton.styleFrom(
+                  backgroundColor: MFColors.teal, foregroundColor: MFColors.bg),
+              child: const Text('Erzeugen'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _snack(String msg, {bool error = true}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg.length > 160 ? '${msg.substring(0, 160)}…' : msg),
@@ -1001,6 +1143,9 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                   if (v == 'research') {
                     await _researchLink(entry.id, entry.sourceUrl, entry.title);
                   }
+                  if (v == 'itnote') {
+                    await _generateItNote(entry);
+                  }
                   if (v == 'transcript') {
                     await _fetchTranscript(entry.id, entry.sourceUrl, entry.body);
                   }
@@ -1025,6 +1170,10 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
                       _researching ? Icons.hourglass_top_rounded : Icons.travel_explore_outlined,
                       _researching ? 'Recherche läuft…' : 'Link recherchieren (Web)',
                       color: MFColors.teal),
+                  _popItem('itnote',
+                    _generatingIt ? Icons.hourglass_top_rounded : Icons.build_circle_outlined,
+                    _generatingIt ? 'IT-Notiz läuft…' : 'IT-Notiz erzeugen (KI)',
+                    color: const Color(0xFF8B5CF6)),
                   if (_isYoutube(entry.sourceUrl))
                     _popItem('transcript', Icons.subtitles_outlined,
                       'Transkript einfügen',
