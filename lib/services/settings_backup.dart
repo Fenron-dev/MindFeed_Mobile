@@ -39,6 +39,7 @@ class SettingsBackup {
     'recent_vaults',
     'sync_device_id',
     'sync_last_sync_at',
+    'sync_server_cursor',
     'auto_backup_last_at',
     'auto_backup_dir',
   };
