@@ -730,6 +730,19 @@ class AppSettings {
   static Future<void> saveLastSyncAt(DateTime dt) async =>
       _prefs?.setString('sync_last_sync_at', dt.toIso8601String());
 
+  /// Pull-Cursor in SERVER-Zeit (der vom Server gelieferte `syncedAt`). Wird als
+  /// `since` für den nächsten Pull verwendet, damit die Delta-Auswahl vollständig
+  /// in Server-Zeit passiert und nicht am Uhren-Versatz Client↔Server scheitert.
+  /// Getrennt von [getLastSyncAt] (lokale Zeit für die Tombstone-Auswahl). (#25)
+  static DateTime? getSyncServerCursor() {
+    final raw = _prefs?.getString('sync_server_cursor');
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  static Future<void> saveSyncServerCursor(DateTime dt) async =>
+      _prefs?.setString('sync_server_cursor', dt.toUtc().toIso8601String());
+
   // ── Papierkorb ──────────────────────────────────────────────────────────────
 
   /// Aufbewahrungsdauer in Tagen; 0 = nie automatisch löschen.

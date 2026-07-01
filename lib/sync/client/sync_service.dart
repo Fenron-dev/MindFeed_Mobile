@@ -70,15 +70,22 @@ class SyncService {
       return SyncResult.failed('Server nicht erreichbar: $e');
     }
 
+    // lastSyncAt (lokale Uhr) steuert weiterhin die Tombstone-Auswahl unten.
     final lastSyncAt = AppSettings.getLastSyncAt();
     final firstSync = lastSyncAt == null;
+
+    // Pull-Cursor in SERVER-Zeit (#25): so vergleicht der Server das Delta
+    // gegen denselben Zeitmaßstab, in dem er syncUpdatedAt vergibt — kein
+    // Uhren-Versatz Client↔Server mehr. Fallback auf lastSyncAt für den ersten
+    // Sync nach dem Update (noch kein Server-Cursor gespeichert).
+    final pullSince = AppSettings.getSyncServerCursor() ?? lastSyncAt;
 
     // ── PULL ─────────────────────────────────────────────────────────────────
     // Alle Exceptions fangen (TimeoutException, SocketException, FormatException…)
 
     SyncPullResponse pullResp;
     try {
-      pullResp = await client.pull(since: lastSyncAt);
+      pullResp = await client.pull(since: pullSince);
     } catch (e) {
       return SyncResult.failed('Pull fehlgeschlagen: $e');
     }
@@ -170,6 +177,13 @@ class SyncService {
 
     final now = DateTime.now().toUtc();
     await AppSettings.saveLastSyncAt(now);
+    // Pull-Cursor in Server-Zeit fortschreiben (#25). Der Server liefert
+    // syncedAt = seine aktuelle Zeit; damit pullt der nächste Sync exakt das
+    // Delta, das der Server seither empfangen hat.
+    final serverSyncedAt = DateTime.tryParse(pullResp.syncedAt);
+    if (serverSyncedAt != null) {
+      await AppSettings.saveSyncServerCursor(serverSyncedAt);
+    }
 
     if (conflicts.isNotEmpty) {
       debugPrint('[Sync] ${conflicts.length} echte(r) Konflikt(e) erkannt');

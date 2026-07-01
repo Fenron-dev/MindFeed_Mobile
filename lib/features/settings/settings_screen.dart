@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import '../../core/folder_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -8,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/secure_storage.dart';
 import 'package:intl/intl.dart';
 import '../../core/di.dart';
-import '../../data/db/app_database.dart' hide Container;
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../domain/prop_type.dart';
