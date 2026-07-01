@@ -554,6 +554,17 @@ class AppSettings {
     await _prefs?.remove('ai_research_structure');
   }
 
+  // ── Web-Recherche: aktiver Provider (SearXNG/Brave …) (#32) ────────────────
+
+  /// Aktiver Recherche-Provider als stabile ID (Default: SearXNG für
+  /// Bestandsnutzer). Siehe WebSearchProviderKind.id.
+  static String getWebSearchProvider() =>
+      _prefs?.getString('web_search_provider') ?? 'searxng';
+
+  static Future<void> saveWebSearchProvider(String id) async {
+    await _prefs?.setString('web_search_provider', id);
+  }
+
   // ── Settings-Export für Backup ─────────────────────────────────────────────
 
   static Map<String, dynamic> exportSettings() {

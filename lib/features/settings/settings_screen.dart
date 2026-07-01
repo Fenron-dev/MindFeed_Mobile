@@ -20,7 +20,7 @@ import '../../services/enrichment/api_field_prefs.dart';
 import '../../services/enrichment/api_keys.dart';
 import '../../services/enrichment/api_source.dart';
 import '../../services/backup_service.dart';
-import '../../services/searxng_service.dart';
+import '../../services/web_search/web_search.dart';
 import '../../services/url_metadata_service.dart';
 import '../settings/sync_settings_screen.dart';
 import 'ai_profiles_screen.dart';
@@ -53,10 +53,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _ytTestState = 'idle'; // idle | loading | ok | error
   String _ytTestMsg = '';
 
-  // SearXNG (eigene Recherche-Schicht)
+  // Web-Recherche (Provider-Auswahl: SearXNG / Brave …)
+  WebSearchProviderKind _webProvider = WebSearchProviderKind.searxng;
   final _searxngUrlCtrl = TextEditingController();
+  final _braveKeyCtrl = TextEditingController();
   String _searxTestState = 'idle'; // idle | loading | ok | error
   String _searxTestError = '';
+
+  /// Controller des Konfig-Felds des aktuell gewählten Providers.
+  TextEditingController get _webConfigCtrl =>
+      _webProvider == WebSearchProviderKind.brave
+          ? _braveKeyCtrl
+          : _searxngUrlCtrl;
 
   @override
   void initState() {
@@ -70,16 +78,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _searxngUrlCtrl.dispose();
+    _braveKeyCtrl.dispose();
     _youtubeKeyCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadAiSettings() async {
     final searx = await secureRead(_keySearxngUrl) ?? '';
+    final brave = await secureRead(WebSearchProviderKind.brave.secureKey) ?? '';
     final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
     if (mounted) {
       setState(() {
+        _webProvider =
+            WebSearchProviderKind.fromId(AppSettings.getWebSearchProvider());
         _searxngUrlCtrl.text = searx;
+        _braveKeyCtrl.text = brave;
         _youtubeKeyCtrl.text = youtubeKey;
       });
     }
@@ -106,7 +119,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _saveAiSettings() async {
+    await AppSettings.saveWebSearchProvider(_webProvider.id);
+    // Beide Konfigurationen erhalten, damit ein Provider-Wechsel den jeweils
+    // anderen Wert nicht verliert.
     await secureWrite(_keySearxngUrl, _searxngUrlCtrl.text.trim());
+    await secureWrite(
+        WebSearchProviderKind.brave.secureKey, _braveKeyCtrl.text.trim());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Gespeichert.'),
@@ -115,14 +133,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _testSearxng() async {
-    final url = _searxngUrlCtrl.text.trim();
-    if (url.isEmpty) {
-      setState(() { _searxTestState = 'error'; _searxTestError = 'Keine URL eingegeben'; });
+  Future<void> _testWebSearch() async {
+    final provider =
+        buildWebSearchProvider(_webProvider, _webConfigCtrl.text);
+    if (provider == null) {
+      setState(() {
+        _searxTestState = 'error';
+        _searxTestError = '${_webProvider.configLabel} fehlt';
+      });
       return;
     }
     setState(() { _searxTestState = 'loading'; _searxTestError = ''; });
-    final err = await SearxngService(baseUrl: url).testConnection();
+    final err = await provider.testConnection();
     if (!mounted) return;
     setState(() {
       _searxTestState = err == null ? 'ok' : 'error';
@@ -739,9 +761,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 builder: (_) => const AiProfilesScreen())),
           ),
 
-          // ─── SearXNG (Recherche) ───────────────────────────────────────────
+          // ─── Web-Recherche (Provider-Auswahl) ──────────────────────────────
           const SizedBox(height: 28),
-          _SectionHeader('WEB-RECHERCHE (SEARXNG)'),
+          _SectionHeader('WEB-RECHERCHE'),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(14),
@@ -765,21 +787,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
-                    child: Text('Eigene SearXNG-Instanz',
+                    child: Text('Recherche-Provider',
                         style: TextStyle(fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: MFColors.textPrimary)),
                   ),
                 ]),
                 const SizedBox(height: 14),
+                DropdownButtonFormField<WebSearchProviderKind>(
+                  initialValue: _webProvider,
+                  isExpanded: true,
+                  dropdownColor: MFColors.surface,
+                  style: const TextStyle(fontSize: 13,
+                      color: MFColors.textPrimary),
+                  decoration: InputDecoration(
+                    labelText: 'Anbieter',
+                    labelStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
+                    filled: true, fillColor: MFColors.bg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.border)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: MFColors.teal)),
+                  ),
+                  items: [
+                    for (final k in WebSearchProviderKind.values)
+                      DropdownMenuItem(value: k, child: Text(k.label)),
+                  ],
+                  onChanged: (k) {
+                    if (k == null) return;
+                    setState(() {
+                      _webProvider = k;
+                      _searxTestState = 'idle';
+                      _searxTestError = '';
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
                 TextField(
-                  controller: _searxngUrlCtrl,
+                  key: ValueKey(_webProvider.id),
+                  controller: _webConfigCtrl,
+                  obscureText: _webProvider.isSecret,
                   style: const TextStyle(fontSize: 13,
                       color: MFColors.textPrimary, fontFamily: 'monospace'),
                   decoration: InputDecoration(
-                    labelText: 'Basis-URL',
+                    labelText: _webProvider.configLabel,
                     labelStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
-                    hintText: 'http://192.168.x.x:8080',
+                    hintText: _webProvider.configHint,
                     hintStyle: const TextStyle(color: MFColors.textMuted, fontSize: 12),
                     filled: true, fillColor: MFColors.bg,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
@@ -794,7 +849,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Row(children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: _searxTestState == 'loading' ? null : _testSearxng,
+                      onPressed: _searxTestState == 'loading' ? null : _testWebSearch,
                       icon: _searxTestState == 'loading'
                           ? const SizedBox(width: 14, height: 14,
                               child: CircularProgressIndicator(strokeWidth: 1.5))
@@ -855,12 +910,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       style: const TextStyle(fontSize: 10, color: Colors.redAccent)),
                 ],
                 const SizedBox(height: 6),
-                const Text(
-                  'Selbst gehostete SearXNG-Instanz für Web-Recherche bei der '
-                  'KI-Anreicherung. JSON-Format muss aktiv sein '
-                  '(settings.yml: search.formats: [html, json]). HTTP-Adressen '
-                  'im LAN sind nur im Heimnetz erreichbar.',
-                  style: TextStyle(fontSize: 10, color: MFColors.textMuted),
+                Text(
+                  _webProvider == WebSearchProviderKind.brave
+                      ? 'Brave Search API für Web-Recherche bei der KI-Anreicherung. '
+                          'API-Key unter api.search.brave.com anlegen. Der Key '
+                          'bleibt lokal und wird NICHT mit anderen Geräten gesynct.'
+                      : 'Selbst gehostete SearXNG-Instanz für Web-Recherche bei der '
+                          'KI-Anreicherung. JSON-Format muss aktiv sein '
+                          '(settings.yml: search.formats: [html, json]). HTTP-Adressen '
+                          'im LAN sind nur im Heimnetz erreichbar.',
+                  style: const TextStyle(fontSize: 10, color: MFColors.textMuted),
                 ),
               ],
             ),
