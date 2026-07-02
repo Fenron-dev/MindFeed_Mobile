@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'ai/structure_template.dart';
+import 'ai/it_note_template.dart';
 
 class AiEnrichment {
   final List<String> tags;
@@ -563,6 +564,73 @@ Gib NUR die fertige Markdown-Notiz aus, ohne Vorrede, ohne Code-Fences.''';
       structure: (structure == null || structure.trim().isEmpty)
           ? StructureTemplate.defaultResearchStructure
           : structure,
+    );
+
+    final needed = maxTokens < 2500 ? 2500 : maxTokens;
+    final reqHeaders = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mindfeed.app',
+      'X-Title': 'MindFeed Mobile',
+    };
+    final reqBody = jsonEncode({
+      'model': model,
+      'messages': [
+        {'role': 'user', 'content': prompt},
+      ],
+      'max_tokens': needed,
+      'temperature': temperature,
+    });
+
+    var res = await http
+        .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode == 429) {
+      await Future.delayed(const Duration(seconds: 6));
+      res = await http
+          .post(Uri.parse(chatUrl), headers: reqHeaders, body: reqBody)
+          .timeout(const Duration(seconds: 90));
+    }
+    _checkStatus(res);
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true))
+        as Map<String, dynamic>;
+    final msg = data['choices']?[0]?['message'] as Map<String, dynamic>?;
+    var text = (msg?['content'] as String?) ?? '';
+    if (text.trim().isEmpty) text = (msg?['reasoning'] as String?) ?? '';
+    text = text
+        .replaceAll(
+            RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'^\s*```(?:markdown|md)?\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s*```\s*$'), '')
+        .trim();
+    return text.isEmpty ? null : text;
+  }
+
+  /// Erzeugt eine strukturierte IT-Problem-/Lösungs-Notiz (#31).
+  ///
+  /// [mode] = research (nur Problem → recherchieren, nutzt [searchContext]) oder
+  /// structure (Problem + [solution] → nur strukturieren). Liefert portables
+  /// Markdown im Hybrid-Format (Obsidian-Callouts, kein YAML/meta-bind).
+  Future<String?> generateItNote({
+    required ItNoteMode mode,
+    required String problem,
+    String solution = '',
+    String searchContext = '',
+  }) async {
+    final prob = problem.trim();
+    if (prob.isEmpty) return null;
+    final research = searchContext.trim().length > 9000
+        ? searchContext.trim().substring(0, 9000)
+        : searchContext.trim();
+
+    final prompt = buildItNotePrompt(
+      mode: mode,
+      problem: prob.length > 6000 ? prob.substring(0, 6000) : prob,
+      solution: solution.trim().length > 6000
+          ? solution.trim().substring(0, 6000)
+          : solution.trim(),
+      research: research,
     );
 
     final needed = maxTokens < 2500 ? 2500 : maxTokens;
