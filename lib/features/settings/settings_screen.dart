@@ -51,6 +51,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _ytTestState = 'idle'; // idle | loading | ok | error
   String _ytTestMsg = '';
 
+  // TMDB (Filme/Serien)
+  final _tmdbKeyCtrl = TextEditingController();
+
   // Web-Recherche (Provider-Auswahl: SearXNG / Brave …)
   WebSearchProviderKind _webProvider = WebSearchProviderKind.searxng;
   final _searxngUrlCtrl = TextEditingController();
@@ -78,6 +81,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _searxngUrlCtrl.dispose();
     _braveKeyCtrl.dispose();
     _youtubeKeyCtrl.dispose();
+    _tmdbKeyCtrl.dispose();
     super.dispose();
   }
 
@@ -85,6 +89,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final searx = await secureRead(_keySearxngUrl) ?? '';
     final brave = await secureRead(WebSearchProviderKind.brave.secureKey) ?? '';
     final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
+    final tmdbKey = await secureRead(ApiKeyStore.tmdb) ?? '';
     if (mounted) {
       setState(() {
         _webProvider =
@@ -92,6 +97,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _searxngUrlCtrl.text = searx;
         _braveKeyCtrl.text = brave;
         _youtubeKeyCtrl.text = youtubeKey;
+        _tmdbKeyCtrl.text = tmdbKey;
       });
     }
   }
@@ -99,6 +105,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _saveYoutubeKey() async {
     await secureWrite(ApiKeyStore.youtube, _youtubeKeyCtrl.text.trim());
     if (mounted) _showSnack('YouTube-API-Key gespeichert', success: true);
+  }
+
+  Future<void> _saveTmdbKey() async {
+    await secureWrite(ApiKeyStore.tmdb, _tmdbKeyCtrl.text.trim());
+    if (mounted) _showSnack('TMDB-API-Key gespeichert', success: true);
   }
 
   Future<void> _testYoutubeKey() async {
@@ -1049,6 +1060,65 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               fontSize: 11, color: Colors.redAccent)),
                     ),
                 ]),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // ── TMDB (Filme/Serien) ─────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: MFColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MFColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: const [
+                  Icon(Icons.movie_outlined, size: 16, color: Color(0xFF01B4E4)),
+                  SizedBox(width: 8),
+                  Text('TMDB (Filme & Serien)',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600,
+                          color: MFColors.textPrimary)),
+                ]),
+                const SizedBox(height: 4),
+                const Text(
+                  'API-Key (themoviedb.org → Einstellungen → API). Nötig für die '
+                  'Titel-Suche nach Filmen/Serien.',
+                  style: TextStyle(fontSize: 11, color: MFColors.textMuted),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _tmdbKeyCtrl,
+                  obscureText: true,
+                  style: const TextStyle(
+                      fontSize: 13, color: MFColors.textPrimary),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'API-Key einfügen…',
+                    hintStyle: const TextStyle(
+                        fontSize: 13, color: MFColors.textMuted),
+                    filled: true,
+                    fillColor: MFColors.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: MFColors.border),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.save_outlined,
+                          size: 18, color: MFColors.teal),
+                      tooltip: 'Speichern',
+                      onPressed: _saveTmdbKey,
+                    ),
+                  ),
+                  onSubmitted: (_) => _saveTmdbKey(),
+                ),
               ],
             ),
           ),
@@ -2440,6 +2510,8 @@ class _ApiFieldSection extends StatelessWidget {
     ApiSource.rpgg: ('RPGGeek (Rollenspiele)', Icons.auto_fix_high_outlined, Color(0xFF059669)),
     ApiSource.github: ('GitHub (Repositories)', Icons.code_outlined, Color(0xFF6366F1)),
     ApiSource.youtube: ('YouTube (Videos)', Icons.smart_display_outlined, Color(0xFFFF0000)),
+    ApiSource.tmdbMovie: ('TMDB (Filme)', Icons.movie_outlined, Color(0xFF01B4E4)),
+    ApiSource.tmdbTv: ('TMDB (Serien)', Icons.live_tv_outlined, Color(0xFF01B4E4)),
     ApiSource.genericWeb: ('Web (allgemeine Links)', Icons.public_outlined, Color(0xFF38BDF8)),
   };
 

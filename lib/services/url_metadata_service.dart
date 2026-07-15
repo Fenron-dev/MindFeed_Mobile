@@ -400,6 +400,124 @@ class UrlMetadataService {
     }
   }
 
+  /// Sucht per **Titel** einen Film ([tv]=false) oder eine Serie ([tv]=true)
+  /// über die TMDB-API und liefert dessen Metadaten (Poster, Genres, Jahr,
+  /// Regie/Besetzung bzw. Staffeln/Folgen). Zwei Aufrufe: Suche → Details
+  /// (mit Credits). Braucht einen TMDB-API-Key. (#28/#44)
+  static Future<UrlMetadata?> searchTmdb(String query, String apiKey,
+      {bool tv = false}) async {
+    if (query.trim().isEmpty || apiKey.trim().isEmpty) return null;
+    final kind = tv ? 'tv' : 'movie';
+    final key = Uri.encodeQueryComponent(apiKey.trim());
+    try {
+      final searchRes = await http.get(Uri.parse(
+              'https://api.themoviedb.org/3/search/$kind?api_key=$key'
+              '&query=${Uri.encodeQueryComponent(query.trim())}'
+              '&language=de-DE&include_adult=false'))
+          .timeout(const Duration(seconds: 8));
+      if (searchRes.statusCode != 200) return null;
+      final results = jsonDecode(_decodeBody(searchRes))['results'] as List?;
+      if (results == null || results.isEmpty) return null;
+      final id = (results.first as Map)['id'];
+      if (id == null) return null;
+
+      final detailRes = await http.get(Uri.parse(
+              'https://api.themoviedb.org/3/$kind/$id?api_key=$key'
+              '&language=de-DE&append_to_response=credits'))
+          .timeout(const Duration(seconds: 8));
+      if (detailRes.statusCode != 200) return null;
+      final data = jsonDecode(_decodeBody(detailRes)) as Map<String, dynamic>;
+      return parseTmdbDetails(data, tv: tv);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Bildet eine TMDB-Detail-Antwort auf [UrlMetadata] ab (Basisfelder +
+  /// [UrlMetadata.extraProps] für Katalog-Propkeys). Ausgelagert für die
+  /// Testbarkeit (keine HTTP-Abhängigkeit).
+  static UrlMetadata? parseTmdbDetails(Map<String, dynamic> d,
+      {bool tv = false}) {
+    final title = (tv ? d['name'] : d['title']) as String? ??
+        (tv ? d['original_name'] : d['original_title']) as String? ??
+        '';
+    if (title.isEmpty) return null;
+
+    final poster = d['poster_path'] as String?;
+    final image = (poster != null && poster.isNotEmpty)
+        ? 'https://image.tmdb.org/t/p/w500$poster'
+        : null;
+    final genres = (d['genres'] as List?)
+            ?.map((g) => (g as Map)['name']?.toString() ?? '')
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    final vote = (d['vote_average'] as num?)?.toDouble();
+    final score = vote != null ? (vote * 10).round() : null;
+    final date = (tv ? d['first_air_date'] : d['release_date']) as String? ?? '';
+
+    final extra = <String, String>{};
+    if (date.length >= 4) extra['Jahr'] = date.substring(0, 4);
+
+    final credits = d['credits'] as Map<String, dynamic>?;
+    final cast = (credits?['cast'] as List?)
+            ?.take(5)
+            .map((c) => (c as Map)['name']?.toString() ?? '')
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    if (cast.isNotEmpty) extra['Besetzung'] = cast.join(', ');
+
+    if (tv) {
+      final seasons = d['number_of_seasons'];
+      if (seasons != null) extra['Staffeln'] = '$seasons';
+      final eps = d['number_of_episodes'];
+      if (eps != null) extra['Folgen gesamt'] = '$eps';
+      final status = d['status'] as String?;
+      if (status != null && status.isNotEmpty) extra['Status'] = status;
+      final creators = (d['created_by'] as List?)
+          ?.map((c) => (c as Map)['name']?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (creators != null && creators.isNotEmpty) {
+        extra['Creator'] = creators.join(', ');
+      }
+      final networks = (d['networks'] as List?)
+          ?.map((n) => (n as Map)['name']?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (networks != null && networks.isNotEmpty) {
+        extra['Sender'] = networks.join(', ');
+      }
+    } else {
+      final runtime = d['runtime'];
+      if (runtime is int && runtime > 0) extra['Laufzeit'] = '$runtime min';
+      final crew = (credits?['crew'] as List?) ?? const [];
+      final director = crew.cast<Map>().firstWhere(
+          (c) => c['job'] == 'Director',
+          orElse: () => const {});
+      final dn = director['name']?.toString() ?? '';
+      if (dn.isNotEmpty) extra['Regie'] = dn;
+      final orig = d['original_title'] as String?;
+      if (orig != null && orig.isNotEmpty && orig != title) {
+        extra['Originaltitel'] = orig;
+      }
+      final tagline = d['tagline'] as String?;
+      if (tagline != null && tagline.isNotEmpty) extra['Tagline'] = tagline;
+    }
+
+    return UrlMetadata(
+      title: title,
+      description: (d['overview'] as String?)?.trim() ?? '',
+      image: image,
+      domain: 'themoviedb.org',
+      genres: genres,
+      score: score,
+      mediaType: tv ? 'tv' : 'movie',
+      extraProps: extra,
+    );
+  }
+
   /// Sucht per **Titel** das passende YouTube-Video (Data API) und liefert
   /// dessen echte Metadaten (Thumbnail, Kanal, Beschreibung …). Braucht einen
   /// YouTube-Data-API-Key. So wird die Bild-Erkennung auf das reale Video
