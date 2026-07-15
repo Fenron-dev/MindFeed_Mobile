@@ -6,7 +6,9 @@ import '../core/di.dart';
 import '../core/theme.dart';
 import '../data/repositories/entry_repository.dart';
 import '../domain/prop_type.dart';
+import '../domain/property_registry.dart';
 import '../services/app_settings.dart';
+import 'prop_value_view.dart';
 
 bool get _isDesktop =>
     Platform.isMacOS || Platform.isWindows || Platform.isLinux;
@@ -289,7 +291,7 @@ class _DesktopCard extends StatelessWidget {
                 .toList()
             : <dynamic>[])
         : item.properties
-            .where((p) => !_PropertiesRow._isExcluded(p.key))
+            .where((p) => !PropertyRegistry.isHidden(p.key))
             .toList(); // Desktop: kein take()-Limit
 
     return InkWell(
@@ -531,23 +533,6 @@ class _PropertiesRow extends StatelessWidget {
   final List properties;
   const _PropertiesRow(this.properties);
 
-  static const _excludedPrefixes = [
-    'og_', 'bgg_', 'anilist_', 'github_', 'youtube_', 'vgg_', 'rpg_', 'task_',
-  ];
-  static const _excludedExact = {
-    'cover_image', 'cover', 'bild', 'genres', 'media_type', 'domain',
-    'url_author', 'score', '_template', 'parent_entry_id',
-  };
-
-  static bool _isExcluded(String key) {
-    final k = key.toLowerCase();
-    if (_excludedExact.contains(k)) return true;
-    for (final prefix in _excludedPrefixes) {
-      if (k.startsWith(prefix)) return true;
-    }
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     final tplId = properties.where((p) => p.key == '_template').firstOrNull?.value;
@@ -565,7 +550,7 @@ class _PropertiesRow extends StatelessWidget {
                 .where((p) => cardFields.any((cf) => cf.toLowerCase() == p.key.toLowerCase()))
                 .take(5).toList()
             : <dynamic>[])
-        : properties.where((p) => !_isExcluded(p.key)).take(4).toList();
+        : properties.where((p) => !PropertyRegistry.isHidden(p.key)).take(4).toList();
 
     if (visible.isEmpty) return const SizedBox.shrink();
 
@@ -603,49 +588,10 @@ class _PropChip extends StatelessWidget {
             child: Text('${prop.key}: ',
                 style: const TextStyle(fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
                 overflow: TextOverflow.ellipsis, maxLines: 1)),
-          Flexible(flex: 3, child: _renderValue(type, val)),
+          Flexible(flex: 3, child: CompactPropValue.mobile(type: type, value: val)),
         ]),
       ),
     );
-  }
-
-  static const _vs = TextStyle(fontSize: 10, fontFamily: 'monospace');
-
-  Widget _renderValue(PropType type, String val) {
-    if (val.isEmpty) {
-      return const Text('—', style: TextStyle(fontSize: 10, color: MFColors.textMuted, fontFamily: 'monospace'),
-          overflow: TextOverflow.ellipsis, maxLines: 1);
-    }
-    switch (type) {
-      case PropType.boolean:
-        final isOn = val == 'true';
-        return Icon(isOn ? Icons.check_circle_outline : Icons.radio_button_unchecked,
-            size: 11, color: isOn ? const Color(0xFF10B981) : MFColors.textMuted);
-      case PropType.rating:
-        final stars = (int.tryParse(val) ?? 0).clamp(0, 5);
-        return Row(mainAxisSize: MainAxisSize.min,
-            children: List.generate(stars,
-                (_) => const Icon(Icons.star_rounded, size: 10, color: Color(0xFFF59E0B))));
-      case PropType.date:
-        final dt = DateTime.tryParse(val);
-        final label = dt != null
-            ? '${dt.day.toString().padLeft(2,'0')}.${dt.month.toString().padLeft(2,'0')}.${dt.year}'
-            : val;
-        return Text(label, style: _vs.copyWith(color: MFColors.textPrimary),
-            overflow: TextOverflow.ellipsis, maxLines: 1);
-      case PropType.url:
-        final host = Uri.tryParse(val)?.host.replaceFirst('www.', '') ?? val;
-        return Text(host, style: _vs.copyWith(color: const Color(0xFF60A5FA)),
-            overflow: TextOverflow.ellipsis, maxLines: 1);
-      case PropType.tags:
-        final first = val.split(',').map((t) => t.trim())
-            .where((t) => t.isNotEmpty).take(2).join(', ');
-        return Text(first, style: _vs.copyWith(color: MFColors.teal),
-            overflow: TextOverflow.ellipsis, maxLines: 1);
-      default:
-        return Text(val, style: _vs.copyWith(color: MFColors.textPrimary),
-            overflow: TextOverflow.ellipsis, maxLines: 1);
-    }
   }
 }
 
@@ -675,51 +621,9 @@ class _DesktopPropChip extends StatelessWidget {
           const SizedBox(width: 4),
           Text('${prop.key}: ',
               style: const TextStyle(fontSize: 11, color: MFColors.textMuted, fontFamily: 'monospace')),
-          Flexible(child: _renderValue(type, val)),
+          Flexible(child: CompactPropValue.desktop(type: type, value: val)),
         ]),
       ),
     );
-  }
-
-  static const _vs = TextStyle(fontSize: 11, fontFamily: 'monospace', color: MFColors.textPrimary);
-
-  Widget _renderValue(PropType type, String val) {
-    if (val.isEmpty) {
-      return const Text('—', style: TextStyle(fontSize: 11, color: MFColors.textMuted, fontFamily: 'monospace'));
-    }
-    switch (type) {
-      case PropType.boolean:
-        final isOn = val == 'true';
-        return Icon(isOn ? Icons.check_circle_outline : Icons.radio_button_unchecked,
-            size: 13, color: isOn ? const Color(0xFF10B981) : MFColors.textMuted);
-      case PropType.rating:
-        final stars = (int.tryParse(val) ?? 0).clamp(0, 5);
-        return Row(mainAxisSize: MainAxisSize.min,
-            children: List.generate(stars,
-                (_) => const Icon(Icons.star_rounded, size: 12, color: Color(0xFFF59E0B))));
-      case PropType.date:
-        final dt = DateTime.tryParse(val);
-        final label = dt != null
-            ? '${dt.day.toString().padLeft(2,'0')}.${dt.month.toString().padLeft(2,'0')}.${dt.year}'
-            : val;
-        return Text(label, style: _vs);
-      case PropType.url:
-        final host = Uri.tryParse(val)?.host.replaceFirst('www.', '') ?? val;
-        return Text(host, style: _vs.copyWith(color: const Color(0xFF60A5FA)));
-      case PropType.tags:
-        // Tags auf Desktop als separate Mini-Chips anzeigen
-        final tags = val.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
-        return Wrap(spacing: 4, children: tags.map((t) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-          decoration: BoxDecoration(
-            color: MFColors.teal.withAlpha(25),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: MFColors.teal.withAlpha(80)),
-          ),
-          child: Text(t, style: const TextStyle(fontSize: 10, color: MFColors.teal, fontFamily: 'monospace')),
-        )).toList());
-      default:
-        return Text(val, style: _vs);
-    }
   }
 }
