@@ -14,6 +14,7 @@ import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
+import '../../domain/entry_kind.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
 import '../../services/ai/ai_service.dart';
@@ -25,6 +26,7 @@ import 'field_import_sheet.dart';
 import '../../sync/sync_provider.dart';
 import '../../widgets/app_shell.dart' show navigateToEntry;
 import '../../widgets/format_toolbar.dart';
+import '../../widgets/kind_picker.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'vision_flow.dart';
 
@@ -59,6 +61,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _isSaving = false;
   List<String> _parsedTags = [];
   bool _showTitle = false;
+
+  // Manuell gewählter Typ (überschreibt die Auto-Erkennung beim Speichern).
+  EntryKind? _manualKind;
 
   // URL-Preview
   UrlMetadata? _urlPreview;
@@ -374,23 +379,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   /// Wendet automatisch das passende Template an und befüllt bekannte Felder.
-  Future<void> _autoApplyTemplate(String entryId, String mediaType) async {
+  /// [kindOverride] erlaubt dem manuellen Kind-Wähler, das Template zu
+  /// bestimmen; sonst wird es aus [mediaType] abgeleitet. Prefill-Werte kommen
+  /// weiterhin aus [mediaType]/`_urlPreview` (bei manuellem Kind ggf. leer).
+  Future<void> _autoApplyTemplate(String entryId, String? mediaType,
+      {EntryKind? kindOverride}) async {
     final templates = AppSettings.loadTemplates();
     PropTemplate? _find(String id, String fallback) =>
         templates.where((t) => t.id == id).firstOrNull ??
         templates.where((t) => t.name.toLowerCase().contains(fallback)).firstOrNull;
 
-    PropTemplate? tpl;
-    switch (mediaType) {
-      case 'ANIME':    tpl = _find('tpl-anime',      'anime');      break;
-      case 'MANGA':    tpl = _find('tpl-book',        'buch');       break;
-      case 'YOUTUBE':  tpl = _find('tpl-youtube',     'youtube');    break;
-      case 'BOARDGAME':tpl = _find('tpl-boardgame',   'brettspiel'); break;
-      case 'VIDEOGAME':tpl = _find('tpl-videogame',   'videospiel'); break;
-      case 'TTRPG':    tpl = _find('tpl-ttrpg',       'rpg');        break;
-      case 'GITHUB':   tpl = _find('tpl-github',      'github');     break;
-      default:         return; // kein passendes Template
-    }
+    // Kind-getriebene Template-Auswahl (Registry statt String-Switch).
+    const fallbackNames = {
+      'tpl-anime': 'anime', 'tpl-book': 'buch', 'tpl-youtube': 'youtube',
+      'tpl-boardgame': 'brettspiel', 'tpl-videogame': 'videospiel',
+      'tpl-ttrpg': 'rpg', 'tpl-github': 'github',
+    };
+    final kind = kindOverride ?? EntryKind.fromLegacyMediaType(mediaType);
+    final tplId = kind?.structureTemplateId;
+    if (tplId == null) return; // kein passendes Template
+    final tpl = _find(tplId, fallbackNames[tplId] ?? '');
     if (tpl == null) return;
 
     final dao = ref.read(propertyDaoProvider);
@@ -758,10 +766,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             );
       }
 
-      // ── Auto-Template für AniList & YouTube ─────────────────────────────
+      // ── Kind + Auto-Template ────────────────────────────────────────────
+      // Manueller Kind-Wähler hat Vorrang vor der Auto-Erkennung.
       final mediaType = _urlPreview?.mediaType;
-      if (mediaType != null) {
-        await _autoApplyTemplate(createdEntry.entry.id, mediaType);
+      final effectiveKind =
+          _manualKind ?? EntryKind.fromLegacyMediaType(mediaType);
+      if (_manualKind != null) {
+        await ref.read(entryRepositoryProvider).setPropertyByKey(
+            createdEntry.entry.id, 'kind', _manualKind!.id, 'select');
+      }
+      if (effectiveKind != null) {
+        await _autoApplyTemplate(createdEntry.entry.id, mediaType,
+            kindOverride: effectiveKind);
       }
 
       // Auto-KI Anreicherung wenn Toggle aktiv (über die Profil-Kette).
@@ -1020,6 +1036,27 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 ),
               ]),
             ),
+
+          // Typ-Wähler (manueller Kind-Override, überschreibt Auto-Erkennung)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: KindChip(
+                kind: _manualKind ??
+                    EntryKind.fromLegacyMediaType(_urlPreview?.mediaType),
+                onTap: () async {
+                  final current = _manualKind ??
+                      EntryKind.fromLegacyMediaType(_urlPreview?.mediaType);
+                  final picked =
+                      await showKindPicker(context, current: current);
+                  if (picked != null && mounted) {
+                    setState(() => _manualKind = picked);
+                  }
+                },
+              ),
+            ),
+          ),
 
           // Tag-Preview
           if (_parsedTags.isNotEmpty)

@@ -10,6 +10,7 @@ import '../db/daos/tag_dao.dart';
 import '../db/daos/attachment_dao.dart';
 import '../db/daos/property_dao.dart';
 import 'package:drift/drift.dart';
+import '../../domain/entry_kind.dart';
 import '../../domain/tag_parser.dart';
 import '../../domain/task_parser.dart';
 import '../../domain/recurrence_calculator.dart';
@@ -302,7 +303,20 @@ class EntryRepository {
       addProp('domain', urlDomain, 'string');
       if (urlGenres.isNotEmpty) addProp('genres', urlGenres.join(', '), 'string');
       if (urlScore != null) addProp('score', urlScore.toString(), 'number');
-      if (urlMediaType != null) addProp('media_type', urlMediaType, 'string');
+      if (urlMediaType != null) {
+        addProp('media_type', urlMediaType, 'string');
+        // Kanonischer Kind (Phase 1) parallel zum Legacy-media_type.
+        final kind = EntryKind.fromLegacyMediaType(urlMediaType);
+        if (kind != null) {
+          props.add(EntryPropertiesCompanion(
+            id: Value('prop-kind-$id'),
+            entryId: Value(id),
+            key: const Value('kind'),
+            value: Value(kind.id),
+            type: const Value('select'),
+          ));
+        }
+      }
       // AniList-Metadaten als strukturierte Properties
       addProp('anilist_studio', anilistStudio, 'string');
       addProp('anilist_format', anilistFormat, 'string');

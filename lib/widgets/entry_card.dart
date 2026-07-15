@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../core/di.dart';
 import '../core/theme.dart';
 import '../data/repositories/entry_repository.dart';
+import '../domain/entry_kind.dart';
 import '../domain/prop_type.dart';
 import '../domain/property_registry.dart';
 import '../services/app_settings.dart';
@@ -192,7 +193,7 @@ class EntryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      _TypeIcon(entry.type),
+                      _TypeIcon(entry.type, kindId: _kindIdOf(item.properties)),
                       const SizedBox(width: 5),
                       Text(
                         DateFormat('dd.MM.yy HH:mm').format(entry.createdAt.toLocal()),
@@ -340,7 +341,7 @@ class _DesktopCard extends StatelessWidget {
                   children: [
                     // Metazeile
                     Row(children: [
-                      _TypeIcon(entry.type),
+                      _TypeIcon(entry.type, kindId: _kindIdOf(item.properties)),
                       const SizedBox(width: 5),
                       Text(
                         DateFormat('dd.MM.yy HH:mm').format(entry.createdAt.toLocal()),
@@ -432,12 +433,23 @@ class _TaskCheckbox extends StatelessWidget {
   }
 }
 
+/// Kind-Property eines Eintrags (oder null), für Karten-Icon/-Farbe.
+String? _kindIdOf(List props) =>
+    props.where((p) => p.key == 'kind').firstOrNull?.value as String?;
+
 class _TypeIcon extends StatelessWidget {
   final String type;
-  const _TypeIcon(this.type);
+
+  /// Semantischer Kind (bevorzugt); fällt auf den strukturellen [type] zurück.
+  final String? kindId;
+  const _TypeIcon(this.type, {this.kindId});
 
   @override
   Widget build(BuildContext context) {
+    final kind = EntryKind.fromId(kindId);
+    if (kind != null) {
+      return Icon(kind.icon, size: 12, color: kind.color);
+    }
     final (icon, color) = switch (type) {
       'link' => (Icons.link_rounded, const Color(0xFF60A5FA)),
       'image' => (Icons.image_outlined, const Color(0xFFA78BFA)),
