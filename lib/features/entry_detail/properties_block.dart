@@ -498,8 +498,65 @@ class _PropValueState extends ConsumerState<_PropValue> {
             ],
           ]),
         );
+      case PropType.select:
+        return Row(children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: widget.editable ? _openSelect : null,
+              behavior: HitTestBehavior.opaque,
+              child: Text(val.isEmpty ? '—' : val,
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: val.isEmpty
+                          ? MFColors.textMuted
+                          : MFColors.textPrimary),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+          if (widget.editable)
+            const Icon(Icons.arrow_drop_down_rounded,
+                size: 20, color: MFColors.textMuted),
+        ]);
+      case PropType.tags:
+        final tags = val
+            .split(',')
+            .map((t) => t.trim())
+            .where((t) => t.isNotEmpty)
+            .toList();
+        if (tags.isEmpty && !widget.editable) {
+          return const Text('—',
+              style: TextStyle(fontSize: 13, color: MFColors.textMuted));
+        }
+        return Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final t in tags)
+              _ValueChip(
+                label: t,
+                onRemove: widget.editable
+                    ? () => _saveTags(tags.where((x) => x != t).toList())
+                    : null,
+              ),
+            if (widget.editable)
+              GestureDetector(
+                onTap: () => _addTag(tags),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(color: MFColors.border),
+                  ),
+                  child: const Icon(Icons.add,
+                      size: 13, color: MFColors.textMuted),
+                ),
+              ),
+          ],
+        );
       default:
-        // text / number / select / tags-string
+        // text / number
         // Lange Werte gekürzt anzeigen (max. 5 Zeilen) → Antippen öffnet die
         // Vollansicht. Gespeichert wird immer der volle Text.
         final isLong = val.length > 140 || '\n'.allMatches(val).length >= 4;
@@ -605,6 +662,145 @@ class _PropValueState extends ConsumerState<_PropValue> {
       ),
     );
     if (result != null) await _save(result);
+  }
+
+  /// Speichert eine Tags-Liste als komma-separierten String (bestehende
+  /// Speicherform), dedupliziert und ohne Leereinträge.
+  Future<void> _saveTags(List<String> tags) async {
+    final cleaned = <String>[];
+    for (final t in tags) {
+      final v = t.trim();
+      if (v.isNotEmpty && !cleaned.contains(v)) cleaned.add(v);
+    }
+    await _save(cleaned.join(', '));
+  }
+
+  Future<void> _addTag(List<String> current) async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MFColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _ValuePickerSheet(
+        title: widget.prop.key,
+        suggestions: const [],
+        initial: '',
+        hint: 'Eintrag hinzufügen…',
+      ),
+    );
+    final v = result?.trim();
+    if (v != null && v.isNotEmpty) await _saveTags([...current, v]);
+  }
+
+  /// Auswahl-Popup für `select`: Registry-Choices ∪ bereits vergebene Werte,
+  /// plus „Eigener Wert…" als Freitext-Fallback.
+  Future<void> _openSelect() async {
+    final registry = PropertyRegistry.choicesFor(widget.prop.key);
+    final distinct =
+        await ref.read(propertyDaoProvider).getDistinctValues(widget.prop.key);
+    if (!mounted) return;
+    final choices = <String>[];
+    for (final c in [...registry, ...distinct]) {
+      final v = c.trim();
+      if (v.isNotEmpty && !choices.contains(v)) choices.add(v);
+    }
+    final current = widget.prop.value ?? '';
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MFColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.prop.key,
+                  style: const TextStyle(
+                      color: MFColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final c in choices)
+                    ChoiceChip(
+                      label: Text(c),
+                      selected: c == current,
+                      backgroundColor: MFColors.bg,
+                      selectedColor: MFColors.teal.withValues(alpha: 0.2),
+                      labelStyle: TextStyle(
+                          color: c == current
+                              ? MFColors.textPrimary
+                              : MFColors.textSecondary,
+                          fontSize: 13),
+                      side: BorderSide(
+                          color: c == current
+                              ? MFColors.teal
+                              : MFColors.border),
+                      onSelected: (_) => Navigator.pop(ctx, c),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => Navigator.pop(ctx, ' custom'),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Eigener Wert…'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    if (picked == ' custom') {
+      await _openEditor(PropType.select);
+      return;
+    }
+    await _save(picked);
+  }
+}
+
+/// Kompakter, entfernbarer Wert-Chip (Tags/Listen-Editor).
+class _ValueChip extends StatelessWidget {
+  final String label;
+  final VoidCallback? onRemove;
+  const _ValueChip({required this.label, this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+          left: 8, right: onRemove != null ? 4 : 8, top: 3, bottom: 3),
+      decoration: BoxDecoration(
+        color: MFColors.teal.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: MFColors.teal.withValues(alpha: 0.4)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: MFColors.teal)),
+        if (onRemove != null) ...[
+          const SizedBox(width: 2),
+          GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close, size: 13, color: MFColors.teal),
+          ),
+        ],
+      ]),
+    );
   }
 }
 
