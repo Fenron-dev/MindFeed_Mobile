@@ -126,6 +126,9 @@ class PropertyRegistry {
   /// Bekannte Definition zu einem Key (oder `null`, wenn generisch/unbekannt).
   static PropertyDef? defFor(String key) => _byKey[key.toLowerCase()];
 
+  /// Definierte Auswahlwerte eines `select`-Keys (leer, wenn keine bekannt).
+  static List<String> choicesFor(String key) => defFor(key)?.choices ?? const [];
+
   /// Alle registrierten Definitionen (für künftige Settings-/Auswahl-UIs).
   static List<PropertyDef> get all => _byKey.values.toList(growable: false);
 }
