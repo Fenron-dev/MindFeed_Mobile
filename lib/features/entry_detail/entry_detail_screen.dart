@@ -33,10 +33,12 @@ import '../../features/tasks/task_provider.dart'
 import '../../widgets/app_shell.dart' show navigateToCapture, navigateToEntry, navigateToTask;
 import '../../widgets/entry_card.dart';
 import '../../widgets/format_toolbar.dart';
+import '../../widgets/kind_picker.dart';
 import '../../widgets/linked_entries_section.dart';
 import '../../widgets/wikilink_text_field.dart';
 import 'entry_detail_provider.dart';
 import 'properties_block.dart';
+import '../../domain/entry_kind.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/web_search/web_search.dart';
 
@@ -218,6 +220,46 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
       }
     } finally {
       if (mounted) setState(() => _refetching = false);
+    }
+  }
+
+  /// Öffnet den Kind-Wähler, speichert die Auswahl als `kind`-Property und
+  /// bietet — sofern eine Quell-URL existiert — an, die Metadaten neu
+  /// abzuholen. (Quell-spezifisches Umschalten Film→Anime folgt mit P4.)
+  Future<void> _pickKind(Entry entry, List<EntryProperty> props) async {
+    final current = EntryKind.fromId(
+        props.where((p) => p.key == 'kind').firstOrNull?.value);
+    final picked = await showKindPicker(context, current: current);
+    if (picked == null || picked == current || !mounted) return;
+    await ref
+        .read(entryRepositoryProvider)
+        .setPropertyByKey(entry.id, 'kind', picked.id, 'select');
+    if (!mounted) return;
+
+    final url = entry.sourceUrl;
+    if (url != null && url.isNotEmpty) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: MFColors.surface,
+          title: Text('Typ: ${picked.label}',
+              style: const TextStyle(
+                  color: MFColors.textPrimary, fontSize: 16)),
+          content: const Text('Metadaten jetzt neu abholen?',
+              style: TextStyle(color: MFColors.textSecondary)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Später')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Neu abholen')),
+          ],
+        ),
+      );
+      if (go == true) await _refetchMetadata(entry.id, url);
+    } else {
+      _snack('Typ geändert: ${picked.label}', error: false);
     }
   }
 
@@ -1214,7 +1256,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
 
                 // Meta-Zeile
                 Row(children: [
-                  _TypeChip(entry.type),
+                  KindChip(
+                    kind: EntryKind.fromId(item.properties
+                        .where((p) => p.key == 'kind')
+                        .firstOrNull
+                        ?.value),
+                    onTap: () => _pickKind(entry, item.properties),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     DateFormat('dd.MM.yyyy HH:mm')
@@ -1530,28 +1578,6 @@ class _Section extends StatelessWidget {
           child,
         ],
       );
-}
-
-class _TypeChip extends StatelessWidget {
-  final String type;
-  const _TypeChip(this.type);
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color, label) = switch (type) {
-      'link' => (Icons.link_rounded, const Color(0xFF60A5FA), 'Link'),
-      'image' =>
-        (Icons.image_outlined, const Color(0xFFA78BFA), 'Bild'),
-      'audio' => (Icons.mic_outlined, const Color(0xFFC084FC), 'Audio'),
-      _ => (Icons.notes_rounded, MFColors.textMuted, 'Text'),
-    };
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 12, color: color),
-      const SizedBox(width: 4),
-      Text(label,
-          style: TextStyle(
-              fontSize: 11, color: color, fontFamily: 'monospace')),
-    ]);
-  }
 }
 
 class _StatusChip extends StatelessWidget {
