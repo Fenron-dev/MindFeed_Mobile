@@ -1,6 +1,7 @@
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import '../../domain/entry_kind.dart';
 import 'tables/entries.dart';
 import 'tables/tags.dart';
 import 'tables/containers.dart';
@@ -52,7 +53,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -94,6 +95,9 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 7) {
             await m.addColumn(entryLinks, entryLinks.manual);
+          }
+          if (from < 8) {
+            await _backfillKindFromMediaType();
           }
         },
         beforeOpen: (details) async {
@@ -163,6 +167,42 @@ class AppDatabase extends _$AppDatabase {
         'CREATE INDEX IF NOT EXISTS idx_attachments_entry ON attachments(entry_id)');
     await customStatement(
         'CREATE INDEX IF NOT EXISTS idx_properties_entry ON entry_properties(entry_id)');
+  }
+
+  /// Migration v8: Backfill der kanonischen `kind`-Property aus dem Legacy-
+  /// `media_type`. Additiv & idempotent — `media_type` bleibt erhalten, die
+  /// Property-ID ist aus der entryId abgeleitet (`prop-kind-<entryId>`), damit
+  /// mehrere Geräte denselben Datensatz erzeugen (kein Sync-Duplikat).
+  Future<void> _backfillKindFromMediaType() async {
+    final rows = await (select(entryProperties)
+          ..where((p) => p.key.equals('media_type')))
+        .get();
+    if (rows.isEmpty) return;
+
+    // Entries, die bereits einen kind besitzen, überspringen.
+    final withKind = await (select(entryProperties)
+          ..where((p) => p.key.equals('kind')))
+        .get();
+    final haveKind = withKind.map((p) => p.entryId).toSet();
+
+    await batch((b) {
+      for (final row in rows) {
+        if (haveKind.contains(row.entryId)) continue;
+        final kind = EntryKind.fromLegacyMediaType(row.value);
+        if (kind == null) continue;
+        b.insert(
+          entryProperties,
+          EntryPropertiesCompanion.insert(
+            id: 'prop-kind-${row.entryId}',
+            entryId: row.entryId,
+            key: 'kind',
+            value: Value(kind.id),
+            type: const Value('select'),
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+      }
+    });
   }
 
   /// Suche: FTS5 mit LIKE-Fallback (Fuzzy).
