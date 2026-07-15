@@ -6,6 +6,7 @@ import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../data/db/app_database.dart' hide Container;
 import '../../domain/prop_type.dart';
+import '../../domain/property_registry.dart';
 
 /// Obsidian-artiger Eigenschaften-Block: kompakte, volle-Breite Liste von
 /// Schlüssel:Wert-Zeilen inkl. einer Tags-Zeile (technisch im Tag-System).
@@ -41,25 +42,11 @@ class PropertiesBlock extends ConsumerStatefulWidget {
 class _PropertiesBlockState extends ConsumerState<PropertiesBlock> {
   bool _collapsed = false;
 
-  // Technische/intern gerenderte Keys ausblenden
-  static const _hidden = {
-    'og_image', 'og_title', 'og_description', 'domain', 'genres',
-    'media_type', 'url_author', 'score', '_template', 'parent_entry_id',
-    'cover', 'cover_image', 'bild', '_transcript',
-  };
-  static const _hiddenPrefixes = ['bgg_', 'github_', 'youtube_', 'anilist_',
-    'vgg_', 'rpg_', 'task_'];
-
-  static bool _isHidden(String key) {
-    final k = key.toLowerCase();
-    if (_hidden.contains(k)) return true;
-    return _hiddenPrefixes.any(k.startsWith);
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Technische/intern gerenderte Keys ausblenden (zentral in PropertyRegistry).
     final visible =
-        widget.properties.where((p) => !_isHidden(p.key)).toList();
+        widget.properties.where((p) => !PropertyRegistry.isHidden(p.key)).toList();
     final count = visible.length + (widget.tags.isNotEmpty ? 1 : 0);
 
     return Column(
