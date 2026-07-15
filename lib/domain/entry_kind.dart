@@ -18,7 +18,8 @@ enum EntryKind {
     icon: Icons.movie_outlined,
     color: Color(0xFFEF4444),
     apiSources: [ApiSource.tmdbMovie, ApiSource.omdb],
-    structureTemplateId: 'tpl-anime',
+    // Noch kein dediziertes Film-Template; TMDB schreibt Felder direkt.
+    structureTemplateId: null,
     legacyAliases: ['movie'],
   ),
   series(
@@ -27,7 +28,9 @@ enum EntryKind {
     icon: Icons.live_tv_outlined,
     color: Color(0xFFF97316),
     apiSources: [ApiSource.tmdbTv, ApiSource.omdb],
-    structureTemplateId: 'tpl-anime',
+    // tpl-anime ("Anime / Serie") passt konzeptuell, wird aber erst mit
+    // eigenem Serien-Prefill aktiviert; TMDB schreibt Felder direkt.
+    structureTemplateId: null,
     legacyAliases: ['series', 'tv'],
   ),
   anime(
