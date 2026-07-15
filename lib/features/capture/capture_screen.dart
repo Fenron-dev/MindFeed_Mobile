@@ -14,6 +14,7 @@ import '../../core/di.dart';
 import '../../core/theme.dart';
 import '../../core/vault_manager.dart';
 import '../../data/db/app_database.dart' hide Container;
+import '../../domain/entry_kind.dart';
 import '../../domain/tag_parser.dart';
 import '../../services/app_settings.dart';
 import '../../services/ai/ai_service.dart';
@@ -380,17 +381,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         templates.where((t) => t.id == id).firstOrNull ??
         templates.where((t) => t.name.toLowerCase().contains(fallback)).firstOrNull;
 
-    PropTemplate? tpl;
-    switch (mediaType) {
-      case 'ANIME':    tpl = _find('tpl-anime',      'anime');      break;
-      case 'MANGA':    tpl = _find('tpl-book',        'buch');       break;
-      case 'YOUTUBE':  tpl = _find('tpl-youtube',     'youtube');    break;
-      case 'BOARDGAME':tpl = _find('tpl-boardgame',   'brettspiel'); break;
-      case 'VIDEOGAME':tpl = _find('tpl-videogame',   'videospiel'); break;
-      case 'TTRPG':    tpl = _find('tpl-ttrpg',       'rpg');        break;
-      case 'GITHUB':   tpl = _find('tpl-github',      'github');     break;
-      default:         return; // kein passendes Template
-    }
+    // Kind-getriebene Template-Auswahl (Registry statt String-Switch).
+    const fallbackNames = {
+      'tpl-anime': 'anime', 'tpl-book': 'buch', 'tpl-youtube': 'youtube',
+      'tpl-boardgame': 'brettspiel', 'tpl-videogame': 'videospiel',
+      'tpl-ttrpg': 'rpg', 'tpl-github': 'github',
+    };
+    final tplId = EntryKind.fromLegacyMediaType(mediaType)?.structureTemplateId;
+    if (tplId == null) return; // kein passendes Template
+    final tpl = _find(tplId, fallbackNames[tplId] ?? '');
     if (tpl == null) return;
 
     final dao = ref.read(propertyDaoProvider);
