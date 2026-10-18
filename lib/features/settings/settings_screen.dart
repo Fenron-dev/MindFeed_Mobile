@@ -55,7 +55,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _tmdbKeyCtrl = TextEditingController();
 
   // Web-Recherche (Provider-Auswahl: SearXNG / Brave …)
-  WebSearchProviderKind _webProvider = WebSearchProviderKind.searxng;
+  WebSearchProviderKind _webProvider = WebSearchProviderKind.parallel;
+  bool _webSettingsLoaded = false;
   final _searxngUrlCtrl = TextEditingController();
   final _braveKeyCtrl = TextEditingController();
   String _searxTestState = 'idle'; // idle | loading | ok | error
@@ -90,10 +91,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final brave = await secureRead(WebSearchProviderKind.brave.secureKey) ?? '';
     final youtubeKey = await secureRead(ApiKeyStore.youtube) ?? '';
     final tmdbKey = await secureRead(ApiKeyStore.tmdb) ?? '';
+    final webProvider = await resolveActiveWebSearchProviderKind();
     if (mounted) {
       setState(() {
-        _webProvider =
-            WebSearchProviderKind.fromId(AppSettings.getWebSearchProvider());
+        _webProvider = webProvider;
+        _webSettingsLoaded = true;
         _searxngUrlCtrl.text = searx;
         _braveKeyCtrl.text = brave;
         _youtubeKeyCtrl.text = youtubeKey;
@@ -804,6 +806,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ]),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<WebSearchProviderKind>(
+                  key: ValueKey(_webProvider),
                   initialValue: _webProvider,
                   isExpanded: true,
                   dropdownColor: MFColors.surface,
@@ -824,7 +827,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     for (final k in WebSearchProviderKind.values)
                       DropdownMenuItem(value: k, child: Text(k.label)),
                   ],
-                  onChanged: (k) {
+                  onChanged: !_webSettingsLoaded ? null : (k) {
                     if (k == null) return;
                     setState(() {
                       _webProvider = k;
@@ -834,7 +837,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   },
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                if (_webProvider.requiresConfig) TextField(
                   key: ValueKey(_webProvider.id),
                   controller: _webConfigCtrl,
                   obscureText: _webProvider.isSecret,
@@ -858,7 +861,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Row(children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: _searxTestState == 'loading' ? null : _testWebSearch,
+                      onPressed: !_webSettingsLoaded || _searxTestState == 'loading' ||
+                              _webProvider == WebSearchProviderKind.disabled
+                          ? null : _testWebSearch,
                       icon: _searxTestState == 'loading'
                           ? const SizedBox(width: 14, height: 14,
                               child: CircularProgressIndicator(strokeWidth: 1.5))
@@ -899,7 +904,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: _saveAiSettings,
+                      onPressed: _webSettingsLoaded ? _saveAiSettings : null,
                       icon: const Icon(Icons.save_outlined, size: 15),
                       label: const Text('Speichern',
                           style: TextStyle(fontSize: 12)),
@@ -920,14 +925,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
                 const SizedBox(height: 6),
                 Text(
-                  _webProvider == WebSearchProviderKind.brave
-                      ? 'Brave Search API für Web-Recherche bei der KI-Anreicherung. '
+                  switch (_webProvider) {
+                    WebSearchProviderKind.parallel =>
+                      'Kostenlose Web-Recherche über Parallel Search MCP (Fast). '
+                          'Kein Konto oder API-Key nötig; Nutzungslimits gelten. '
+                          'Erst beim Start einer Recherche wird der Suchbegriff '
+                          '(Titel bzw. Problembeschreibung) an Parallel übertragen. '
+                          'Der Verbindungstest prüft nur das Suchwerkzeug.',
+                    WebSearchProviderKind.disabled =>
+                      'Keine Web-Recherche. Vorhandene URLs und API-Keys bleiben gespeichert.',
+                    WebSearchProviderKind.brave =>
+                      'Brave Search API für Web-Recherche bei der KI-Anreicherung. '
                           'API-Key unter api.search.brave.com anlegen. Der Key '
-                          'bleibt lokal und wird NICHT mit anderen Geräten gesynct.'
-                      : 'Selbst gehostete SearXNG-Instanz für Web-Recherche bei der '
+                          'bleibt lokal und wird NICHT mit anderen Geräten gesynct.',
+                    WebSearchProviderKind.searxng =>
+                      'Selbst gehostete SearXNG-Instanz für Web-Recherche bei der '
                           'KI-Anreicherung. JSON-Format muss aktiv sein '
                           '(settings.yml: search.formats: [html, json]). HTTP-Adressen '
                           'im LAN sind nur im Heimnetz erreichbar.',
+                  },
                   style: const TextStyle(fontSize: 10, color: MFColors.textMuted),
                 ),
               ],

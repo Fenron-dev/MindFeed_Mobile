@@ -30,6 +30,26 @@ abstract class WebSearchProvider {
 /// Verfügbare Recherche-Anbieter. Treibt zugleich die Einstellungs-UI
 /// (Label, Konfig-Feld) und den Resolver.
 enum WebSearchProviderKind {
+  parallel(
+    id: 'parallel',
+    label: 'Parallel (kostenlos, ohne API-Key)',
+    configLabel: '',
+    configHint: '',
+    secureKey: '',
+    isSecret: false,
+    requiresConfig: false,
+  ),
+
+  disabled(
+    id: 'disabled',
+    label: 'Deaktiviert',
+    configLabel: '',
+    configHint: '',
+    secureKey: '',
+    isSecret: false,
+    requiresConfig: false,
+  ),
+
   /// Selbst gehostete SearXNG-Instanz (Basis-URL, kein Geheimnis im engeren
   /// Sinne — wird wie bisher in den Sync-Bundle übernommen).
   searxng(
@@ -58,6 +78,7 @@ enum WebSearchProviderKind {
     required this.configHint,
     required this.secureKey,
     required this.isSecret,
+    this.requiresConfig = true,
   });
 
   /// Stabiler Schlüssel für die Persistenz in den Einstellungen.
@@ -78,6 +99,8 @@ enum WebSearchProviderKind {
   /// Ob die Konfiguration ein Geheimnis (API-Key) ist → nicht in den
   /// Geräte-Sync-Bundle übernehmen, Eingabefeld verschleiern.
   final bool isSecret;
+
+  final bool requiresConfig;
 
   static WebSearchProviderKind fromId(String? id) =>
       values.firstWhere((e) => e.id == id, orElse: () => searxng);

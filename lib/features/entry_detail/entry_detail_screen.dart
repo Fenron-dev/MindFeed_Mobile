@@ -526,17 +526,19 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
     return base.isEmpty ? block : '$base\n\n$block';
   }
 
-  /// Recherchiert einen Link über SearXNG und erzeugt daraus per LLM eine
+  /// Recherchiert einen Link über den gewählten Provider und erzeugt per LLM eine
   /// strukturierte Notiz, die als eigener Block in den Body eingefügt wird.
   Future<void> _researchLink(String entryId, String? url, String? title) async {
-    final provider = await resolveActiveWebSearchProvider();
+    final provider = await resolveActiveWebSearchProvider(
+      enabled: ref.read(llmProfilesProvider).aiEnabled,
+    );
     if (!mounted) return;
     if (ref.read(llmProfilesProvider).chainFor(LlmTask.researchedNote).isEmpty) {
       _snack('Kein KI-Profil zugewiesen. Bitte in den Einstellungen anlegen.');
       return;
     }
     if (provider == null) {
-      _snack('Kein Recherche-Provider konfiguriert (Einstellungen → Web-Recherche).');
+      _snack('Web-Recherche deaktiviert oder kein Provider konfiguriert (Einstellungen → Web-Recherche).');
       return;
     }
 
@@ -617,11 +619,13 @@ class _EntryDetailScreenState extends ConsumerState<EntryDetailScreen> {
 
       var searchContext = '';
       if (opts.mode == ItNoteMode.research) {
-        final provider = await resolveActiveWebSearchProvider();
+        final provider = await resolveActiveWebSearchProvider(
+          enabled: ref.read(llmProfilesProvider).aiEnabled,
+        );
         if (!mounted) return;
         if (provider == null) {
           throw Exception(
-              'Kein Recherche-Provider konfiguriert (Einstellungen → Web-Recherche).');
+              'Web-Recherche deaktiviert oder kein Provider konfiguriert (Einstellungen → Web-Recherche).');
         }
         final query = title.isNotEmpty ? title : body;
         final results = await provider.search(query, language: 'de');
