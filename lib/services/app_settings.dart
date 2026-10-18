@@ -556,10 +556,10 @@ class AppSettings {
 
   // ── Web-Recherche: aktiver Provider (SearXNG/Brave …) (#32) ────────────────
 
-  /// Aktiver Recherche-Provider als stabile ID (Default: SearXNG für
-  /// Bestandsnutzer). Siehe WebSearchProviderKind.id.
-  static String getWebSearchProvider() =>
-      _prefs?.getString('web_search_provider') ?? 'searxng';
+  /// Explizit gespeicherte Auswahl; `null` erlaubt dem Resolver, zuerst
+  /// Alt-Konfigurationen zu erhalten und sonst Parallel zu verwenden.
+  static String? getWebSearchProvider() =>
+      _prefs?.getString('web_search_provider');
 
   static Future<void> saveWebSearchProvider(String id) async {
     await _prefs?.setString('web_search_provider', id);
